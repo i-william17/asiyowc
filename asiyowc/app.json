@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "asiyowc",
+    "slug": "asiyowc",
+    "scheme": "asiyowc",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/asiyo-nobg.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/asiyo-nobg.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/asiyo-nobg.png",
+        "backgroundColor": "#ffffff"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.anonymous.asiyowc"
+    },
+    "web": {
+      "favicon": "./assets/images/asiyo-nobg.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font"
+    ]
+  }
+}
