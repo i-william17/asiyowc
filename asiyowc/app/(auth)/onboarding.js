@@ -8,7 +8,7 @@ import {
   Dimensions,
   TouchableOpacity,
   BackHandler,
-  Image, 
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,7 +28,7 @@ const OnboardingScreen = () => {
   const [step, setStep] = useState(1);
   const [selectedInterests, setSelectedInterests] = useState([]);
   const [selectedRole, setSelectedRole] = useState('');
-  
+
   const fadeAnim = useState(new Animated.Value(1))[0];
   const slideAnim = useState(new Animated.Value(0))[0];
   const progressAnim = useState(new Animated.Value(0))[0];
@@ -104,7 +104,7 @@ const OnboardingScreen = () => {
     if (targetStep === step) return;
 
     const direction = targetStep > step ? 'forward' : 'backward';
-    
+
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 0,
@@ -192,7 +192,7 @@ const OnboardingScreen = () => {
   };
 
   const getAnimationType = () => {
-    switch(step) {
+    switch (step) {
       case 1: return 'welcome';
       case 2: return 'empowerment';
       case 3: return 'mentorship';
@@ -213,18 +213,18 @@ const OnboardingScreen = () => {
           <View
             style={[
               tw`w-8 h-8 rounded-full items-center justify-center border-2 mx-2`,
-              stepNumber === step 
-                ? tw`bg-purple-600 border-purple-600` 
-                : stepNumber < step 
-                ? tw`bg-green-500 border-green-500`
-                : tw`bg-white border-gray-300`,
+              stepNumber === step
+                ? tw`bg-purple-600 border-purple-600`
+                : stepNumber < step
+                  ? tw`bg-green-500 border-green-500`
+                  : tw`bg-white border-gray-300`,
             ]}
           >
             {stepNumber < step ? (
               <MaterialIcons name="check" size={16} color="#FFFFFF" />
             ) : (
               <Text style={[
-                { fontFamily: 'Poppins-Medium' }, 
+                { fontFamily: 'Poppins-Medium' },
                 stepNumber === step ? tw`text-white` : tw`text-gray-400`
               ]}>
                 {stepNumber}
@@ -245,14 +245,57 @@ const OnboardingScreen = () => {
   );
 
   const renderStep = () => {
-    switch(step) {
+    switch (step) {
       case 1:
         return (
           <View style={tw`flex-1 justify-center items-center`}>
             <View style={tw`items-center mb-6`}>
-              <Image 
-                source={require('../../assets/images/asiyo-nobg.png')} 
-                style={tw`w-40 h-40 rounded-full mb-4`} 
+              <Image
+                source={require('../../assets/images/asiyo-nobg.png')}
+                style={tw`w-40 h-40 rounded-full mb-4`}
+              />
+            </View>
+
+            <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-gray-900 mb-10 text-center`]}>
+              Asiyo Women Connect App
+            </Text>
+
+            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-base text-gray-600 mb-6 text-center leading-6`]}>
+              {quotes[0].text}
+            </Text>
+
+            <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-sm text-gray-500 mb-8 text-center italic`]}>
+              — {quotes[0].author}
+            </Text>
+
+            <AnimatedButton
+              title="Join the Sisterhood"
+              onPress={handleNext}
+              variant="primary"
+              size="lg"
+            />
+
+            {/* ⭐ NEW — Skip to Login Link */}
+            <TouchableOpacity
+              onPress={() => router.push('/(auth)/login')}
+              style={tw`mt-6`}
+            >
+              <Text style={[
+                { fontFamily: 'Poppins-Medium' },
+                tw`text-sm text-black text-center`
+              ]}>
+                Already registered? <Text style={tw`text-purple-900 underline`}>Move to Login</Text>
+              </Text>
+            </TouchableOpacity>
+          </View>
+        );
+
+        return (
+          <View style={tw`flex-1 justify-center items-center`}>
+            <View style={tw`items-center mb-6`}>
+              <Image
+                source={require('../../assets/images/asiyo-nobg.png')}
+                style={tw`w-40 h-40 rounded-full mb-4`}
               />
             </View>
             <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-gray-900 mb-10 text-center`]}>
@@ -272,7 +315,7 @@ const OnboardingScreen = () => {
             />
           </View>
         );
-      
+
       case 2:
         return (
           <View style={tw`flex-1`}>
@@ -284,10 +327,10 @@ const OnboardingScreen = () => {
             <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-base text-center text-gray-600 mb-8`]}>
               Select areas that align with your professional goals
             </Text>
-            
-            <ScrollView 
+
+            <ScrollView
               ref={contentRef}
-              style={tw`flex-1 mb-6`} 
+              style={tw`flex-1 mb-6`}
               showsVerticalScrollIndicator={false}
             >
               <View style={tw`flex-row flex-wrap justify-between`}>
@@ -299,8 +342,8 @@ const OnboardingScreen = () => {
                       key={interest.id}
                       style={[
                         tw`w-[48%] mb-4 p-5 rounded-xl border-2 transition-all duration-200`,
-                        isSelected 
-                          ? tw`border-purple-500 bg-purple-50 shadow-sm` 
+                        isSelected
+                          ? tw`border-purple-500 bg-purple-50 shadow-sm`
                           : tw`border-gray-200 bg-white hover:border-gray-300`
                       ]}
                       onPress={() => toggleInterest(interest.id)}
@@ -308,15 +351,15 @@ const OnboardingScreen = () => {
                       <View style={tw`items-center`}>
                         <View style={[
                           tw`w-14 h-14 rounded-full items-center justify-center mb-3 transition-all duration-200`,
-                          { 
+                          {
                             backgroundColor: isSelected ? interest.color : '#F8FAFC',
                             transform: [{ scale: isSelected ? 1.05 : 1 }]
                           }
                         ]}>
-                          <IconComponent 
+                          <IconComponent
                             name={interest.icon}
-                            size={26} 
-                            color={isSelected ? '#FFFFFF' : interest.color} 
+                            size={26}
+                            color={isSelected ? '#FFFFFF' : interest.color}
                           />
                         </View>
                         <Text style={[
@@ -350,7 +393,7 @@ const OnboardingScreen = () => {
             </View>
           </View>
         );
-      
+
       case 3:
         return (
           <View style={tw`flex-1`}>
@@ -362,10 +405,10 @@ const OnboardingScreen = () => {
             <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-base text-center text-gray-600 mb-8`]}>
               How do you envision contributing to our community?
             </Text>
-            
-            <ScrollView 
+
+            <ScrollView
               ref={contentRef}
-              style={tw`flex-1 mb-6`} 
+              style={tw`flex-1 mb-6`}
               showsVerticalScrollIndicator={false}
             >
               {roles.map((role) => {
@@ -393,10 +436,10 @@ const OnboardingScreen = () => {
                             tw`w-12 h-12 rounded-full bg-white bg-opacity-20 items-center justify-center mr-4 transition-all duration-200`,
                             isSelected && tw`bg-opacity-30`
                           ]}>
-                            <IconComponent 
+                            <IconComponent
                               name={role.icon}
-                              size={24} 
-                              color="#FFFFFF" 
+                              size={24}
+                              color="#FFFFFF"
                             />
                           </View>
                           <View style={tw`flex-1`}>
@@ -437,22 +480,22 @@ const OnboardingScreen = () => {
             </View>
           </View>
         );
-      
+
       case 4:
         return (
           <View style={tw`flex-1 justify-center items-center`}>
             <View style={tw`items-center mb-6`}>
-              <Image 
-                source={require('../../assets/images/asiyo-nobg.png')} 
-                style={tw`w-40 h-40 rounded-full`} 
+              <Image
+                source={require('../../assets/images/asiyo-nobg.png')}
+                style={tw`w-40 h-40 rounded-full`}
               />
             </View>
-            <LottieLoader 
+            <LottieLoader
               type="celebration"
               size={200}
               loop={false}
             />
-            
+
             <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-3xl text-center text-gray-900 mb-6 mt-8 leading-tight`]}>
               Together we rise, together we thrive
             </Text>
@@ -465,7 +508,7 @@ const OnboardingScreen = () => {
             <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-sm text-center text-purple-600 mb-12`]}>
               — {quotes[3].author}
             </Text>
-            
+
             <AnimatedButton
               title="Start your Journey"
               onPress={handleNext}
@@ -480,7 +523,7 @@ const OnboardingScreen = () => {
   return (
     <SafeAreaView style={tw`flex-1 bg-white`}>
       <AnimatedBackground type="floating" opacity={0.08} speed={0.2} />
-      
+
       {/* Enhanced Header with Professional Gradient */}
       <LinearGradient
         colors={['#1E3A8A', '#3730A3', '#6A1B9A']}
@@ -489,7 +532,7 @@ const OnboardingScreen = () => {
         end={{ x: 1, y: 1 }}
       >
         <View style={tw`flex-1 justify-center items-center pt-8`}>
-          <LottieLoader 
+          <LottieLoader
             type={getAnimationType()}
             size={140}
           />
@@ -500,12 +543,12 @@ const OnboardingScreen = () => {
       <View style={tw`px-6 -mt-8 mb-6`}>
         <View style={tw`bg-white rounded-2xl p-6 shadow-lg border border-gray-100`}>
           <StepIndicator />
-          
+
           <View style={tw`flex-row items-center justify-between mb-3`}>
             <View style={tw`flex-row items-center`}>
-              <Image 
-                source={require('../../assets/images/asiyowc.png')} 
-                style={tw`w-8 h-8 rounded-full mr-3`} 
+              <Image
+                source={require('../../assets/images/asiyowc.png')}
+                style={tw`w-8 h-8 rounded-full mr-3`}
               />
               <Text style={[{ fontFamily: 'Poppins-SemiBold' }, tw`text-sm text-gray-700`]}>
                 Asiyo Women Connect

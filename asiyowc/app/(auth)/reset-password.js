@@ -12,7 +12,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useForm, Controller } from 'react-hook-form';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { authService } from '../../services/api';
+import { authService } from '../../services/auth';
 import LottieLoader from '../../components/animations/LottieLoader';
 import AnimatedButton from '../../components/ui/AnimatedButton';
 import tw from '../../utils/tw';
@@ -23,6 +23,10 @@ const ResetPasswordScreen = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // ⭐ added success/error UI state
+  const [successMsg, setSuccessMsg] = useState(null);
+  const [errorMsg, setErrorMsg] = useState(null);
 
   const {
     control,
@@ -41,25 +45,25 @@ const ResetPasswordScreen = () => {
 
   const handlePasswordReset = async (data) => {
     if (!token) {
-      Alert.alert('Error', 'Invalid reset link');
+      setErrorMsg("Invalid reset link.");
       return;
     }
 
     setLoading(true);
+
     try {
       await authService.resetPassword(token, data.password);
-      Alert.alert(
-        'Password Reset',
-        'Your password has been reset successfully',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.replace('/(auth)/login')
-          }
-        ]
-      );
+
+      setSuccessMsg("Password reset successfully! Redirecting…");
+      setErrorMsg(null);
+
+      setTimeout(() => {
+        router.replace('/(auth)/login');
+      }, 1500);
+
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.message || 'Something went wrong');
+      setSuccessMsg(null);
+      setErrorMsg(error.response?.data?.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }
@@ -92,11 +96,32 @@ const ResetPasswordScreen = () => {
           Enter your new password below
         </Text>
 
+        {/* ⭐ SUCCESS MESSAGE */}
+        {successMsg && (
+          <View style={tw`p-4 mb-4 rounded-xl bg-green-100`}>
+            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-green-700 text-center`]}>
+              {successMsg}
+            </Text>
+          </View>
+        )}
+
+        {/* ⭐ ERROR MESSAGE */}
+        {errorMsg && (
+          <View style={tw`p-4 mb-4 rounded-xl bg-red-100`}>
+            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-red-700 text-center`]}>
+              {errorMsg}
+            </Text>
+          </View>
+        )}
+
         <View style={tw`space-y-4 mb-6`}>
+          
+          {/* PASSWORD FIELD */}
           <View>
             <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
               New Password
             </Text>
+
             <Controller
               control={control}
               rules={{
@@ -142,10 +167,12 @@ const ResetPasswordScreen = () => {
             )}
           </View>
 
+          {/* CONFIRM PASSWORD FIELD */}
           <View>
             <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
               Confirm Password
             </Text>
+
             <Controller
               control={control}
               rules={{
@@ -181,12 +208,14 @@ const ResetPasswordScreen = () => {
               )}
               name="confirmPassword"
             />
+
             {errors.confirmPassword && (
               <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-red-500 text-sm mt-1`]}>
                 {errors.confirmPassword.message}
               </Text>
             )}
           </View>
+
         </View>
 
         <AnimatedButton
@@ -206,6 +235,7 @@ const ResetPasswordScreen = () => {
           size="md"
           fullWidth
         />
+
       </ScrollView>
     </SafeAreaView>
   );

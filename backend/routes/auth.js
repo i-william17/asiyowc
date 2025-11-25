@@ -7,7 +7,8 @@ const {
   setup2FA,
   verify2FA,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  verifyResetToken
 } = require('../controllers/authController');
 
 const { auth } = require('../middleware/auth');
@@ -25,6 +26,7 @@ const router = express.Router();
 router.post('/register', authLimiter, registerValidation, handleValidationErrors, register);
 router.post('/login', authLimiter, loginValidation, handleValidationErrors, login);
 router.post('/verify-email', verifyEmail);
+router.post('/verify-reset', verifyResetToken);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
 

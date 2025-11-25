@@ -13,25 +13,53 @@ const handleValidationErrors = (req, res, next) => {
 };
 
 const registerValidation = [
-  body('email').isEmail().normalizeEmail(),
-  body('password').isLength({ min: 6 }),
-  body('profile.firstName').notEmpty(),
-  body('profile.lastName').notEmpty()
+  body('email')
+    .isEmail()
+    .withMessage('Valid email required')
+    .normalizeEmail(),
+
+  body('password')
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters'),
+
+  body('phone')
+    .matches(/^\+?[0-9\s-()]{7,20}$/)
+    .withMessage('Valid phone number required'),
+
+  body('profile.fullName')
+    .notEmpty()
+    .withMessage('Full name is required'),
 ];
 
 const loginValidation = [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty()
+  body('email')
+    .isEmail()
+    .withMessage('Valid email required')
+    .normalizeEmail(),
+
+  body('password')
+    .notEmpty()
+    .withMessage('Password is required'),
 ];
 
 const postValidation = [
-  body('content.text').notEmpty().withMessage('Post content is required'),
-  body('category').isIn(['Leadership', 'Finance', 'Wellness', 'Advocacy', 'Legacy', 'General'])
+  body('content.text')
+    .notEmpty()
+    .withMessage('Post content is required'),
+
+  body('category')
+    .isIn(['Leadership', 'Finance', 'Wellness', 'Advocacy', 'Legacy', 'General'])
+    .withMessage('Invalid post category'),
 ];
 
 const programValidation = [
-  body('title').notEmpty(),
-  body('category').isIn(['Leadership', 'Finance', 'Wellness', 'Advocacy', 'Education', 'Business'])
+  body('title')
+    .notEmpty()
+    .withMessage('Program title is required'),
+
+  body('category')
+    .isIn(['Leadership', 'Finance', 'Wellness', 'Advocacy', 'Education', 'Business'])
+    .withMessage('Invalid program category'),
 ];
 
 module.exports = {

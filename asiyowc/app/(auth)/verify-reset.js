@@ -7,21 +7,17 @@ import {
   TouchableOpacity,
   Alert
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import axios from 'axios';
 import LottieLoader from '../../components/animations/LottieLoader';
 import AnimatedButton from '../../components/ui/AnimatedButton';
 import tw from '../../utils/tw';
 import { server } from '../../server';
-import { useDispatch } from 'react-redux';
-import { setToken } from '../../store/slices/authSlice';
 
-const VerifyOTPScreen = () => {
+const VerifyResetCodeScreen = () => {
   const router = useRouter();
-  const dispatch = useDispatch();
-  const params = useLocalSearchParams();
-  
+
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
 
@@ -61,33 +57,34 @@ const VerifyOTPScreen = () => {
     const otpString = otp.join('');
 
     if (otpString.length !== 6) {
-      setErrorMsg("Please enter the 6-digit code.");
+      setErrorMsg("Please enter the 6-digit reset code.");
       return;
     }
 
     try {
       setLoading(true);
       setErrorMsg(null);
-      
-      const res = await axios.post(`${server}/auth/verify-email`, {
+
+      const res = await axios.post(`${server}/auth/verify-reset`, {
         token: otpString
       });
 
-      setSuccessMsg("Verification successful! Redirecting…");
+      setSuccessMsg("Code verified! Continue to reset your password…");
 
-      // Save token globally
-      dispatch(setToken(res.data.data.token));
-
+      // Wait a moment then go to reset password page
       setTimeout(() => {
-        router.replace('/(auth)/login');
+        router.replace({
+          pathname: '/(auth)/reset-password',
+          params: { token: otpString }
+        });
       }, 1200);
 
     } catch (err) {
-      console.log("❌ OTP VERIFY ERROR:", err?.response?.data || err);
+      console.log("❌ RESET VERIFY ERROR:", err?.response?.data || err);
 
       setErrorMsg(
         err?.response?.data?.message ||
-        "Invalid or expired OTP. Try again."
+        "Invalid or expired reset code."
       );
     } finally {
       setLoading(false);
@@ -95,11 +92,19 @@ const VerifyOTPScreen = () => {
   };
 
   const handleResend = async () => {
-    setTimer(60);
-    setCanResend(false);
-    setOtp(['', '', '', '', '', '']);
+    try {
+      setTimer(60);
+      setCanResend(false);
+      setOtp(['', '', '', '', '', '']);
 
-    Alert.alert("Code Sent", "A new verification code has been sent.");
+      await axios.post(`${server}/auth/forgot-password`, {
+        email: "yourEmailHere@todo.com"  // You will fill this from previous screen
+      });
+
+      Alert.alert("Code Sent", "A new reset code has been sent to your email.");
+    } catch (err) {
+      Alert.alert("Error", "Could not resend reset code.");
+    }
   };
 
   return (
@@ -109,8 +114,12 @@ const VerifyOTPScreen = () => {
         style={tw`h-40 rounded-b-3xl`}
       >
         <View style={tw`flex-1 justify-center items-center`}>
-          <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-white mt-5`]}>Verify Email</Text>
-          <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white opacity-90 mt-5`]}>Enter the 6-digit code</Text>
+          <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-white mt-5`]}>
+            Verify Reset Code
+          </Text>
+          <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white opacity-90 mt-5`]}>
+            Enter the 6-digit reset code
+          </Text>
         </View>
       </LinearGradient>
 
@@ -119,8 +128,12 @@ const VerifyOTPScreen = () => {
           <LottieLoader type="otp" size={120} />
         </View>
 
-        <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-purple-900 mb-2`]}>Enter Code</Text>
-        <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-center text-gray-600 mb-8`]}>We sent a verification code to your email.</Text>
+        <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-purple-900 mb-2`]}>
+          Enter Reset Code
+        </Text>
+        <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-center text-gray-600 mb-8`]}>
+          We sent a password reset code to your email.
+        </Text>
 
         {/* OTP Inputs */}
         <View style={tw`flex-row justify-between mb-8`}>
@@ -159,7 +172,7 @@ const VerifyOTPScreen = () => {
         )}
 
         <AnimatedButton
-          title="Verify Email"
+          title="Verify Code"
           onPress={handleVerification}
           variant="primary"
           size="lg"
@@ -181,4 +194,4 @@ const VerifyOTPScreen = () => {
   );
 };
 
-export default VerifyOTPScreen;
+export default VerifyResetCodeScreen;

@@ -52,7 +52,13 @@ app.use(helmet({
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:8081",
+  origin: [
+    "http://localhost:19000",
+    "http://localhost:8081",
+    "http://192.168.1.112:5000",
+    "http://192.168.1.112:8081",
+    "*"
+  ],
   credentials: true
 }));
 
@@ -130,6 +136,7 @@ const startServer = async () => {
     console.log(`🔗 API URL: http://localhost:${PORT}`);
   });
 };
+
 
 startServer();
 

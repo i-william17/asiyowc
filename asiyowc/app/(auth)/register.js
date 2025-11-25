@@ -6,28 +6,33 @@ import {
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { useForm, Controller } from 'react-hook-form';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { registerUser } from '../../store/slices/authSlice';
 import LottieLoader from '../../components/animations/LottieLoader';
 import AnimatedButton from '../../components/ui/AnimatedButton';
 import tw from '../../utils/tw';
+import axios from 'axios';
+import { server } from '../../server';
 
 const RegisterScreen = () => {
   const router = useRouter();
-  const dispatch = useDispatch();
-  const { onboardingData, loading } = useSelector(state => state.auth);
-  
+  const { onboardingData } = useSelector(state => state.auth);
+
+  const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreeToTerms, setAgreeToTerms] = useState(false);
+
+  const [responseMessage, setResponseMessage] = useState(null);
+  const [responseType, setResponseType] = useState(null);
+
+  const [passwordStrength, setPasswordStrength] = useState(null);
 
   const {
     control,
@@ -46,53 +51,125 @@ const RegisterScreen = () => {
 
   const password = watch('password');
 
+  /* ------------------------------------------
+     🔥 PASSWORD STRENGTH CHECKER
+  ------------------------------------------- */
+  const evaluatePasswordStrength = (pwd) => {
+    if (!pwd) return setPasswordStrength(null);
+
+    let score = 0;
+
+    if (pwd.length >= 8) score++;
+    if (/[A-Z]/.test(pwd)) score++;
+    if (/[0-9]/.test(pwd)) score++;
+    if (/[^A-Za-z0-9]/.test(pwd)) score++;
+
+    if (score <= 1) setPasswordStrength("Weak");
+    else if (score === 2) setPasswordStrength("Medium");
+    else setPasswordStrength("Strong");
+  };
+
+  const strengthColor = {
+    Weak: "text-red-600",
+    Medium: "text-yellow-600",
+    Strong: "text-green-600"
+  };
+
+  /* ------------------------------------------
+     🔥 HANDLE REGISTRATION
+  ------------------------------------------- */
   const handleRegistration = async (data) => {
     if (!agreeToTerms) {
-      Alert.alert('Terms Required', 'Please agree to the Terms and Conditions to continue.');
+      setResponseType('error');
+      setResponseMessage('Please agree to the Terms and Conditions to continue.');
       return;
     }
-    
-    router.push({
-      pathname: '/(tabs)',
-    });
-    // try {
-    //   const userData = {
-    //     ...data,
-    //     ...onboardingData,
-    //     interests: onboardingData?.interests || [],
-    //     role: onboardingData?.role || 'professional'
-    //   };
 
-    //   const result = await dispatch(registerUser(userData)).unwrap();
-      
-    //   router.push({
-    //     pathname: '/(auth)/verify-otp',
-    //     params: { verificationId: result.data.user._id, type: 'registration' }
-    //   });
-    // } catch (error) {
-    //   Alert.alert('Registration Failed', error.message || 'Something went wrong');
-    // }
+    const formattedPhone =
+      data.phone.startsWith("0")
+        ? `+254${data.phone.substring(1)}`
+        : data.phone;
+
+    const userPayload = {
+      email: data.email,
+      password: data.password,
+      phone: formattedPhone,
+      profile: {
+        fullName: data.fullName,
+        role: onboardingData?.role || 'professional',
+      },
+      interests: onboardingData?.interests || []
+    };
+
+    console.log("📤 SENDING PAYLOAD:", userPayload);
+
+    try {
+      setLoading(true);
+      setResponseType(null);
+      setResponseMessage(null);
+
+      const res = await axios.post(
+        `${server}/auth/register`,
+        userPayload,
+        { headers: { "Content-Type": "application/json" } }
+      );
+
+      console.log("✅ REGISTER RESPONSE:", res.data);
+
+      setResponseType('success');
+      setResponseMessage('Registration successful! Redirecting…');
+
+      setTimeout(() => {
+        router.push({
+          pathname: '/(auth)/verify-otp',
+          params: {
+            verificationId: res.data.data.user.id,
+            type: 'registration'
+          }
+        });
+      }, 1000);
+
+    } catch (err) {
+      console.log("❌ REGISTER AXIOS ERROR:", err?.response?.data || err.message);
+
+      setResponseType('error');
+      setResponseMessage(
+        err?.response?.data?.message ||
+        err?.message ||
+        "Registration failed. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <SafeAreaView style={tw`flex-1 bg-white`}>
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         style={tw`flex-1`}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
+
+        {/* ---------------- HEADER ---------------- */}
         <LinearGradient
           colors={['#6A1B9A', '#8E24AA']}
           style={tw`h-40 rounded-b-3xl`}
         >
           <View style={tw`flex-1 justify-center items-center`}>
-            <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-white mt-5`]}>Asiyo Women Connect App</Text>
-            <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white opacity-90 mt-5`]}>Join Our Sisterhood</Text>
+            <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-white mt-5`]}>
+              Asiyo Women Connect App
+            </Text>
+            <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white opacity-90 mt-5`]}>
+              Join Our Sisterhood
+            </Text>
           </View>
         </LinearGradient>
 
-        <ScrollView 
+        {/* ---------------- FORM ---------------- */}
+        <ScrollView
           style={tw`flex-1 px-6 py-8`}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
           <View style={tw`items-center mb-8`}>
             <LottieLoader type="connection" size={120} />
@@ -106,18 +183,18 @@ const RegisterScreen = () => {
           </Text>
 
           <View style={tw`space-y-4`}>
+
+            {/* ---------------- FULL NAME ---------------- */}
             <View>
               <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
                 Full Name
               </Text>
+
               <Controller
                 control={control}
                 rules={{
                   required: 'Full name is required',
-                  minLength: {
-                    value: 2,
-                    message: 'Name must be at least 2 characters'
-                  }
+                  minLength: { value: 2, message: 'Name must be at least 2 characters' }
                 }}
                 render={({ field: { onChange, onBlur, value } }) => (
                   <TextInput
@@ -135,6 +212,7 @@ const RegisterScreen = () => {
                 )}
                 name="fullName"
               />
+
               {errors.fullName && (
                 <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-red-500 text-sm mt-1`]}>
                   {errors.fullName.message}
@@ -142,10 +220,12 @@ const RegisterScreen = () => {
               )}
             </View>
 
+            {/* ---------------- EMAIL ---------------- */}
             <View>
               <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
                 Email Address
               </Text>
+
               <Controller
                 control={control}
                 rules={{
@@ -173,6 +253,7 @@ const RegisterScreen = () => {
                 )}
                 name="email"
               />
+
               {errors.email && (
                 <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-red-500 text-sm mt-1`]}>
                   {errors.email.message}
@@ -180,15 +261,15 @@ const RegisterScreen = () => {
               )}
             </View>
 
+            {/* ---------------- PHONE ---------------- */}
             <View>
               <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
                 Phone Number
               </Text>
+
               <Controller
                 control={control}
-                rules={{
-                  required: 'Phone number is required'
-                }}
+                rules={{ required: 'Phone number is required' }}
                 render={({ field: { onChange, onBlur, value } }) => (
                   <TextInput
                     style={[
@@ -206,6 +287,7 @@ const RegisterScreen = () => {
                 )}
                 name="phone"
               />
+
               {errors.phone && (
                 <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-red-500 text-sm mt-1`]}>
                   {errors.phone.message}
@@ -213,18 +295,17 @@ const RegisterScreen = () => {
               )}
             </View>
 
+            {/* ---------------- PASSWORD ---------------- */}
             <View>
               <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
                 Password
               </Text>
+
               <Controller
                 control={control}
                 rules={{
                   required: 'Password is required',
-                  minLength: {
-                    value: 8,
-                    message: 'Password must be at least 8 characters'
-                  }
+                  minLength: { value: 8, message: 'Password must be at least 8 characters' }
                 }}
                 render={({ field: { onChange, onBlur, value } }) => (
                   <View style={tw`relative`}>
@@ -236,7 +317,10 @@ const RegisterScreen = () => {
                       placeholder="Create a password"
                       placeholderTextColor="#9CA3AF"
                       onBlur={onBlur}
-                      onChangeText={onChange}
+                      onChangeText={(txt) => {
+                        onChange(txt);
+                        evaluatePasswordStrength(txt);
+                      }}
                       value={value}
                       secureTextEntry={!showPassword}
                       autoComplete="password-new"
@@ -245,16 +329,29 @@ const RegisterScreen = () => {
                       style={tw`absolute right-4 top-4`}
                       onPress={() => setShowPassword(!showPassword)}
                     >
-                      <Ionicons 
-                        name={showPassword ? "eye-off" : "eye"} 
-                        size={20} 
-                        color="#6B7280" 
+                      <Ionicons
+                        name={showPassword ? "eye-off" : "eye"}
+                        size={20}
+                        color="#6B7280"
                       />
                     </TouchableOpacity>
                   </View>
                 )}
                 name="password"
               />
+
+              {/* Password Strength Indicator */}
+              {passwordStrength && (
+                <Text
+                  style={[
+                    { fontFamily: 'Poppins-SemiBold' },
+                    tw`${strengthColor[passwordStrength]} mt-1`
+                  ]}
+                >
+                  Password Strength: {passwordStrength}
+                </Text>
+              )}
+
               {errors.password && (
                 <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-red-500 text-sm mt-1`]}>
                   {errors.password.message}
@@ -262,10 +359,12 @@ const RegisterScreen = () => {
               )}
             </View>
 
+            {/* ---------------- CONFIRM PASSWORD ---------------- */}
             <View>
               <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
                 Confirm Password
               </Text>
+
               <Controller
                 control={control}
                 rules={{
@@ -291,16 +390,17 @@ const RegisterScreen = () => {
                       style={tw`absolute right-4 top-4`}
                       onPress={() => setShowConfirmPassword(!showConfirmPassword)}
                     >
-                      <Ionicons 
-                        name={showConfirmPassword ? "eye-off" : "eye"} 
-                        size={20} 
-                        color="#6B7280" 
+                      <Ionicons
+                        name={showConfirmPassword ? "eye-off" : "eye"}
+                        size={20}
+                        color="#6B7280"
                       />
                     </TouchableOpacity>
                   </View>
                 )}
                 name="confirmPassword"
               />
+
               {errors.confirmPassword && (
                 <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-red-500 text-sm mt-1`]}>
                   {errors.confirmPassword.message}
@@ -308,22 +408,30 @@ const RegisterScreen = () => {
               )}
             </View>
 
-            {/* Terms and Conditions Checkbox */}
+            {/* ---------------- TERMS ---------------- */}
             <View style={tw`flex-row items-start mt-4 mb-2`}>
               <TouchableOpacity
                 style={tw`flex-row items-start`}
                 onPress={() => setAgreeToTerms(!agreeToTerms)}
               >
-                <View style={[
-                  tw`w-5 h-5 border-2 rounded mt-1 mr-3 items-center justify-center`,
-                  agreeToTerms ? tw`bg-purple-600 border-purple-600` : tw`border-gray-400`
-                ]}>
+                <View
+                  style={[
+                    tw`w-5 h-5 border-2 rounded mt-1 mr-3 items-center justify-center`,
+                    agreeToTerms ? tw`bg-purple-600 border-purple-600` : tw`border-gray-400`
+                  ]}
+                >
                   {agreeToTerms && (
                     <Ionicons name="checkmark" size={14} color="#FFFFFF" />
                   )}
                 </View>
+
                 <View style={tw`flex-1`}>
-                  <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-gray-700 text-sm leading-5`]}>
+                  <Text
+                    style={[
+                      { fontFamily: 'Poppins-Regular' },
+                      tw`text-gray-700 text-sm leading-5`
+                    ]}
+                  >
                     I agree to the{' '}
                     <Text style={[{ fontFamily: 'Poppins-SemiBold' }, tw`text-purple-600`]}>
                       Terms and Conditions
@@ -338,6 +446,26 @@ const RegisterScreen = () => {
             </View>
           </View>
 
+          {/* ---------------- FEEDBACK MESSAGE ---------------- */}
+          {responseMessage && (
+            <View
+              style={tw`
+                mt-4 p-4 rounded-2xl
+                ${responseType === 'success' ? 'bg-green-100' : 'bg-red-100'}
+              `}
+            >
+              <Text
+                style={[
+                  { fontFamily: 'Poppins-Medium' },
+                  tw`${responseType === 'success' ? 'text-green-700' : 'text-red-700'} text-center`
+                ]}
+              >
+                {responseMessage}
+              </Text>
+            </View>
+          )}
+
+          {/* ---------------- SUBMIT BUTTON ---------------- */}
           <AnimatedButton
             title="Create Account"
             onPress={handleSubmit(handleRegistration)}
@@ -359,6 +487,7 @@ const RegisterScreen = () => {
               </Text>
             </TouchableOpacity>
           </View>
+
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

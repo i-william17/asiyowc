@@ -3,7 +3,7 @@ import { Stack } from 'expo-router';
 import { Provider } from 'react-redux';
 import { store } from '../store/store';
 import { AuthProvider } from '../context/AuthContext';
-import { NotificationProvider } from '../context/NotificationContext';
+// import { NotificationProvider } from '../context/NotificationContext';
 import { ThemeProvider } from '../context/ThemeContext';
 import { AnimationProvider } from '../context/AnimationContext';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -40,7 +40,6 @@ export default function RootLayout() {
           <ThemeProvider>
             <AnimationProvider>
               <AuthProvider>
-                <NotificationProvider>
 
                   <Stack
                     screenOptions={{
@@ -50,7 +49,6 @@ export default function RootLayout() {
                     }}
                   />
 
-                </NotificationProvider>
               </AuthProvider>
             </AnimationProvider>
           </ThemeProvider>

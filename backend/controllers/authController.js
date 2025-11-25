@@ -1,311 +1,403 @@
+// controllers/authController.js
 const jwt = require('jsonwebtoken');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 const User = require('../models/User');
-const Notification = require('../models/Notification');
-const { sendEmail } = require('../utils/email.js');
-const { sendSMS } = require('../utils/twilio.js');
+const { sendEmail } = require('../utils/email.js'); // EMAIL ONLY NOW
 
+/* ==========================================================
+   JWT GENERATOR
+========================================================== */
 const generateToken = (userId) => {
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '30d' });
+  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+    expiresIn: '30d',
+  });
 };
 
+/* ==========================================================
+   REGISTER USER
+========================================================== */
 exports.register = async (req, res) => {
   try {
-    const { email, password, profile, phone } = req.body;
+    const { email, password, profile, phone, interests } = req.body;
 
-    // Check if user exists
-    const existingUser = await User.findOne({ 
-      $or: [{ email }, { phone }] 
+    console.log('📥 Registration request:', req.body);
+
+    const existingUser = await User.findOne({
+      $or: [{ email }, { phone }],
     });
-    
+
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'User already exists with this email or phone'
+        message: 'User already exists with this email or phone',
       });
     }
 
-    // Create user
+    // 1️⃣ Create new user (hasRegistered stays default=false)
     const user = await User.create({
       email,
       password,
       profile,
-      phone
+      phone,
+      interests: interests || []
     });
 
-    // Generate verification token
-    const emailToken = Math.floor(100000 + Math.random() * 900000).toString();
-    user.emailVerificationToken = emailToken;
-    user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+    // 2️⃣ Mark as registered
+    user.hasRegistered = true;
+
+    // 3️⃣ Generate verification code
+    const emailCode = user.generateEmailVerificationCode();
+
+    // 4️⃣ Save user
     await user.save();
 
-    // Send verification email
-    await sendEmail({
-      to: email,
-      subject: 'Verify Your Email - Asiyo Global Women Connect',
-      html: `Your email verification code is: <strong>${emailToken}</strong>`
-    });
+    // 5️⃣ Send verification email
+    try {
+      await sendEmail({
+        to: email,
+        subject: 'Verify Your Email - Asiyo Global Women Connect',
+        html: `
+          <h2>Email Verification</h2>
+          <p>Your Asiyo verification code is:</p>
+          <h1 style="font-size: 32px; letter-spacing: 4px;">${emailCode}</h1>
+          <p>This code expires in 10 minutes.</p>
+        `,
+      });
 
-    // Generate JWT token
-    const token = generateToken(user._id);
+      console.log("📧 Verification email sent successfully");
+    } catch (emailErr) {
+      console.error("❌ Email sending FAILED:", emailErr.message);
+    }
 
-    res.status(201).json({
+    // 6️⃣ Send response
+    return res.status(201).json({
       success: true,
-      message: 'User registered successfully. Please verify your email.',
+      message: 'Registration successful. Please verify your email.',
       data: {
         user: {
           id: user._id,
           email: user.email,
-          profile: user.profile
-        },
-        token
+          profile: user.profile,
+          hasRegistered: true  // ⭐ Return it to frontend
+        }
       }
     });
+
   } catch (error) {
-    res.status(500).json({
+    console.error('❌ Registration error:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
 
+
+
+/* ==========================================================
+   LOGIN
+========================================================== */
 exports.login = async (req, res) => {
   try {
     const { email, password, twoFactorCode } = req.body;
 
-    // Check if user exists
     const user = await User.findOne({ email }).select('+password');
+
     if (!user || !(await user.correctPassword(password, user.password))) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid email or password'
+        message: 'Invalid email or password',
       });
     }
 
-    // Check if 2FA is enabled
-    if (user.auth.twoFactorEnabled) {
+    if (!user.isVerified?.email) {
+      return res.status(403).json({
+        success: false,
+        message: 'Please verify your email before logging in.',
+      });
+    }
+
+    if (user.twoFactorAuth?.enabled) {
       if (!twoFactorCode) {
-        return res.status(200).json({
+        return res.json({
           success: true,
           requires2FA: true,
-          message: 'Two-factor authentication required'
+          message: 'Two-factor authentication required',
         });
       }
 
-      // Verify 2FA code
       const verified = speakeasy.totp.verify({
-        secret: user.auth.twoFactorSecret,
+        secret: user.twoFactorAuth.secret,
         encoding: 'base32',
         token: twoFactorCode,
-        window: 2
+        window: 2,
       });
 
       if (!verified) {
         return res.status(401).json({
           success: false,
-          message: 'Invalid two-factor authentication code'
+          message: 'Invalid 2FA code',
         });
       }
     }
 
-    // Update device session
-    const deviceId = req.headers['device-id'] || req.ip;
-    user.auth.deviceSessions.push({
-      deviceId,
-      lastActive: new Date(),
-      ipAddress: req.ip
-    });
-    await user.save();
-
     const token = generateToken(user._id);
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         user: {
           id: user._id,
           email: user.email,
           profile: user.profile,
-          role: user.role
         },
-        token
-      }
+        token,
+      },
     });
+
   } catch (error) {
-    res.status(500).json({
+    console.error('❌ Login error:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
 
+/* ==========================================================
+   VERIFY EMAIL
+========================================================== */
 exports.verifyEmail = async (req, res) => {
   try {
-    const { token } = req.body;
+    const { token: emailToken } = req.body;
+
     const user = await User.findOne({
-      emailVerificationToken: token,
-      emailVerificationExpires: { $gt: Date.now() }
+      'verification.emailToken': emailToken,
+      'verification.emailTokenExpires': { $gt: Date.now() },
     });
 
     if (!user) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid or expired verification token'
+        message: 'Invalid or expired verification token',
       });
     }
 
-    user.auth.emailVerified = true;
-    user.emailVerificationToken = undefined;
-    user.emailVerificationExpires = undefined;
+    user.isVerified.email = true;
+    user.verification.emailToken = undefined;
+    user.verification.emailTokenExpires = undefined;
     await user.save();
 
-    res.json({
+    const token = generateToken(user._id);
+
+    return res.json({
       success: true,
-      message: 'Email verified successfully'
+      message: 'Email verified successfully',
+      data: {
+        user: {
+          id: user._id,
+          email: user.email,
+          profile: user.profile,
+        },
+        token,
+      },
     });
+
   } catch (error) {
-    res.status(500).json({
+    console.error('❌ Verify email error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.verifyResetToken = async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    const user = await User.findOne({
+      'verification.phoneToken': token,
+      'verification.phoneTokenExpires': { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired reset code"
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Reset code verified",
+      data: { token }
+    });
+
+  } catch (error) {
+    console.error("❌ verifyResetToken ERROR:", error);
+    return res.status(500).json({
       success: false,
       message: error.message
     });
   }
 };
 
+
+/* ==========================================================
+   SETUP 2FA
+========================================================== */
 exports.setup2FA = async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
-    
+
     const secret = speakeasy.generateSecret({
-      name: `Asiyo App (${user.email})`
+      name: `Asiyo App (${user.email})`,
     });
 
-    user.auth.tempSecret = secret.base32;
+    user.twoFactorAuth.tempSecret = secret.base32;
     await user.save();
 
     const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url);
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         secret: secret.base32,
-        qrCode: qrCodeUrl
-      }
+        qrCode: qrCodeUrl,
+      },
     });
+
   } catch (error) {
-    res.status(500).json({
+    console.error('❌ setup2FA error:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
 
+/* ==========================================================
+   VERIFY 2FA SETUP
+========================================================== */
 exports.verify2FA = async (req, res) => {
   try {
     const { token } = req.body;
     const user = await User.findById(req.user.id);
 
     const verified = speakeasy.totp.verify({
-      secret: user.auth.tempSecret,
+      secret: user.twoFactorAuth.tempSecret,
       encoding: 'base32',
-      token: token,
-      window: 2
+      token,
+      window: 2,
     });
 
     if (!verified) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid verification code'
+        message: 'Invalid verification code',
       });
     }
 
-    user.auth.twoFactorEnabled = true;
-    user.auth.twoFactorSecret = user.auth.tempSecret;
-    user.auth.tempSecret = undefined;
+    user.twoFactorAuth.enabled = true;
+    user.twoFactorAuth.secret = user.twoFactorAuth.tempSecret;
+    user.twoFactorAuth.tempSecret = undefined;
     await user.save();
 
-    res.json({
+    return res.json({
       success: true,
-      message: 'Two-factor authentication enabled successfully'
+      message: 'Two-factor authentication enabled successfully',
     });
+
   } catch (error) {
-    res.status(500).json({
+    console.error('❌ verify2FA error:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
 
+/* ==========================================================
+   FORGOT PASSWORD (EMAIL ONLY — Twilio Removed)
+========================================================== */
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
+
     const user = await User.findOne({ email });
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: 'User not found',
       });
     }
 
-    const resetToken = user.generatePasswordResetToken();
+    const resetToken = user.generatePhoneVerificationCode();
     await user.save();
 
-    // Send SMS if phone exists, otherwise email
-    if (user.phone) {
-      await sendSMS({
-        to: user.phone,
-        body: `Your password reset code is: ${resetToken}. It expires in 10 minutes.`
-      });
-    } else {
-      await sendEmail({
-        to: user.email,
-        subject: 'Password Reset - Asiyo Global Women Connect',
-        html: `Your password reset code is: <strong>${resetToken}</strong>. It expires in 10 minutes.`
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Password reset code sent successfully'
+    // REPLACEMENT — ALWAYS SEND EMAIL, NEVER SMS
+    await sendEmail({
+      to: user.email,
+      subject: 'Password Reset - Asiyo Global Women Connect',
+      html: `
+        <h2>Password Reset Code</h2>
+        <p>Your reset code is:</p>
+        <h1 style="font-size: 32px; letter-spacing: 4px;">${resetToken}</h1>
+        <p>This code expires in 10 minutes.</p>
+      `,
     });
+
+    return res.json({
+      success: true,
+      message: 'Password reset code sent successfully',
+    });
+
   } catch (error) {
-    res.status(500).json({
+    console.error('❌ forgotPassword error:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
 
+/* ==========================================================
+   RESET PASSWORD
+========================================================== */
 exports.resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
 
     const user = await User.findOne({
-      passwordResetToken: token,
-      passwordResetExpires: { $gt: Date.now() }
-    });
+      'verification.phoneToken': token,
+      'verification.phoneTokenExpires': { $gt: Date.now() },
+    }).select('+password');
 
     if (!user) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid or expired reset token'
+        message: 'Invalid or expired reset token',
       });
     }
 
     user.password = newPassword;
-    user.passwordResetToken = undefined;
-    user.passwordResetExpires = undefined;
+    user.verification.phoneToken = undefined;
+    user.verification.phoneTokenExpires = undefined;
     await user.save();
 
-    res.json({
+    return res.json({
       success: true,
-      message: 'Password reset successfully'
+      message: 'Password reset successfully',
     });
+
   } catch (error) {
-    res.status(500).json({
+    console.error('❌ resetPassword error:', error);
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
