@@ -12,7 +12,7 @@ import {
 import { useRouter } from 'expo-router';
 import axios from 'axios';
 import { useDispatch } from 'react-redux';
-import { setToken } from '../../store/slices/authSlice';
+import { setToken, fetchAuthenticatedUser } from '../../store/slices/authSlice';
 import { secureStore } from '../../services/storage';
 import { useForm, Controller } from 'react-hook-form';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -75,11 +75,14 @@ const LoginScreen = () => {
         return;
       }
 
-      // Save token in secure storage
+      // Save token securely
       await secureStore.setItem("token", res.data.data.token);
 
-      // Update Redux state
+      // Update Redux instantly
       dispatch(setToken(res.data.data.token));
+
+      // 🔥 Fetch full authenticated user profile
+      await dispatch(fetchAuthenticatedUser());
 
       setResponseType("success");
       setResponseMessage("Login successful! Redirecting…");
@@ -104,7 +107,7 @@ const LoginScreen = () => {
 
   return (
     <SafeAreaView style={tw`flex-1 bg-white`}>
-      <KeyboardAvoidingView 
+      <KeyboardAvoidingView
         style={tw`flex-1`}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
@@ -138,7 +141,7 @@ const LoginScreen = () => {
           </Text>
 
           <View style={tw`space-y-4`}>
-            {/* EMAIL */}
+            {/* EMAIL INPUT */}
             <View>
               <Text style={[{ fontFamily: "Poppins-Medium" }, tw`text-sm text-gray-700 mb-2`]}>
                 Email Address
@@ -170,6 +173,7 @@ const LoginScreen = () => {
                 )}
                 name="email"
               />
+
               {errors.email && (
                 <Text style={[{ fontFamily: "Poppins-Regular" }, tw`text-red-500 text-sm mt-1`]}>
                   {errors.email.message}
@@ -177,7 +181,7 @@ const LoginScreen = () => {
               )}
             </View>
 
-            {/* PASSWORD */}
+            {/* PASSWORD INPUT */}
             <View>
               <Text style={[{ fontFamily: "Poppins-Medium" }, tw`text-sm text-gray-700 mb-2`]}>
                 Password
@@ -199,14 +203,13 @@ const LoginScreen = () => {
                       onBlur={onBlur}
                       onChangeText={onChange}
                       value={value}
-                      autoComplete="password"
                     />
 
                     <TouchableOpacity
                       style={tw`absolute right-4 top-4`}
                       onPress={() => setShowPassword(!showPassword)}
                     >
-                      <Ionicons 
+                      <Ionicons
                         name={showPassword ? "eye-off" : "eye"}
                         size={20}
                         color="#6B7280"
@@ -225,6 +228,7 @@ const LoginScreen = () => {
             </View>
           </View>
 
+          {/* FORGOT PASSWORD */}
           <TouchableOpacity
             style={tw`self-end mt-3`}
             onPress={() => router.push("/(auth)/forgot-password")}
@@ -254,6 +258,7 @@ const LoginScreen = () => {
             </View>
           )}
 
+          {/* LOGIN BUTTON */}
           <AnimatedButton
             title="Sign In"
             onPress={handleSubmit(handleLogin)}
@@ -264,6 +269,7 @@ const LoginScreen = () => {
             fullWidth
           />
 
+          {/* SIGN UP */}
           <View style={tw`flex-row justify-center items-center mt-8`}>
             <Text style={[{ fontFamily: "Poppins-Regular" }, tw`text-gray-600`]}>
               Don't have an account?{" "}

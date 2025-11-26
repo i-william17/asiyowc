@@ -3,7 +3,28 @@ import { authService } from '../../services/auth';
 import { secureStore } from '../../services/storage';
 
 /* ============================================================
-   RESTORE TOKEN + ONBOARDING + REGISTRATION FLAG
+   FETCH AUTHENTICATED USER /auth/me
+============================================================ */
+export const fetchAuthenticatedUser = createAsyncThunk(
+  'auth/fetchMe',
+  async (_, { rejectWithValue }) => {
+    try {
+      const token = await secureStore.getItem('token');
+
+      if (!token) return rejectWithValue("No token stored");
+
+      const response = await authService.getMe(token);
+
+      return response.data.data; // backend returns { success, data: user }
+    } catch (error) {
+      return rejectWithValue(error.response?.data || error.message);
+    }
+  }
+);
+
+
+/* ============================================================
+   RESTORE TOKEN (App Startup)
 ============================================================ */
 export const restoreToken = createAsyncThunk(
   'auth/restoreToken',
@@ -24,8 +45,9 @@ export const restoreToken = createAsyncThunk(
   }
 );
 
+
 /* ============================================================
-   REGISTER USER — Save hasRegistered **only on success**
+   REGISTER
 ============================================================ */
 export const registerUser = createAsyncThunk(
   'auth/register',
@@ -33,7 +55,6 @@ export const registerUser = createAsyncThunk(
     try {
       const response = await authService.register(userData);
 
-      // ⭐ Save flag ONLY after backend confirms success
       if (response?.success || response?.data?.user) {
         await secureStore.setItem('hasRegistered', 'true');
       }
@@ -44,6 +65,7 @@ export const registerUser = createAsyncThunk(
     }
   }
 );
+
 
 /* ============================================================
    LOGIN
@@ -65,6 +87,7 @@ export const loginUser = createAsyncThunk(
   }
 );
 
+
 /* ============================================================
    VERIFY OTP (after registration)
 ============================================================ */
@@ -78,7 +101,6 @@ export const verifyOTP = createAsyncThunk(
         await secureStore.setItem('token', response.data.token);
       }
 
-      // ⭐ Verified = registered
       await secureStore.setItem('hasRegistered', 'true');
 
       return response;
@@ -88,13 +110,15 @@ export const verifyOTP = createAsyncThunk(
   }
 );
 
+
 /* ============================================================
-   LOGOUT (does NOT remove hasRegistered)
+   LOGOUT
 ============================================================ */
 export const logoutUser = createAsyncThunk('auth/logout', async () => {
   await secureStore.removeItem('token');
   return true;
 });
+
 
 /* ============================================================
    SLICE
@@ -111,11 +135,10 @@ const authSlice = createSlice({
     error: null,
     twoFactorRequired: false,
     appLoaded: false,
-    hasRegistered: false,   // ⭐ NEW
+    hasRegistered: false,
   },
 
   reducers: {
-    /* SAVE ONBOARDING */
     setOnboardingData: (state, action) => {
       state.onboardingData = action.payload;
       secureStore.setItem('onboarding', JSON.stringify(action.payload));
@@ -125,7 +148,6 @@ const authSlice = createSlice({
       state.error = null;
     },
 
-    /* FULL RESET — used for delete account */
     resetAuth: (state) => {
       state.user = null;
       state.token = null;
@@ -133,14 +155,13 @@ const authSlice = createSlice({
       state.isAuthenticated = false;
       state.twoFactorRequired = false;
       state.error = null;
-      state.hasRegistered = false; // ⭐ reset on delete account
+      state.hasRegistered = false;
 
       secureStore.removeItem('token');
       secureStore.removeItem('onboarding');
       secureStore.removeItem('hasRegistered');
     },
 
-    /* MANUAL TOKEN SET */
     setToken: (state, action) => {
       state.token = action.payload;
       state.isAuthenticated = true;
@@ -156,10 +177,11 @@ const authSlice = createSlice({
       .addCase(restoreToken.fulfilled, (state, action) => {
         state.token = action.payload.token;
         state.onboardingData = action.payload.onboarding;
-        state.hasRegistered = action.payload.hasRegistered; // ⭐ RESTORE
+        state.hasRegistered = action.payload.hasRegistered;
         state.isAuthenticated = !!action.payload.token;
         state.appLoaded = true;
       })
+
 
       /* ============================================================
          REGISTER
@@ -171,13 +193,14 @@ const authSlice = createSlice({
       .addCase(registerUser.fulfilled, (state, action) => {
         state.loading = false;
         state.user = action.payload.data.user;
-        state.hasRegistered = true; // ⭐ confirmed by backend
+        state.hasRegistered = true;
         state.isAuthenticated = false; // must verify email
       })
       .addCase(registerUser.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
+
 
       /* ============================================================
          LOGIN
@@ -197,12 +220,13 @@ const authSlice = createSlice({
         state.user = action.payload.data.user;
         state.token = action.payload.data.token;
         state.isAuthenticated = true;
-        state.hasRegistered = true; // ⭐ LOGIN CONFIRMS REGISTERED
+        state.hasRegistered = true;
       })
       .addCase(loginUser.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
+
 
       /* ============================================================
          VERIFY OTP
@@ -216,12 +240,25 @@ const authSlice = createSlice({
         state.user = action.payload.data.user;
         state.token = action.payload.data.token;
         state.isAuthenticated = true;
-        state.hasRegistered = true; // ⭐ VERIFIED = REGISTERED
+        state.hasRegistered = true;
       })
       .addCase(verifyOTP.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
+
+
+      /* ============================================================
+         FETCH AUTHENTICATED USER
+      ============================================================= */
+      .addCase(fetchAuthenticatedUser.fulfilled, (state, action) => {
+        state.user = action.payload;  // full user from DB
+        state.isAuthenticated = true;
+      })
+      .addCase(fetchAuthenticatedUser.rejected, (state, action) => {
+        state.error = action.payload;
+      })
+
 
       /* ============================================================
          LOGOUT
@@ -230,11 +267,10 @@ const authSlice = createSlice({
         state.user = null;
         state.token = null;
         state.isAuthenticated = false;
-
-        // ⭐ KEEP hasRegistered TRUE so onboarding never shows again
       });
   },
 });
+
 
 export const { 
   setOnboardingData, 

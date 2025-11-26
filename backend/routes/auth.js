@@ -8,7 +8,8 @@ const {
   verify2FA,
   forgotPassword,
   resetPassword,
-  verifyResetToken
+  verifyResetToken,
+  getMe // ⭐ Added
 } = require('../controllers/authController');
 
 const { auth } = require('../middleware/auth');
@@ -25,6 +26,10 @@ const router = express.Router();
 
 router.post('/register', authLimiter, registerValidation, handleValidationErrors, register);
 router.post('/login', authLimiter, loginValidation, handleValidationErrors, login);
+
+// Fetch authenticated user
+router.get('/me', auth, getMe);
+
 router.post('/verify-email', verifyEmail);
 router.post('/verify-reset', verifyResetToken);
 router.post('/forgot-password', forgotPassword);

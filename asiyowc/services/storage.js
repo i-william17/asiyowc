@@ -32,9 +32,9 @@ export const secureStore = {
 
   async clear() {
     try {
-      // You might want to be more specific about which keys to clear
       await SecureStore.deleteItemAsync('token');
-      await SecureStore.deleteItemAsync('user');
+      await SecureStore.deleteItemAsync('onboarding');
+      await SecureStore.deleteItemAsync('hasRegistered');
       return true;
     } catch (error) {
       console.error('Error clearing secure store:', error);

@@ -166,6 +166,31 @@ exports.login = async (req, res) => {
 };
 
 /* ==========================================================
+   GET AUTHENTICATED USER
+========================================================== */
+exports.getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    return res.json({
+      success: true,
+      data: user
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+
+/* ==========================================================
    VERIFY EMAIL
 ========================================================== */
 exports.verifyEmail = async (req, res) => {
