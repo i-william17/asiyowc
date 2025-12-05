@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// app/(tabs)/ProgramsScreen.js
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -7,130 +8,216 @@ import {
   TouchableOpacity,
   Animated,
   RefreshControl,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import { useSelector, useDispatch } from 'react-redux';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { fetchPrograms } from '../../store/slices/programsSlice';
-import ProgramCard from '../../components/programs/ProgramCard';
-import LottieLoader from '../../components/animations/LottieLoader';
-import AnimatedButton from '../../components/ui/AnimatedButton';
-import { FeedShimmer } from '../../components/ui/ShimmerLoader';
-import tw from '../../utils/tw';
+  TextInput,
+} from "react-native";
+
+import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+
+import FeedShimmer from "../../components/ui/ShimmerLoader";
+import ProgramCard from "../../components/programs/ProgramCard";
+import { programService } from "../../services/program";
+import tw from "../../utils/tw";
 
 const ProgramsScreen = () => {
   const router = useRouter();
-  const dispatch = useDispatch();
-  const { programs, enrolledPrograms, loading } = useSelector(state => state.programs);
-  
+
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState('all');
-  const fadeAnim = useState(new Animated.Value(0))[0];
 
-  const tabs = [
-    { id: 'all', name: 'All Programs' },
-    { id: 'enrolled', name: 'My Programs' },
-    { id: 'completed', name: 'Completed' },
-  ];
+  const [activeTab, setActiveTab] = useState("all");
 
-  useEffect(() => {
-    loadData();
-    animateIn();
-  }, []);
+  const [allPrograms, setAllPrograms] = useState([]);
+  const [myPrograms, setMyPrograms] = useState([]);
+  const [completedPrograms, setCompletedPrograms] = useState([]);
 
-  const animateIn = () => {
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 800,
-      useNativeDriver: true,
-    }).start();
+  // 🔎 Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  /* -----------------------------------------------------------------
+      SAFE EXTRACTOR: handles { programs }, { data }, or arrays
+  ----------------------------------------------------------------- */
+  const extractPrograms = (res) => {
+    if (!res) return [];
+    if (Array.isArray(res)) return res;
+    if (res.programs) return res.programs;
+    if (res.data) return res.data;
+    return [];
   };
 
-  const loadData = async () => {
-    await dispatch(fetchPrograms());
-  };
+  /* -----------------------------------------------------------------
+      FETCH ALL PROGRAM DATA
+  ----------------------------------------------------------------- */
+  const fetchAll = async () => {
+    try {
+      setLoading(true);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  };
+      const publicRes = await programService.getPublicPrograms();
+      const myRes = await programService.getMyPrograms();
+      const completedRes = await programService.getCompletedPrograms();
 
-  const getFilteredPrograms = () => {
-    switch (activeTab) {
-      case 'enrolled':
-        return programs.filter(p => p.isEnrolled);
-      case 'completed':
-        return programs.filter(p => p.isCompleted);
-      default:
-        return programs;
+      console.log("📌 PUBLIC:", publicRes);
+      console.log("📌 MY PROGRAMS:", myRes);
+      console.log("📌 COMPLETED:", completedRes);
+
+      setAllPrograms(extractPrograms(publicRes));
+      setMyPrograms(extractPrograms(myRes));
+      setCompletedPrograms(extractPrograms(completedRes));
+    } catch (err) {
+      console.log("❌ Fetch error:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const filteredPrograms = getFilteredPrograms();
+  useEffect(() => {
+    fetchAll();
 
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 550,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchAll();
+    setRefreshing(false);
+  };
+
+  /* -----------------------------------------------------------------
+      SEARCH DEBOUNCE
+  ----------------------------------------------------------------- */
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [searchQuery]);
+
+  /* -----------------------------------------------------------------
+      TABS
+  ----------------------------------------------------------------- */
+  const tabs = [
+    { id: "all", name: "All Programs" },
+    { id: "enrolled", name: "My Programs" },
+    { id: "completed", name: "Completed" },
+  ];
+
+  let dataToRender = allPrograms;
+  if (activeTab === "enrolled") dataToRender = myPrograms;
+  if (activeTab === "completed") dataToRender = completedPrograms;
+
+  // 🔎 Apply search filtering (frontend)
+  if (debouncedQuery.trim().length > 0) {
+    const q = debouncedQuery.toLowerCase();
+
+    dataToRender = dataToRender.filter((p) => {
+      return (
+        p.title?.toLowerCase().includes(q) ||
+        p.category?.toLowerCase().includes(q) ||
+        p.description?.toLowerCase().includes(q)
+      );
+    });
+  }
+
+  /* -----------------------------------------------------------------
+      RENDER UI
+  ----------------------------------------------------------------- */
   return (
     <SafeAreaView style={tw`flex-1 bg-gray-50`}>
       <Animated.ScrollView
         style={{ opacity: fadeAnim }}
+        showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
+          <RefreshControl
+            refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#6A1B9A']}
+            colors={["#6A1B9A"]}
             tintColor="#6A1B9A"
           />
         }
-        showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
+        {/* --------------------------------------------------------------
+            HEADER
+        -------------------------------------------------------------- */}
         <LinearGradient
-          colors={['#6A1B9A', '#8E24AA']}
-          style={tw`px-6 pt-16 pb-8 rounded-b-3xl`}
+          colors={["#6A1B9A", "#8E24AA"]}
+          style={tw`px-6 pt-16 pb-10 rounded-b-3xl shadow-lg`}
         >
-          <View style={tw`flex-row justify-between items-center mb-6`}>
+          <View style={tw`flex-row justify-between items-center`}>
             <View>
-              <Text style={tw`text-2xl font-bold text-white`}>
+              <Text
+                style={[
+                  tw`text-white`,
+                  { fontSize: 28, fontFamily: "Poppins-Bold" },
+                ]}
+              >
                 Programs
               </Text>
-              <Text style={tw`text-white opacity-90 mt-1`}>
-                Learn, grow, and empower yourself
+              <Text
+                style={[
+                  tw`mt-1`,
+                  {
+                    color: "rgba(255,255,255,0.85)",
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 14,
+                  },
+                ]}
+              >
+                Learn • Grow • Empower
               </Text>
             </View>
+
+            {/* 🔔 Notifications */}
             <TouchableOpacity
-              style={tw`bg-white bg-opacity-20 p-3 rounded-2xl`}
-              onPress={() => router.push('/modals/notifications')}
+              style={[
+                tw`p-3 rounded-2xl`,
+                { backgroundColor: "rgba(255,255,255,0.18)" },
+              ]}
+              onPress={() => router.push("/modals/notifications")}
             >
-              <Ionicons name="certificate" size={24} color="white" />
+              <Ionicons
+                name="notifications-outline"
+                size={26}
+                color="#FFFFFF"
+              />
             </TouchableOpacity>
           </View>
         </LinearGradient>
 
-        {/* Tab Navigation */}
-        <View style={tw`px-6 -mt-4 mb-6`}>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={tw`pb-1`}
-          >
+        {/* --------------------------------------------------------------
+            TABS
+        -------------------------------------------------------------- */}
+        <View style={tw`px-6 -mt-4 mb-4`}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {tabs.map((tab) => (
               <TouchableOpacity
                 key={tab.id}
-                style={[
-                  tw`px-6 py-3 rounded-2xl mr-3`,
-                  activeTab === tab.id 
-                    ? tw`bg-purple-500 shadow-lg` 
-                    : tw`bg-white border border-gray-200 shadow-sm`
-                ]}
                 onPress={() => setActiveTab(tab.id)}
+                style={[
+                  tw`px-6 py-3 mr-3 rounded-2xl`,
+                  {
+                    backgroundColor:
+                      activeTab === tab.id ? "#6A1B9A" : "#FFFFFF",
+                    borderWidth: activeTab === tab.id ? 0 : 1,
+                    borderColor: "#E5E7EB",
+                  },
+                ]}
               >
-                <Text style={[
-                  tw`font-medium`,
-                  activeTab === tab.id 
-                    ? tw`text-white` 
-                    : tw`text-gray-700`
-                ]}>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Medium",
+                    fontSize: 14,
+                    color: activeTab === tab.id ? "#FFFFFF" : "#374151",
+                  }}
+                >
                   {tab.name}
                 </Text>
               </TouchableOpacity>
@@ -138,63 +225,95 @@ const ProgramsScreen = () => {
           </ScrollView>
         </View>
 
-        {/* Programs List */}
-        <View style={tw`px-6 pb-8`}>
-          <View style={tw`flex-row justify-between items-center mb-6`}>
-            <Text style={tw`text-xl font-bold text-gray-900`}>
-              {activeTab === 'all' ? 'All Programs' : 
-               activeTab === 'enrolled' ? 'My Programs' : 'Completed Programs'}
-            </Text>
-            <Text style={tw`text-gray-500 text-sm`}>
-              {filteredPrograms.length} programs
-            </Text>
+        {/* --------------------------------------------------------------
+            SEARCH BAR
+        -------------------------------------------------------------- */}
+        <View style={tw`px-6 mb-6`}>
+          <View
+            style={[
+              tw`flex-row items-center rounded-2xl px-4 py-3`,
+              {
+                backgroundColor: "#FFFFFF",
+                borderWidth: 1,
+                borderColor: "#E5E7EB",
+                shadowColor: "#000",
+                shadowOpacity: 0.05,
+                shadowRadius: 6,
+                shadowOffset: { width: 0, height: 2 },
+              },
+            ]}
+          >
+            <Ionicons name="search" size={20} color="#6B7280" />
+
+            <TextInput
+              placeholder="Search programs..."
+              placeholderTextColor="#9CA3AF"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={{
+                marginLeft: 10,
+                fontFamily: "Poppins-Regular",
+                fontSize: 14,
+                color: "#111827",
+                flex: 1,
+              }}
+            />
+
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery("")}>
+                <Ionicons name="close-circle" size={20} color="#9CA3AF" />
+              </TouchableOpacity>
+            )}
           </View>
-          
+        </View>
+
+        {/* --------------------------------------------------------------
+            PROGRAM LIST
+        -------------------------------------------------------------- */}
+        <View style={tw`px-6 pb-10`}>
+          <Text
+            style={{
+              fontFamily: "Poppins-SemiBold",
+              fontSize: 18,
+              color: "#111827",
+              marginBottom: 12,
+            }}
+          >
+            {activeTab === "all"
+              ? "All Programs"
+              : activeTab === "enrolled"
+              ? "Your Programs"
+              : "Completed Programs"}
+          </Text>
+
           {loading ? (
             <FeedShimmer />
-          ) : filteredPrograms.length === 0 ? (
-            <View style={tw`bg-white rounded-2xl p-8 items-center shadow-sm`}>
-              <LottieLoader 
-                type="education" 
-                size={120} 
-                loop={false}
-              />
-              <Text style={tw`text-lg text-gray-500 mt-4 text-center font-medium`}>
-                {activeTab === 'all' ? 'No programs available' :
-                 activeTab === 'enrolled' ? 'No enrolled programs' :
-                 'No completed programs'}
+          ) : dataToRender.length === 0 ? (
+            <View style={tw`items-center mt-10`}>
+              <Text
+                style={{
+                  color: "#6B7280",
+                  fontFamily: "Poppins-Medium",
+                  fontSize: 15,
+                }}
+              >
+                No programs found.
               </Text>
-              <Text style={tw`text-gray-400 text-center mt-2 mb-6`}>
-                {activeTab === 'all' ? 'Check back later for new programs' :
-                 activeTab === 'enrolled' ? 'Enroll in programs to start learning' :
-                 'Complete programs to see them here'}
+              <Text
+                style={{
+                  color: "#9CA3AF",
+                  fontFamily: "Poppins-Regular",
+                  fontSize: 13,
+                  marginTop: 4,
+                }}
+              >
+                Try searching with a different term or pull down to refresh.
               </Text>
-              {activeTab === 'all' && (
-                <AnimatedButton
-                  title="Browse Programs"
-                  onPress={() => {}}
-                  variant="primary"
-                />
-              )}
             </View>
           ) : (
-            <View style={tw`space-y-4`}>
-              {filteredPrograms.map((program, index) => (
-                <ProgramCard 
-                  key={program.id} 
-                  program={program}
-                  style={{
-                    opacity: fadeAnim,
-                    transform: [{
-                      translateY: fadeAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [50 * (index + 1), 0],
-                      }),
-                    }],
-                  }}
-                />
-              ))}
-            </View>
+            dataToRender.map((program) => (
+              <ProgramCard key={program._id} program={program} />
+            ))
           )}
         </View>
       </Animated.ScrollView>

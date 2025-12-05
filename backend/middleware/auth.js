@@ -1,4 +1,3 @@
-// middleware/auth.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User.js');
 const AppError = require('../utils/AppError.js');
@@ -43,8 +42,22 @@ const auth = async (req, res, next) => {
       return next(new AppError('User recently changed password. Please log in again.', 401));
     }
 
-    // ⭐ Attach only the user ID (cleaner, safer)
-    req.user = { id: currentUser._id };
+    /* ==========================================================
+       ⭐ NORMALIZED USER OBJECT — ALWAYS CONSISTENT
+       All controllers now rely only on:
+       - req.user.id
+       - req.user.role
+       - req.user._id (alias)
+    =========================================================== */
+    req.user = {
+      id: currentUser._id.toString(),
+      _id: currentUser._id.toString(),
+      role: currentUser.role,
+      isActive: currentUser.isActive,
+      profile: currentUser.profile
+    };
+
+    console.log("🔐 AUTH → User attached:", req.user);
 
     next();
   } catch (error) {
@@ -61,7 +74,6 @@ const optionalAuth = async (req, res, next) => {
   try {
     let token;
 
-    // Same token extraction logic
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     } else if (req.cookies?.jwt) {
@@ -71,7 +83,6 @@ const optionalAuth = async (req, res, next) => {
     if (!token) return next();
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
     const currentUser = await User.findById(decoded.id);
 
     if (
@@ -79,12 +90,20 @@ const optionalAuth = async (req, res, next) => {
       (!currentUser.changedPasswordAfter || !currentUser.changedPasswordAfter(decoded.iat)) &&
       currentUser.isActive
     ) {
-      req.user = { id: currentUser._id };
+      req.user = {
+        id: currentUser._id.toString(),
+        _id: currentUser._id.toString(),
+        role: currentUser.role,
+        isActive: currentUser.isActive,
+        profile: currentUser.profile
+      };
+
+      console.log("🔐 OPTIONAL AUTH → User attached:", req.user);
     }
 
     next();
   } catch (error) {
-    next();
+    next(); // allow guest
   }
 };
 

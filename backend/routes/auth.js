@@ -9,7 +9,7 @@ const {
   forgotPassword,
   resetPassword,
   verifyResetToken,
-  getMe // ⭐ Added
+  getMe 
 } = require('../controllers/authController');
 
 const { auth } = require('../middleware/auth');

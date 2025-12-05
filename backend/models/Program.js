@@ -3,172 +3,383 @@ const mongoose = require('mongoose');
 const programSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: [true, 'Program title is required'],
+    required: [true, 'Please add a program title'],
     trim: true,
-    maxlength: [200, 'Title cannot be more than 200 characters']
+    maxlength: [100, 'Title cannot exceed 100 characters']
   },
   description: {
     type: String,
-    required: [true, 'Program description is required'],
-    maxlength: [2000, 'Description cannot be more than 2000 characters']
+    required: [true, 'Please add a description'],
+    maxlength: [2000, 'Description cannot exceed 2000 characters']
   },
   shortDescription: {
     type: String,
-    maxlength: [500, 'Short description cannot be more than 500 characters']
+    maxlength: [200, 'Short description cannot exceed 200 characters']
+  },
+  image: {
+    type: String,
+    default: 'https://res.cloudinary.com/demo/image/upload/v1234567/program-placeholder.jpg'
   },
   category: {
     type: String,
-    enum: ['leadership', 'finance', 'wellness', 'advocacy', 'entrepreneurship', 'education'],
+    enum: ['Leadership', 'Finance', 'Wellness', 'Advocacy', 'Education', 'Business', 'Technology', 'Creative', 'Community'],
     required: true
   },
-  image: {
-    url: String,
-    publicId: String
-  },
-  mentor: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
+  subcategory: [String],
+  tags: [String],
+
   duration: {
-    type: String,
-    required: true
+    value: { type: Number, default: 1 },
+    unit: {
+      type: String,
+      enum: ['days', 'weeks', 'months'],
+      default: 'weeks'
+    },
+    estimatedHours: Number
   },
-  level: {
+
+  startDate: Date,
+  endDate: Date,
+
+  status: {
+    type: String,
+    enum: ['draft', 'upcoming', 'active', 'completed', 'archived', 'cancelled'],
+    default: 'draft'
+  },
+
+  featured: { type: Boolean, default: false },
+
+  difficulty: {
     type: String,
     enum: ['beginner', 'intermediate', 'advanced'],
     default: 'beginner'
   },
-  price: {
-    amount: { type: Number, default: 0 },
-    currency: { type: String, default: 'KES' },
-    isFree: { type: Boolean, default: true }
+
+  requirements: [{ title: String, description: String }],
+  prerequisites: [String],
+  benefits: [{ title: String, description: String }],
+  learningOutcomes: [String],
+
+  organizer: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
   },
+
+  coOrganizers: [{
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    role: String
+  }],
+
+  // ============================================================
+  // MODULES — completedBy REMOVED (we now track in participants)
+  // ============================================================
   modules: [{
-    title: {
-      type: String,
-      required: true
-    },
+    title: { type: String, required: true },
     description: String,
-    duration: String,
     content: String,
+    videoUrl: String,
     resources: [{
       title: String,
       url: String,
-      type: String
+      type: { type: String, enum: ['pdf', 'video', 'link', 'document'] }
     }],
+    duration: Number, // minutes
     order: Number,
-    isPublished: { type: Boolean, default: false }
+
+    quiz: {
+      questions: [{
+        question: String,
+        options: [String],
+        correctAnswer: Number,
+        points: Number
+      }],
+      passingScore: Number
+    }
   }],
-  requirements: [String],
-  learningOutcomes: [String],
-  badges: [String],
-  maxParticipants: {
-    type: Number,
-    default: 0
-  },
-  enrolledUsers: [{
+
+  // ============================================================
+  // PARTICIPANTS — single source of truth for progress
+  // ============================================================
+  participants: [{
     user: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
+      ref: 'User',
+      required: true
     },
-    enrolledAt: {
-      type: Date,
-      default: Date.now
+
+    enrolledAt: { type: Date, default: Date.now },
+
+    status: {
+      type: String,
+      enum: ['enrolled', 'active', 'paused', 'completed', 'dropped'],
+      default: 'enrolled'
     },
-    progress: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 100
-    },
+
+    progress: { type: Number, default: 0, min: 0, max: 100 },
+    lastActive: Date,
     completedAt: Date,
-    certificateIssued: { type: Boolean, default: false }
+
+    certificate: {
+      id: String,
+      issuedAt: Date,
+      downloadUrl: String,
+      verified: Boolean
+    },
+
+    grades: [{
+      moduleId: mongoose.Schema.Types.ObjectId,
+      score: Number,
+      maxScore: Number,
+      passed: Boolean,
+      completedAt: Date
+    }],
+
+    feedback: {
+      rating: { type: Number, min: 1, max: 5 },
+      review: String,
+      submittedAt: Date
+    },
+
+    // SINGLE SOURCE OF MODULE COMPLETION
+    completedModules: [{
+      moduleOrder: Number,
+      completedAt: Date
+    }],
+
+    // Auto filled by middleware
+    certificateIssued: { type: Boolean, default: false },
+
+    // Free enrollment or paid
+    purchaseStatus: {
+      type: String,
+      enum: ['free', 'paid'],
+      default: 'free'
+    }
   }],
-  status: {
-    type: String,
-    enum: ['draft', 'published', 'archived', 'completed'],
-    default: 'draft'
+
+  // ============================================================
+  // WAITING LIST
+  // ============================================================
+  capacity: {
+    type: Number,
+    default: 0 // unlimited
   },
-  startDate: Date,
-  endDate: Date,
-  isFeatured: {
-    type: Boolean,
-    default: false
+
+  waitingList: [{
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    joinedAt: { type: Date, default: Date.now },
+    notified: { type: Boolean, default: false }
+  }],
+
+  // ============================================================
+  // PRICE & PAYMENTS
+  // ============================================================
+  price: {
+    amount: { type: Number, default: 0 },
+    currency: { type: String, default: 'USD' },
+    paymentPlan: {
+      enabled: Boolean,
+      installments: Number,
+      interval: String
+    },
+    scholarship: {
+      available: Boolean,
+      spots: Number,
+      criteria: String
+    }
   },
-  ratings: {
-    average: { type: Number, default: 0, min: 0, max: 5 },
-    count: { type: Number, default: 0 }
+
+  // ============================================================
+  // BADGES
+  // ============================================================
+  badges: [{
+    name: String,
+    description: String,
+    criteria: String,
+    image: String,
+    type: { type: String, enum: ['completion', 'excellence', 'participation'] }
+  }],
+
+  // ============================================================
+  // MILESTONES
+  // ============================================================
+  milestones: [{
+    title: String,
+    description: String,
+    rewardPoints: Number,
+    achievedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+  }],
+
+  // ============================================================
+  // DISCUSSION FORUM
+  // ============================================================
+  discussionForum: {
+    enabled: { type: Boolean, default: true },
+    threads: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Thread' }]
   },
-  statistics: {
+
+  // ============================================================
+  // PROGRAM RESOURCES
+  // ============================================================
+  resources: [{
+    title: String,
+    description: String,
+    type: { type: String, enum: ['ebook', 'worksheet', 'template', 'checklist'] },
+    url: String,
+    downloads: { type: Number, default: 0 }
+  }],
+
+  // ============================================================
+  // LIVE SESSIONS & SCHEDULE
+  // ============================================================
+  schedule: {
+    liveSessions: [{
+      title: String,
+      description: String,
+      dateTime: Date,
+      duration: Number,
+      meetingLink: String,
+      recordingUrl: String,
+      attendees: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+    }],
+    officeHours: [{
+      day: String,
+      time: String,
+      duration: Number
+    }]
+  },
+
+  // ============================================================
+  // ANALYTICS
+  // ============================================================
+  analytics: {
     views: { type: Number, default: 0 },
     enrollments: { type: Number, default: 0 },
-    completions: { type: Number, default: 0 }
-  }
+    completionRate: Number,
+    averageRating: Number,
+    totalRatings: { type: Number, default: 0 }
+  },
+
+  // ============================================================
+  // SETTINGS
+  // ============================================================
+  settings: {
+    autoEnroll: { type: Boolean, default: true },
+    requireApproval: { type: Boolean, default: false },
+    allowWithdrawal: { type: Boolean, default: true },
+    publicVisibility: { type: Boolean, default: true },
+    notifications: {
+      enrollment: { type: Boolean, default: true },
+      progress: { type: Boolean, default: true },
+      liveSession: { type: Boolean, default: true }
+    }
+  },
+
+  // ============================================================
+  // METADATA
+  // ============================================================
+  metadata: {
+    languages: [String],
+    targetAudience: [String],
+    skillLevel: [String],
+    accreditation: String,
+    partnerOrganizations: [String]
+  },
+
+  // ============================================================
+  // PUBLIC REVIEWS (separate from participant feedback)
+  // ============================================================
+  reviews: [{
+    _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    rating: { type: Number, min: 1, max: 5 },
+    reviewText: { type: String, maxlength: 500 },
+    createdAt: { type: Date, default: Date.now }
+  }],
+
+
+  // ============================================================
+  // INLINE COMMENTS (THREAD MODEL)
+  // ============================================================
+  comments: [{
+    _id: { type: mongoose.Schema.Types.ObjectId, auto: true },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    text: { type: String, required: true, maxlength: 500 },
+    parent: { type: mongoose.Schema.Types.ObjectId, default: null },
+    createdAt: { type: Date, default: Date.now }
+  }],
+
+
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-// Indexes
+// ============================================================
+// VIRTUALS
+// ============================================================
+programSchema.virtual('isFull').get(function () {
+  return this.capacity > 0 && this.participants.length >= this.capacity;
+});
+
+programSchema.virtual('availableSpots').get(function () {
+  return this.capacity > 0 ? this.capacity - this.participants.length : 'Unlimited';
+});
+
+programSchema.virtual('durationInWeeks').get(function () {
+  if (this.duration.unit === 'weeks') return this.duration.value;
+  if (this.duration.unit === 'months') return this.duration.value * 4;
+  if (this.duration.unit === 'days') return Math.ceil(this.duration.value / 7);
+  return 0;
+});
+
+// ============================================================
+// INDEXES
+// ============================================================
+programSchema.index({ title: 'text', description: 'text', tags: 'text' });
 programSchema.index({ category: 1, status: 1 });
-programSchema.index({ mentor: 1 });
-programSchema.index({ isFeatured: 1, status: 1 });
-programSchema.index({ 'enrolledUsers.user': 1 });
-programSchema.index({ createdAt: -1 });
+programSchema.index({ organizer: 1, createdAt: -1 });
+programSchema.index({ 'participants.user': 1 });
+programSchema.index({ featured: 1, status: 1 });
+programSchema.index({ startDate: 1, endDate: 1 });
 
-// Virtuals
-programSchema.virtual('enrollmentCount').get(function() {
-  return this.enrolledUsers.length;
-});
+// ============================================================
+// PROGRESS & CERTIFICATE AUTO-CALC MIDDLEWARE
+// ============================================================
+programSchema.pre('save', function (next) {
+  const program = this;
+  const totalModules = program.modules.length;
 
-programSchema.virtual('completionCount').get(function() {
-  return this.enrolledUsers.filter(enrollment => enrollment.completedAt).length;
-});
+  program.participants = program.participants.map(p => {
+    const completed = p.completedModules?.length || 0;
 
-// Methods
-programSchema.methods.enrollUser = function(userId) {
-  const existingEnrollment = this.enrolledUsers.find(
-    enrollment => enrollment.user.toString() === userId.toString()
-  );
+    // Auto-progress calculation
+    const progress = totalModules > 0
+      ? Math.round((completed / totalModules) * 100)
+      : 0;
 
-  if (existingEnrollment) {
-    throw new Error('User already enrolled in this program');
-  }
+    p.progress = progress;
 
-  if (this.maxParticipants > 0 && this.enrolledUsers.length >= this.maxParticipants) {
-    throw new Error('Program has reached maximum participants');
-  }
+    // Auto-issue certificate when done
+    if (progress === 100) {
+      p.certificateIssued = true;
+      if (!p.completedAt) p.completedAt = new Date();
+    }
 
-  this.enrolledUsers.push({
-    user: userId,
-    enrolledAt: new Date()
+    return p;
   });
 
-  this.statistics.enrollments += 1;
-};
+  // Update analytics
+  const totalP = program.participants.length;
+  const completedP = program.participants.filter(p => p.progress === 100).length;
 
-programSchema.methods.updateProgress = function(userId, progress) {
-  const enrollment = this.enrolledUsers.find(
-    enrollment => enrollment.user.toString() === userId.toString()
-  );
-
-  if (!enrollment) {
-    throw new Error('User not enrolled in this program');
+  if (totalP > 0) {
+    program.analytics.completionRate = (completedP / totalP) * 100;
   }
 
-  enrollment.progress = Math.min(100, Math.max(0, progress));
-
-  if (progress >= 100 && !enrollment.completedAt) {
-    enrollment.completedAt = new Date();
-    enrollment.certificateIssued = true;
-    this.statistics.completions += 1;
-  }
-};
-
-programSchema.methods.addRating = function(rating) {
-  const newTotal = this.ratings.average * this.ratings.count + rating;
-  this.ratings.count += 1;
-  this.ratings.average = newTotal / this.ratings.count;
-};
+  next();
+});
 
 module.exports = mongoose.model('Program', programSchema);

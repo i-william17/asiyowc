@@ -53,13 +53,16 @@ const postValidation = [
 ];
 
 const programValidation = [
-  body('title')
-    .notEmpty()
-    .withMessage('Program title is required'),
-
-  body('category')
-    .isIn(['Leadership', 'Finance', 'Wellness', 'Advocacy', 'Education', 'Business'])
-    .withMessage('Invalid program category'),
+  body('title').notEmpty().withMessage('Program title is required'),
+  body('description').notEmpty().withMessage('Program description is required'),
+  body('category').isIn(['Leadership', 'Finance', 'Wellness', 'Advocacy', 'Education', 'Business', 'Technology', 'Creative', 'Community']),
+  body('difficulty').optional().isIn(['beginner', 'intermediate', 'advanced']),
+  body('duration.value').optional().isInt({ min: 1 }),
+  body('duration.unit').optional().isIn(['days', 'weeks', 'months']),
+  body('capacity').optional().isInt({ min: 0 }),
+  body('price.amount').optional().isFloat({ min: 0 }),
+  body('price.currency').optional().isLength({ min: 3, max: 3 }),
+  body('status').optional().isIn(['draft', 'upcoming', 'active', 'completed', 'archived', 'cancelled'])
 ];
 
 module.exports = {

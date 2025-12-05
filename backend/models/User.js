@@ -17,7 +17,7 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Phone number is required'],
     unique: true,
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         return /^\+?[0-9\s-()]{7,20}$/.test(v);
       },
       message: 'Please provide a valid phone number'
@@ -105,6 +105,21 @@ const userSchema = new mongoose.Schema({
     default: false,
   },
 
+  programProgress: [{
+    program: { type: mongoose.Schema.Types.ObjectId, ref: 'Program' },
+    enrolledAt: Date,
+    completedAt: Date,
+    progress: Number,
+    lastActive: Date,
+    completedModules: [mongoose.Schema.Types.ObjectId],
+    certificates: [{
+      programId: mongoose.Schema.Types.ObjectId,
+      certificateId: String,
+      issuedAt: Date,
+      downloadUrl: String
+    }]
+  }],
+
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
@@ -118,19 +133,19 @@ userSchema.index({ interests: 1 });
 userSchema.index({ createdAt: -1 });
 
 /* Password hashing */
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
 /* Compare password */
-userSchema.methods.correctPassword = async function(candidatePassword, userPassword) {
+userSchema.methods.correctPassword = async function (candidatePassword, userPassword) {
   return await bcrypt.compare(candidatePassword, userPassword);
 };
 
 /* Generate email verification code */
-userSchema.methods.generateEmailVerificationCode = function() {
+userSchema.methods.generateEmailVerificationCode = function () {
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   this.verification.emailToken = code;
   this.verification.emailTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
@@ -138,7 +153,7 @@ userSchema.methods.generateEmailVerificationCode = function() {
 };
 
 /* Generate phone verification code */
-userSchema.methods.generatePhoneVerificationCode = function() {
+userSchema.methods.generatePhoneVerificationCode = function () {
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   this.verification.phoneToken = code;
   this.verification.phoneTokenExpires = Date.now() + 10 * 60 * 1000;
@@ -146,7 +161,7 @@ userSchema.methods.generatePhoneVerificationCode = function() {
 };
 
 /* Profile URL */
-userSchema.virtual('profileUrl').get(function() {
+userSchema.virtual('profileUrl').get(function () {
   return `/users/${this._id}/profile`;
 });
 

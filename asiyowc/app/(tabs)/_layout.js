@@ -4,113 +4,45 @@ import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { fetchUserProfile } from '../../store/slices/userSlice';
+import ShimmerLoader from '../../components/ui/ShimmerLoader';
 import tw from '../../utils/tw';
 
 export default function TabLayout() {
   const router = useRouter();
   const dispatch = useDispatch();
 
-  // ⭐ Fetch user from userSlice
-  const user = useSelector((state) => state.user.user);
+  const { user, loading } = useSelector((state) => state.user);
 
-  // ⭐ Extract first name
   const fullName = user?.profile?.fullName;
   const firstName = fullName?.split(" ")[0] || "User";
-
-  // ⭐ Extract avatar (may be null)
   const avatar = user?.profile?.avatar?.url;
 
-  // ⭐ Fetch user profile when Tabs loads
   useEffect(() => {
     dispatch(fetchUserProfile());
   }, []);
+
+  // ⭐ Show shimmer skeleton until user data loads
+  if (loading || !user) {
+    return (
+      <View style={tw`flex-1 bg-white`}>
+        <ShimmerLoader />
+      </View>
+    );
+  }
 
   return (
     <Tabs
       screenOptions={{
         headerShown: true,
-        headerStyle: {
-          height: 140,
-        },
-
-        // ⭐ Purple Header BG
-        headerBackground: () => (
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: '#6A1B9A',
-              borderBottomLeftRadius: 35,
-              borderBottomRightRadius: 35,
-              overflow: 'hidden',
-            }}
-          />
-        ),
-
-        // ==========================
-        // ⭐ CUSTOM HEADER TITLE AREA
-        // ==========================
-        headerTitle: () => (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            {/* ⭐ Avatar on the LEFT */}
-            {avatar ? (
-              <Image
-                source={{ uri: avatar }}
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
-                  borderWidth: 2,
-                  borderColor: "white",
-                }}
-              />
-            ) : (
-              // ⭐ Fallback Initial Bubble
-              <View
-                style={{
-                  width: 38,
-                  height: 38,
-                  borderRadius: 19,
-                  backgroundColor: "#FFD700",
-                  justifyContent: "center",
-                  alignItems: "center",
-                }}
-              >
-                <Text
-                  style={{
-                    color: "#6A1B9A",
-                    fontFamily: "Poppins-Bold",
-                    fontSize: 16,
-                  }}
-                >
-                  {firstName?.charAt(0) || "U"}
-                </Text>
-              </View>
-            )}
-
-            {/* ⭐ Welcome + First Name */}
-            <Text
-              style={{
-                color: "#FFFFFF",
-                fontFamily: "Poppins-Bold",
-                fontSize: 20,
-              }}
-            >
-              Welcome, {firstName}
-            </Text>
-          </View>
-        ),
-
+        headerStyle: { height: 140 },
         headerTintColor: "#FFFFFF",
 
-        // ⭐ Tab Bar Styling
         tabBarStyle: [
           tw`bg-white border-t border-gray-200`,
           { height: Platform.OS === "android" ? 65 : 70 },
         ],
-
         tabBarActiveTintColor: '#6A1B9A',
         tabBarInactiveTintColor: '#9CA3AF',
-
         tabBarLabelStyle: {
           fontFamily: 'Poppins-Medium',
           fontSize: 12,
@@ -119,16 +51,74 @@ export default function TabLayout() {
       }}
     >
 
-      {/* 🏠 HOME */}
+      {/* 🏠 HOME — ONLY SCREEN WITH PURPLE HEADER */}
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
+          title: "Home",
+
+          // ⭐ Purple rounded header ONLY here
+          headerBackground: () => (
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: '#6A1B9A',
+                borderBottomLeftRadius: 35,
+                borderBottomRightRadius: 35,
+                overflow: 'hidden',
+              }}
+            />
           ),
 
-          // ⭐ Notification icon on RIGHT
+          // ⭐ Custom Title (Avatar + Welcome)
+          headerTitle: () => (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              {avatar ? (
+                <Image
+                  source={{ uri: avatar }}
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 19,
+                    borderWidth: 2,
+                    borderColor: "white",
+                  }}
+                />
+              ) : (
+                <View
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 19,
+                    backgroundColor: "#FFD700",
+                    justifyContent: "center",
+                    alignItems: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: "#6A1B9A",
+                      fontFamily: "Poppins-Bold",
+                      fontSize: 16,
+                    }}
+                  >
+                    {firstName?.charAt(0) || "U"}
+                  </Text>
+                </View>
+              )}
+
+              <Text
+                style={{
+                  color: "#FFFFFF",
+                  fontFamily: "Poppins-Bold",
+                  fontSize: 20,
+                }}
+              >
+                Welcome, {firstName}
+              </Text>
+            </View>
+          ),
+
           headerRight: () => (
             <TouchableOpacity
               style={{ marginRight: 18 }}
@@ -136,6 +126,10 @@ export default function TabLayout() {
             >
               <Ionicons name="notifications" size={28} color="#FFD700" />
             </TouchableOpacity>
+          ),
+
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home" size={size} color={color} />
           ),
         }}
       />
@@ -155,6 +149,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="programs"
         options={{
+          headerShown: false,
           title: 'Programs',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="school" size={size} color={color} />
