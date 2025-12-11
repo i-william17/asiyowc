@@ -7,6 +7,9 @@ import tw from "../../utils/tw";
 const ProgramCard = ({ program }) => {
   const router = useRouter();
 
+  /* -------------------------------
+      SAFE VALUES
+  ------------------------------- */
   const duration =
     program?.duration?.value && program?.duration?.unit
       ? `${program.duration.value} ${program.duration.unit}`
@@ -17,9 +20,14 @@ const ProgramCard = ({ program }) => {
       ? "Free Program"
       : `KES ${program.price.amount}`;
 
-  const isEnrolled = !!program?.participantData;
-  const progress = program?.participantData?.progress ?? 0;
+  const participant = program?.participantData || null;
+  const isEnrolled = !!participant;
+  const progress = participant?.progress ?? 0;
   const isCompleted = progress === 100;
+
+  const completedDate = participant?.completedAt
+    ? new Date(participant.completedAt).toLocaleDateString()
+    : null;
 
   return (
     <TouchableOpacity
@@ -29,15 +37,17 @@ const ProgramCard = ({ program }) => {
         tw`bg-white rounded-3xl overflow-hidden mb-6`,
         {
           shadowColor: "#000",
-          shadowOpacity: 0.12,
-          shadowRadius: 14,
+          shadowOpacity: 0.13,
+          shadowRadius: 12,
           shadowOffset: { width: 0, height: 6 },
-          elevation: Platform.OS === "android" ? 4 : 0,
+          elevation: Platform.OS === "android" ? 4 : 1,
           borderCurve: "continuous",
         },
       ]}
     >
-      {/* IMAGE */}
+      {/* -------------------------------- 
+          PROGRAM IMAGE 
+      -------------------------------- */}
       <View style={{ position: "relative" }}>
         <Image
           source={{ uri: program.image }}
@@ -49,22 +59,24 @@ const ProgramCard = ({ program }) => {
           resizeMode="cover"
         />
 
-        {/* Gradient Overlay */}
+        {/* Soft Bottom Overlay */}
         <View
           style={{
             position: "absolute",
             bottom: 0,
-            height: 60,
+            height: 70,
             width: "100%",
             backgroundColor: "rgba(0,0,0,0.15)",
-            opacity: 0.4,
+            opacity: 0.35,
           }}
         />
       </View>
 
-      {/* CONTENT */}
+      {/* -------------------------------- 
+          CONTENT
+      -------------------------------- */}
       <View style={tw`p-5`}>
-        {/* Program Title */}
+        {/* Title */}
         <Text
           style={{
             fontFamily: "Poppins-SemiBold",
@@ -88,18 +100,18 @@ const ProgramCard = ({ program }) => {
           {program.category} • {duration}
         </Text>
 
-        {/* PRICE BADGE */}
+        {/* Price Badge */}
         <View style={[tw`mt-3`, { alignSelf: "flex-start" }]}>
           <AchievementBadge
             label={priceLabel}
             type={program?.price?.amount > 0 ? "paid" : "free"}
             size="sm"
-            style={{ maxWidth: 140 }} // adjust this value
           />
         </View>
 
-
-        {/* STATUS BADGES */}
+        {/* -------------------------------- 
+            STATUS BADGES
+        -------------------------------- */}
         <View style={tw`flex-row mt-3 flex-wrap`}>
           {isCompleted && (
             <AchievementBadge
@@ -110,7 +122,7 @@ const ProgramCard = ({ program }) => {
             />
           )}
 
-          {!isCompleted && isEnrolled && (
+          {isEnrolled && !isCompleted && (
             <AchievementBadge
               label="Enrolled"
               type="purple"
@@ -129,8 +141,60 @@ const ProgramCard = ({ program }) => {
           )}
         </View>
 
+        {/* -------------------------------- 
+            COMPLETED SECTION (New)
+        -------------------------------- */}
+        {isCompleted && (
+          <View style={tw`mt-4`}>
+            <Text
+              style={{
+                fontFamily: "Poppins-Medium",
+                fontSize: 13,
+                color: "#10B981",
+              }}
+            >
+              Completed on: {completedDate}
+            </Text>
 
-        {/* PROGRESS BAR */}
+            <View style={tw`flex-row items-center mt-2`}>
+              <View
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 20,
+                  backgroundColor: "#10B981",
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+              >
+                <Text
+                  style={{
+                    color: "#fff",
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 11,
+                    top: -1,
+                  }}
+                >
+                  ✓
+                </Text>
+              </View>
+
+              <Text
+                style={{
+                  marginLeft: 8,
+                  fontFamily: "Poppins-Medium",
+                  color: "#10B981",
+                }}
+              >
+                100% completed
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* -------------------------------- 
+            PROGRESS (Enrolled but not completed)
+        -------------------------------- */}
         {isEnrolled && !isCompleted && (
           <View style={tw`mt-5`}>
             <View

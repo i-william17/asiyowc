@@ -14,14 +14,12 @@ export const fetchAuthenticatedUser = createAsyncThunk(
       if (!token) return rejectWithValue("No token stored");
 
       const response = await authService.getMe(token);
-
       return response.data.data; // backend returns { success, data: user }
     } catch (error) {
       return rejectWithValue(error.response?.data || error.message);
     }
   }
 );
-
 
 /* ============================================================
    RESTORE TOKEN (App Startup)
@@ -45,7 +43,6 @@ export const restoreToken = createAsyncThunk(
   }
 );
 
-
 /* ============================================================
    REGISTER
 ============================================================ */
@@ -66,7 +63,6 @@ export const registerUser = createAsyncThunk(
   }
 );
 
-
 /* ============================================================
    LOGIN
 ============================================================ */
@@ -86,7 +82,6 @@ export const loginUser = createAsyncThunk(
     }
   }
 );
-
 
 /* ============================================================
    VERIFY OTP (after registration)
@@ -110,15 +105,14 @@ export const verifyOTP = createAsyncThunk(
   }
 );
 
-
 /* ============================================================
    LOGOUT
 ============================================================ */
 export const logoutUser = createAsyncThunk('auth/logout', async () => {
   await secureStore.removeItem('token');
+  await secureStore.removeItem('userId');
   return true;
 });
-
 
 /* ============================================================
    SLICE
@@ -158,6 +152,7 @@ const authSlice = createSlice({
       state.hasRegistered = false;
 
       secureStore.removeItem('token');
+      secureStore.removeItem('userId');
       secureStore.removeItem('onboarding');
       secureStore.removeItem('hasRegistered');
     },
@@ -182,7 +177,6 @@ const authSlice = createSlice({
         state.appLoaded = true;
       })
 
-
       /* ============================================================
          REGISTER
       ============================================================= */
@@ -201,9 +195,8 @@ const authSlice = createSlice({
         state.error = action.payload;
       })
 
-
       /* ============================================================
-         LOGIN
+         LOGIN (PATCHED)
       ============================================================= */
       .addCase(loginUser.pending, (state) => {
         state.loading = true;
@@ -217,19 +210,25 @@ const authSlice = createSlice({
           return;
         }
 
-        state.user = action.payload.data.user;
+        const user = action.payload.data.user;
+
+        state.user = user;
         state.token = action.payload.data.token;
         state.isAuthenticated = true;
         state.hasRegistered = true;
+
+        // ⭐ STORE USER ID PERSISTENTLY
+        if (user?._id) {
+          secureStore.setItem("userId", user._id);
+        }
       })
       .addCase(loginUser.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
 
-
       /* ============================================================
-         VERIFY OTP
+         VERIFY OTP (PATCHED)
       ============================================================= */
       .addCase(verifyOTP.pending, (state) => {
         state.loading = true;
@@ -237,28 +236,39 @@ const authSlice = createSlice({
       })
       .addCase(verifyOTP.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.data.user;
+
+        const user = action.payload.data.user;
+
+        state.user = user;
         state.token = action.payload.data.token;
         state.isAuthenticated = true;
         state.hasRegistered = true;
+
+        // ⭐ STORE USER ID
+        if (user?._id) {
+          secureStore.setItem("userId", user._id);
+        }
       })
       .addCase(verifyOTP.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
 
-
       /* ============================================================
-         FETCH AUTHENTICATED USER
+         FETCH AUTHENTICATED USER (PATCHED)
       ============================================================= */
       .addCase(fetchAuthenticatedUser.fulfilled, (state, action) => {
-        state.user = action.payload;  // full user from DB
+        state.user = action.payload;
         state.isAuthenticated = true;
+
+        // ⭐ STORE USER ID ON APP RELOAD
+        if (action.payload?._id) {
+          secureStore.setItem("userId", action.payload._id);
+        }
       })
       .addCase(fetchAuthenticatedUser.rejected, (state, action) => {
         state.error = action.payload;
       })
-
 
       /* ============================================================
          LOGOUT
@@ -270,7 +280,6 @@ const authSlice = createSlice({
       });
   },
 });
-
 
 export const { 
   setOnboardingData, 

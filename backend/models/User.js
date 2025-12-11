@@ -165,5 +165,6 @@ userSchema.virtual('profileUrl').get(function () {
   return `/users/${this._id}/profile`;
 });
 
+
 const User = mongoose.model('User', userSchema);
 module.exports = User;

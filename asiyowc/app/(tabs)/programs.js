@@ -19,6 +19,7 @@ import FeedShimmer from "../../components/ui/ShimmerLoader";
 import ProgramCard from "../../components/programs/ProgramCard";
 import { programService } from "../../services/program";
 import tw from "../../utils/tw";
+import { secureStore } from "../../services/storage";
 
 const ProgramsScreen = () => {
   const router = useRouter();
@@ -48,6 +49,7 @@ const ProgramsScreen = () => {
     if (res.data) return res.data;
     return [];
   };
+
 
   /* -----------------------------------------------------------------
       FETCH ALL PROGRAM DATA
@@ -202,7 +204,7 @@ const ProgramsScreen = () => {
                 key={tab.id}
                 onPress={() => setActiveTab(tab.id)}
                 style={[
-                  tw`px-6 py-3 mr-3 rounded-2xl`,
+                  tw`px-5 py-3 mr-3 rounded-2xl`,
                   {
                     backgroundColor:
                       activeTab === tab.id ? "#6A1B9A" : "#FFFFFF",
@@ -282,8 +284,8 @@ const ProgramsScreen = () => {
             {activeTab === "all"
               ? "All Programs"
               : activeTab === "enrolled"
-              ? "Your Programs"
-              : "Completed Programs"}
+                ? "Your Programs"
+                : "Completed Programs"}
           </Text>
 
           {loading ? (

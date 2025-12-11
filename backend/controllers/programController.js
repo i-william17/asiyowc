@@ -446,12 +446,14 @@ exports.buyProgram = async (req, res) => {
 // ========================================================================
 // LEAVE PROGRAM
 // ========================================================================
+// ========================================================================
+// LEAVE PROGRAM (BUT DO NOT REMOVE IF COMPLETED)
+// ========================================================================
 exports.leaveProgram = async (req, res) => {
   try {
     const programId = req.params.id;
     const userId = req.user.id;
 
-    // Ensure program exists
     const program = await Program.findById(programId);
     if (!program) {
       return res.status(404).json({
@@ -460,13 +462,32 @@ exports.leaveProgram = async (req, res) => {
       });
     }
 
-    /* ============================================================
-       ATOMIC REMOVE → Prevent double-leave, race conditions
-    ============================================================ */
-    const updatedProgram = await Program.findOneAndUpdate(
+    const participant = program.participants.find(
+      (p) => p.user.toString() === userId
+    );
+
+    if (!participant) {
+      return res.status(400).json({
+        success: false,
+        message: "You are not enrolled in this program",
+      });
+    }
+
+    // 🚫 If user completed program, prevent removal of history
+    if (participant.progress === 100) {
+      return res.status(400).json({
+        success: false,
+        completed: true,
+        message:
+          "You have completed this program. Certificate remains available, unenrollment is disabled.",
+      });
+    }
+
+    // ✅ Otherwise allow unenrollment normally
+    const updated = await Program.findOneAndUpdate(
       {
         _id: programId,
-        "participants.user": userId, // only update if user is actually enrolled
+        "participants.user": userId,
       },
       {
         $pull: { participants: { user: userId } },
@@ -475,38 +496,13 @@ exports.leaveProgram = async (req, res) => {
       { new: true }
     );
 
-    /* ============================================================
-       If null → user was not enrolled
-    ============================================================ */
-    if (!updatedProgram) {
-      return res.status(400).json({
-        success: false,
-        message: "You are not enrolled in this program",
-      });
-    }
-
-    /* ============================================================
-       NOTIFICATION: User left program
-    ============================================================ */
-    const fullName =
-      req.user?.profile?.fullName ||
-      req.user?.fullName ||
-      "Someone";
-
-    await createProgramNotifications({
-      program: updatedProgram,
-      user: req.user,
-      type: "system_alert",
-      title: "Program Left",
-      message: `${fullName} left ${updatedProgram.title}.`,
-    });
-
     return res.status(200).json({
       success: true,
       message: "You have left the program",
       isEnrolled: false,
-      totalParticipants: updatedProgram.participants.length,
+      totalParticipants: updated.participants.length,
     });
+
   } catch (error) {
     console.error("leaveProgram ERROR:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -908,69 +904,109 @@ exports.deleteComment = async (req, res) => {
 
 
 // ========================================================================
-// GET MY PROGRAMS (ALL ENROLLED)
+// GET MY PROGRAMS (All enrolled programs)
 // ========================================================================
 exports.getMyPrograms = async (req, res) => {
   try {
+    const userId = req.user.id;
+
     const programs = await Program.find({
-      "participants.user": req.user.id,
+      participants: {
+        $elemMatch: { user: userId }
+      }
     })
-      .populate(
-        "organizer",
-        "profile.fullName profile.avatar"
-      )
+      .populate("organizer", "profile.fullName profile.avatar")
+      .populate("participants.user", "profile.fullName profile.avatar")
       .sort({ createdAt: -1 });
 
+    // Inject participant-specific data
     const enriched = programs.map((p) => {
       const participant = p.participants.find(
-        (pp) => pp.user.toString() === req.user.id
+        (pp) => pp.user.toString() === userId
       );
-      return { ...p.toObject(), participantData: participant };
+
+      return {
+        ...p.toObject(),
+        participantData: participant,
+      };
     });
 
-    res.json({
+    return res.json({
       success: true,
       data: enriched,
     });
+
   } catch (error) {
     console.error("getMyPrograms ERROR:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+
 // ========================================================================
-// GET CONTINUE PROGRAMS (progress between 1–99%)
+// GET CONTINUE PROGRAMS (progress between 1–99% for THIS user only)
 // ========================================================================
 exports.getContinuePrograms = async (req, res) => {
   try {
+    const userId = req.user.id;
+
     const programs = await Program.find({
-      "participants.user": req.user.id,
-      "participants.progress": { $gt: 0, $lt: 100 },
+      participants: {
+        $elemMatch: {
+          user: userId,
+          progress: { $gt: 0, $lt: 100 }
+        }
+      }
+    })
+      .populate("organizer", "profile.fullName profile.avatar")
+      .populate("participants.user", "profile.fullName profile.avatar")
+      .sort({ createdAt: -1 });
+
+    return res.json({
+      success: true,
+      data: programs
     });
 
-    res.json({ success: true, data: programs });
   } catch (error) {
     console.error("getContinuePrograms ERROR:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+
 // ========================================================================
-// GET COMPLETED PROGRAMS (progress = 100)
+// GET COMPLETED PROGRAMS (progress = 100 for THIS user only)
 // ========================================================================
 exports.getCompletedPrograms = async (req, res) => {
   try {
+    const userId = req.user.id;
+
     const programs = await Program.find({
-      "participants.user": req.user.id,
-      "participants.progress": 100,
+      participants: {
+        $elemMatch: {
+          user: userId,
+          progress: 100
+        }
+      }
+    })
+      .populate("organizer", "profile.fullName profile.avatar")
+      .populate("participants.user", "profile.fullName profile.avatar")
+      .sort({ createdAt: -1 });
+
+    return res.json({
+      success: true,
+      data: programs
     });
 
-    res.json({ success: true, data: programs });
   } catch (error) {
     console.error("getCompletedPrograms ERROR:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to load completed programs"
+    });
   }
 };
+
 
 // ========================================================================
 // GET PROGRAM STATISTICS (updated to new schema)

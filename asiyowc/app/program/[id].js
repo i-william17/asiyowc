@@ -8,6 +8,7 @@ import {
   Animated,
   Dimensions,
   TextInput,
+  RefreshControl,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -54,6 +55,11 @@ const ProgramDetailsScreen = () => {
   const userProgress = program?.userProgress?.progress || 0;
   const isCompleted = userProgress === 100;
 
+  const hasCertificate =
+    program?.userProgress?.certificateIssued === true ||
+    program?.participantData?.certificateIssued === true;
+
+
   /* -----------------------------------------------
      LOCAL STATES
   ----------------------------------------------- */
@@ -63,6 +69,7 @@ const ProgramDetailsScreen = () => {
   const [commentText, setCommentText] = useState("");
   const [replyText, setReplyText] = useState("");
   const [activeReply, setActiveReply] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   /* SNACKBAR */
   const [snack, setSnack] = useState({
@@ -104,6 +111,16 @@ const ProgramDetailsScreen = () => {
     await dispatch(fetchProgram(programId));
   };
 
+  const onRefresh = async () => {
+    try {
+      setRefreshing(true);
+      await refreshProgram();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+
   /* -----------------------------------------------
      ENROLL
   ----------------------------------------------- */
@@ -132,6 +149,21 @@ const ProgramDetailsScreen = () => {
       showSnack("Failed to unenroll.", "error");
     }
   };
+
+  const handleBuyProgram = async () => {
+    try {
+      const res = await programService.buyProgram(program._id);
+
+      if (res.success) {
+        showSnack("Waiting for M-Pesa confirmation…", "success");
+        return;
+      }
+      showSnack("Failed to initiate payment", "error");
+    } catch (err) {
+      showSnack("Payment error", "error");
+    }
+  };
+
 
   /* -----------------------------------------------
      REVIEWS
@@ -323,11 +355,21 @@ const ProgramDetailsScreen = () => {
         style={{ opacity: fadeAnim, marginTop: -25 }}
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#7C3AED"
+            colors={["#7C3AED"]}
+          />
+        }
         onScroll={Animated.event(
           [{ nativeEvent: { contentOffset: { y: scrollY } } }],
           { useNativeDriver: true }
         )}
       >
+
+
         {/* MAIN DETAILS */}
         <View style={tw`p-6 bg-white rounded-t-3xl`}>
           <Text style={{ fontFamily: "Poppins-Bold", fontSize: 26 }}>
@@ -393,12 +435,12 @@ const ProgramDetailsScreen = () => {
           >
             {program.shortDescription ||
               (program.description
-                ? program.description.slice(0, 140) + "..."
+                ? program.description.slice(0, 500) + "..."
                 : "")}
           </Text>
 
-          {/* ENROLL BUTTON */}
-          {!isCompleted && (
+          {/* ENROLL BUTTON — ONLY FOR FREE PROGRAMS */}
+          {program.price.amount === 0 && !isCompleted && !hasCertificate && (
             <TouchableOpacity
               onPress={handleEnroll}
               style={tw`mt-6 bg-purple-600 p-4 rounded-2xl flex-row justify-center`}
@@ -416,8 +458,31 @@ const ProgramDetailsScreen = () => {
             </TouchableOpacity>
           )}
 
+
+
+          {/* BUY BUTTON */}
+          {/* BUY BUTTON — ONLY FOR PAID PROGRAMS */}
+          {program.price.amount > 0 && !isEnrolled && !hasCertificate && (
+            <TouchableOpacity
+              onPress={handleBuyProgram}
+              style={tw`bg-green-700 p-4 mt-4 rounded-2xl`}
+            >
+              <Text
+                style={{
+                  fontFamily: "Poppins-SemiBold",
+                  color: "#fff",
+                  textAlign: "center",
+                }}
+              >
+                Buy Program (M-Pesa)
+              </Text>
+            </TouchableOpacity>
+          )}
+
+
+
           {/* UNENROLL BUTTON */}
-          {isEnrolled && (
+          {isEnrolled && !isCompleted && (
             <TouchableOpacity
               onPress={handleUnenroll}
               style={tw`mt-3 bg-red-500 p-4 rounded-2xl flex-row justify-center`}
@@ -435,25 +500,47 @@ const ProgramDetailsScreen = () => {
             </TouchableOpacity>
           )}
 
+
           {/* CERTIFICATE BUTTON */}
-          {isCompleted && (
-            <TouchableOpacity
-              onPress={() =>
-                router.push(`/program/certificate/${program._id}`)
-              }
-              style={tw`bg-green-600 p-3 rounded-xl mt-4`}
-            >
-              <Text
-                style={{
-                  fontFamily: "Poppins-SemiBold",
-                  textAlign: "center",
-                  color: "white",
-                }}
+          {hasCertificate && (
+            <View style={tw`mt-4`}>
+              {/* VIEW CERTIFICATE */}
+              <TouchableOpacity
+                onPress={() => router.push(`/program/certificate/${program._id}`)}
+                style={tw`bg-green-600 p-3 rounded-xl mb-3`}
               >
-                View Certificate 🎓
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    textAlign: "center",
+                    color: "white",
+                  }}
+                >
+                  View Certificate 🎓
+                </Text>
+              </TouchableOpacity>
+
+              {/* CONTINUE PROGRAM */}
+              {isEnrolled && (
+                <TouchableOpacity
+                  onPress={() => router.push(`/program/learn/${program._id}`)}
+                  style={tw`bg-purple-600 p-3 rounded-xl`}
+                >
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-SemiBold",
+                      textAlign: "center",
+                      color: "white",
+                    }}
+                  >
+                    Continue Program
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
+
+
 
           {/* PROGRESS BAR */}
           {isEnrolled && !isCompleted && (
@@ -500,7 +587,7 @@ const ProgramDetailsScreen = () => {
           </Text>
         </View>
 
-                {/* OVERVIEW SECTION */}
+        {/* OVERVIEW SECTION */}
         <View style={tw`px-6 py-4`}>
           <Text
             style={{
@@ -547,7 +634,7 @@ const ProgramDetailsScreen = () => {
             />
             <OverviewItem
               label="Certificate"
-              value={ "Yes" }
+              value={"Yes"}
               icon="ribbon"
             />
             <OverviewItem
@@ -700,7 +787,7 @@ const ProgramDetailsScreen = () => {
               >
                 <View style={tw`flex-row items-center`}>
                   <Image
-                    source={{ uri: getSafeUri(rev?.user?.profile?.avatar) }}
+                    source={{ uri: getSafeUri(rev?.user?.profile?.avatar?.url) }}
                     style={tw`w-10 h-10 rounded-full`}
                   />
                   <View style={tw`ml-3 flex-1`}>
@@ -802,7 +889,7 @@ const ProgramDetailsScreen = () => {
             <View key={c._id} style={tw`mt-6`}>
               <View style={tw`flex-row`}>
                 <Image
-                  source={{ uri: getSafeUri(c?.user?.profile?.avatar) }}
+                  source={{ uri: getSafeUri(c?.user?.profile?.avatar?.url) }}
                   style={tw`w-9 h-9 rounded-full`}
                 />
 
