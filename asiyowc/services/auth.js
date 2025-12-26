@@ -115,7 +115,7 @@ export const authService = {
    * UPDATE PROFILE
    ========================================= */
   async updateProfile(data, token) {
-    const res = await axios.put(`${server}/users/update-profile`, data, {
+    const res = await axios.put(`${server}/users/profile`, data, {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json"
@@ -128,7 +128,7 @@ export const authService = {
    * UPDATE AVATAR (MULTIPART)
    ========================================= */
   async updateAvatar(formData, token) {
-    const res = await axios.put(`${server}/users/update-avatar`, formData, {
+    const res = await axios.post(`${server}/users/avatar`, formData, {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "multipart/form-data"
@@ -141,7 +141,7 @@ export const authService = {
    * DELETE AVATAR
    ========================================= */
   async deleteAvatar(token) {
-    const res = await axios.delete(`${server}/users/delete-avatar`, {
+    const res = await axios.delete(`${server}/users/avatar`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     return res.data;
@@ -211,7 +211,82 @@ export const authService = {
         "Content-Type": "application/json"
       }
     });
+    return res.data;
+  },
 
+  /* =========================================================
+     ⭐⭐ ADDED METHODS (NON-BREAKING)
+     These DO NOT affect existing code
+  ========================================================== */
+
+  /** GET FULL PROFILE + STATS */
+  async getProfile(token) {
+    const res = await axios.get(`${server}/users/profile`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data;
+  },
+
+  /** GET USER STATS ONLY */
+  async getUserStats(token) {
+    const res = await axios.get(`${server}/users/stats`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data;
+  },
+
+  /** UPDATE COVER PHOTO */
+  async updateCoverPhoto(formData, token) {
+    const res = await axios.post(`${server}/users/cover-photo`, formData, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "multipart/form-data"
+      }
+    });
+    return res.data;
+  },
+
+  /** DELETE COVER PHOTO */
+  async deleteCoverPhoto(token) {
+    const res = await axios.delete(`${server}/users/cover-photo`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data;
+  },
+
+  /** GET ENROLLED PROGRAMS */
+  async getEnrolledPrograms(token) {
+    const res = await axios.get(`${server}/users/programs/enrolled`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data;
+  },
+
+  /** GET COMPLETED PROGRAMS */
+  async getCompletedPrograms(token) {
+    const res = await axios.get(`${server}/users/programs/completed`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data;
+  },
+
+  /** ADD EMERGENCY CONTACT */
+  async addEmergencyContact(data, token) {
+    const res = await axios.post(
+      `${server}/users/emergency-contacts`,
+      data,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    return res.data;
+  },
+
+  /** TRIGGER SOS */
+  async triggerSOS(token) {
+    const res = await axios.post(
+      `${server}/users/sos`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
     return res.data;
   }
 };

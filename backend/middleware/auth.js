@@ -57,7 +57,7 @@ const auth = async (req, res, next) => {
       profile: currentUser.profile
     };
 
-    console.log("🔐 AUTH → User attached:", req.user);
+    // console.log("🔐 AUTH → User attached:", req.user);
 
     next();
   } catch (error) {

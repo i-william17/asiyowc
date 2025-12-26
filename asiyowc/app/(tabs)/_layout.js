@@ -21,17 +21,16 @@ export default function TabLayout() {
   }, []);
 
   // ⭐ Loading State
-  if (loading || !user) {
-    return (
-      <View style={tw`flex-1 bg-white`}>
-        <ShimmerLoader />
-      </View>
-    );
-  }
-
+ if (!user) {
+   return (
+     <View style={tw`flex-1 bg-white`}>
+       <ShimmerLoader />
+     </View>
+   );
+ }
   return (
-    <View style={{ flex: 1 }}>
-      {/* MAIN TAB NAVIGATION */}
+    <>
+      {/* ================= MAIN TAB NAVIGATION ================= */}
       <Tabs
         screenOptions={{
           headerShown: true,
@@ -53,13 +52,11 @@ export default function TabLayout() {
           },
         }}
       >
-
         {/* 🏠 HOME */}
         <Tabs.Screen
           name="index"
           options={{
             title: "Home",
-
             headerBackground: () => (
               <View
                 style={{
@@ -71,7 +68,6 @@ export default function TabLayout() {
                 }}
               />
             ),
-
             headerTitle: () => (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
                 {avatar ? (
@@ -119,7 +115,6 @@ export default function TabLayout() {
                 </Text>
               </View>
             ),
-
             headerRight: () => (
               <TouchableOpacity
                 style={{ marginRight: 18 }}
@@ -128,7 +123,6 @@ export default function TabLayout() {
                 <Ionicons name="notifications" size={28} color="#FFD700" />
               </TouchableOpacity>
             ),
-
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="home" size={size} color={color} />
             ),
@@ -159,18 +153,6 @@ export default function TabLayout() {
           }}
         />
 
-        {/* 💰 SAVINGS */}
-        <Tabs.Screen
-          name="savings"
-          options={{
-            headerShown: false,
-            title: "Savings",
-            tabBarIcon: ({ color, size }) => (
-              <Ionicons name="wallet" size={size} color={color} />
-            ),
-          }}
-        />
-
         {/* 👤 PROFILE */}
         <Tabs.Screen
           name="profile"
@@ -182,11 +164,10 @@ export default function TabLayout() {
             ),
           }}
         />
+
       </Tabs>
 
-      {/* =====================================================
-          🌟 FLOATING ACTION BUTTON — RIGHT (MORE MENU)
-      ====================================================== */}
+      {/* ================= FLOATING ACTION BUTTON — RIGHT ================= */}
       <TouchableOpacity
         style={{
           position: "absolute",
@@ -208,9 +189,7 @@ export default function TabLayout() {
         <Ionicons name="grid" size={28} color="#fff" />
       </TouchableOpacity>
 
-      {/* =====================================================
-          🤖 FLOATING ACTION BUTTON — LEFT (AI CHAT)
-      ====================================================== */}
+      {/* ================= FLOATING ACTION BUTTON — LEFT ================= */}
       <TouchableOpacity
         style={{
           position: "absolute",
@@ -231,6 +210,6 @@ export default function TabLayout() {
       >
         <Ionicons name="chatbubble-ellipses" size={26} color="#fff" />
       </TouchableOpacity>
-    </View>
+    </>
   );
 }

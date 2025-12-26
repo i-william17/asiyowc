@@ -97,6 +97,14 @@ const OnboardingScreen = () => {
       icon: 'public',
       library: MaterialIcons
     },
+        {
+      id: 'learner',
+      name: 'Learner',
+      description: 'Get up and going',
+      gradient: ['#44B5', '#44A0'],
+      icon: 'public',
+      library: MaterialIcons
+    },
   ];
 
   // Enhanced step navigation with smooth transitions
@@ -252,7 +260,7 @@ const OnboardingScreen = () => {
             <View style={tw`items-center mb-6`}>
               <Image
                 source={require('../../assets/images/asiyo-nobg.png')}
-                style={tw`w-40 h-40 rounded-full mb-4`}
+                style={tw`w-30 h-30 rounded-full mb-4`}
               />
             </View>
 

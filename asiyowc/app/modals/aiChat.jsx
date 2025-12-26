@@ -1,62 +1,131 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import tw from '../../utils/tw';
+import React, { useState, useRef } from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { useSelector } from "react-redux";
+import { server } from "../../server"
+import tw from "../../utils/tw";
 
 export default function AiChatModal() {
+  const router = useRouter();
+  const scrollRef = useRef(null);
+  const { token } = useSelector((state) => state.auth); // adjust if needed
+
   const [messages, setMessages] = useState([
-    { from: 'bot', text: "Hi! I'm Asiyo AI. How can I help you today?" }
+    { role: "assistant", content: "Hi! I'm Asiyo AI 🤖. How can I help you today?" },
   ]);
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const sendMessage = () => {
-    if (!input.trim()) return;
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
 
-    setMessages([...messages, { from: 'user', text: input }]);
+    const userMessage = input;
     setInput("");
+    setLoading(true);
 
-    // fake bot response for now
-    setTimeout(() => {
-      setMessages((prev) => [...prev, {
-        from: 'bot',
-        text: "I'm still learning! But your message was: " + input
-      }]);
-    }, 800);
+    setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+
+    try {
+      const res = await fetch(`${server}/api/ai/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`, // optional but recommended
+        },
+        body: JSON.stringify({
+          message: userMessage,
+        }),
+      });
+
+      const data = await res.json();
+
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.reply },
+      ]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "⚠️ Something went wrong. Please try again.",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }
   };
 
   return (
-    <View style={tw`flex-1 bg-white p-4`}>
-      <Text style={{ fontFamily: "Poppins-Bold", fontSize: 22 }}>
-        Asiyo AI Assistant 🤖
-      </Text>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={90}
+      style={tw`flex-1 bg-white`}
+    >
+      {/* HEADER */}
+      <View style={tw`flex-row items-center justify-between px-4 pt-12 pb-4 bg-purple-700`}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="close" size={26} color="#fff" />
+        </TouchableOpacity>
 
-      <ScrollView style={tw`mt-4 flex-1`}>
-        {messages.map((m, idx) => (
+        <View style={tw`items-center`}>
+          <Text style={tw`text-white font-bold text-lg`}>Asiyo AI</Text>
+          <Text style={tw`text-green-300 text-xs`}>● Online</Text>
+        </View>
+
+        <Ionicons name="sparkles" size={22} color="#FFD700" />
+      </View>
+
+      {/* CHAT */}
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={tw`p-4`}
+        onContentSizeChange={() =>
+          scrollRef.current?.scrollToEnd({ animated: true })
+        }
+      >
+        {messages.map((m, i) => (
           <View
-            key={idx}
+            key={i}
             style={[
-              tw`p-3 rounded-xl mb-2`,
-              m.from === "user"
+              tw`max-w-[80%] p-3 rounded-2xl mb-3`,
+              m.role === "user"
                 ? tw`bg-purple-600 self-end`
-                : tw`bg-gray-200 self-start`
+                : tw`bg-gray-200 self-start`,
             ]}
           >
             <Text
               style={{
-                color: m.from === "user" ? "#fff" : "#111",
+                color: m.role === "user" ? "#fff" : "#111",
                 fontFamily: "Poppins-Regular",
               }}
             >
-              {m.text}
+              {m.content}
             </Text>
           </View>
         ))}
+
+        {loading && (
+          <Text style={tw`text-gray-400 text-sm`}>
+            Asiyo AI is typing…
+          </Text>
+        )}
       </ScrollView>
 
-      {/* Input Row */}
-      <View style={tw`flex-row items-center mt-3`}>
+      {/* INPUT */}
+      <View style={tw`flex-row items-center px-4 pb-6`}>
         <TextInput
-          placeholder="Type a message..."
+          placeholder="Ask Asiyo AI..."
           value={input}
           onChangeText={setInput}
           style={tw`flex-1 border border-gray-300 rounded-xl p-3`}
@@ -68,6 +137,6 @@ export default function AiChatModal() {
           <Ionicons name="send" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }

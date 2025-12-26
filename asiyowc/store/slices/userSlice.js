@@ -3,19 +3,25 @@ import { authService } from '../../services/auth';
 import { secureStore } from '../../services/storage';
 
 /* ============================================================
-   FETCH USER PROFILE (/auth/me)
+   FETCH USER PROFILE (/users/profile)
 ============================================================ */
 export const fetchUserProfile = createAsyncThunk(
   'user/fetchUserProfile',
   async (_, { rejectWithValue }) => {
     try {
       const token = await secureStore.getItem('token');
-      if (!token) return rejectWithValue("No token found");
 
-      const response = await authService.getMe(token);
-      return response.data; 
+      if (!token) {
+        return rejectWithValue({ message: 'AUTH_REQUIRED' });
+      }
+
+      const res = await authService.getProfile(token);
+      // EXPECTED: { success, data: { user, stats } }
+      return res.data;
     } catch (error) {
-      return rejectWithValue(error.response?.data || error.message);
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
     }
   }
 );
@@ -29,9 +35,11 @@ export const updateProfile = createAsyncThunk(
     try {
       const token = await secureStore.getItem('token');
       const res = await authService.updateProfile(payload, token);
-      return res.data; // updated user object
+      return res.data; // { user }
     } catch (error) {
-      return rejectWithValue(error.response?.data || error.message);
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
     }
   }
 );
@@ -44,16 +52,18 @@ export const updatePassword = createAsyncThunk(
   async (payload, { rejectWithValue }) => {
     try {
       const token = await secureStore.getItem('token');
-      const res = await authService.updatePassword(payload, token);
-      return res;
+      await authService.updatePassword(payload, token);
+      return true;
     } catch (error) {
-      return rejectWithValue(error.response?.data || error.message);
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
     }
   }
 );
 
 /* ============================================================
-   UPDATE AVATAR (form-data)
+   UPDATE AVATAR
 ============================================================ */
 export const updateAvatar = createAsyncThunk(
   'user/updateAvatar',
@@ -61,9 +71,11 @@ export const updateAvatar = createAsyncThunk(
     try {
       const token = await secureStore.getItem('token');
       const res = await authService.updateAvatar(formData, token);
-      return res.data;
+      return res.data; // { avatar }
     } catch (error) {
-      return rejectWithValue(error.response?.data || error.message);
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
     }
   }
 );
@@ -76,75 +88,87 @@ export const deleteAvatar = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const token = await secureStore.getItem('token');
-      const res = await authService.deleteAvatar(token);
-      return res.data;
+      await authService.deleteAvatar(token);
+      return true;
     } catch (error) {
-      return rejectWithValue(error.response?.data || error.message);
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
     }
   }
 );
 
 /* ============================================================
-   DEACTIVATE ACCOUNT
+   UPDATE COVER PHOTO
 ============================================================ */
-export const deactivateAccount = createAsyncThunk(
-  'user/deactivateAccount',
+export const updateCoverPhoto = createAsyncThunk(
+  'user/updateCoverPhoto',
+  async (formData, { rejectWithValue }) => {
+    try {
+      const token = await secureStore.getItem('token');
+      const res = await authService.updateCoverPhoto(formData, token);
+      return res.data; // { coverPhoto }
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
+    }
+  }
+);
+
+/* ============================================================
+   DELETE COVER PHOTO
+============================================================ */
+export const deleteCoverPhoto = createAsyncThunk(
+  'user/deleteCoverPhoto',
   async (_, { rejectWithValue }) => {
     try {
       const token = await secureStore.getItem('token');
-      const res = await authService.deactivateAccount(token);
-      return res;
+      await authService.deleteCoverPhoto(token);
+      return true;
     } catch (error) {
-      return rejectWithValue(error.response?.data || error.message);
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
     }
   }
 );
 
 /* ============================================================
-   REACTIVATE ACCOUNT
+   FETCH ENROLLED PROGRAMS
 ============================================================ */
-export const reactivateAccount = createAsyncThunk(
-  'user/reactivateAccount',
-  async (tokenParam, { rejectWithValue }) => {
-    try {
-      const res = await authService.reactivateAccount(tokenParam);
-      return res;
-    } catch (error) {
-      return rejectWithValue(error.response?.data || error.message);
-    }
-  }
-);
-
-/* ============================================================
-   ENABLE 2FA
-============================================================ */
-export const enable2FA = createAsyncThunk(
-  'user/enable2FA',
+export const fetchEnrolledPrograms = createAsyncThunk(
+  'user/fetchEnrolledPrograms',
   async (_, { rejectWithValue }) => {
     try {
       const token = await secureStore.getItem('token');
-      return await authService.enable2FA(token);
+      const res = await authService.getEnrolledPrograms(token);
+      return res.data; // { programs }
     } catch (error) {
-      return rejectWithValue(error.response?.data || error.message);
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
     }
   }
 );
 
 /* ============================================================
-   DISABLE 2FA
+   FETCH COMPLETED PROGRAMS
 ============================================================ */
-export const disable2FA = createAsyncThunk(
-  'user/disable2FA',
+export const fetchCompletedPrograms = createAsyncThunk(
+  'user/fetchCompletedPrograms',
   async (_, { rejectWithValue }) => {
     try {
       const token = await secureStore.getItem('token');
-      return await authService.disable2FA(token);
+      const res = await authService.getCompletedPrograms(token);
+      return res.data; // { programs }
     } catch (error) {
-      return rejectWithValue(error.response?.data || error.message);
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
     }
   }
 );
-
 
 /* ============================================================
    SLICE
@@ -154,20 +178,35 @@ const userSlice = createSlice({
 
   initialState: {
     user: null,
+    stats: null,
+    enrolledPrograms: [],
+    completedPrograms: [],
     loading: false,
     error: null,
-    refetchTrigger: false,
-    message: null,
+    message: null
   },
 
   reducers: {
-    triggerRefetch(state) {
-      state.refetchTrigger = !state.refetchTrigger;
-    },
     clearUser(state) {
       state.user = null;
+      state.stats = null;
+      state.enrolledPrograms = [];
+      state.completedPrograms = [];
+      state.loading = false;
       state.error = null;
       state.message = null;
+    },
+
+    updateProfileOptimistic(state, action) {
+      if (!state.user) return;
+
+      if (action.payload.fullName !== undefined) {
+        state.user.profile.fullName = action.payload.fullName;
+      }
+
+      if (action.payload.email !== undefined) {
+        state.user.email = action.payload.email;
+      }
     }
   },
 
@@ -178,12 +217,13 @@ const userSlice = createSlice({
       updatePassword,
       updateAvatar,
       deleteAvatar,
-      deactivateAccount,
-      reactivateAccount,
-      enable2FA,
-      disable2FA,
+      updateCoverPhoto,
+      deleteCoverPhoto,
+      fetchEnrolledPrograms,
+      fetchCompletedPrograms
     ];
 
+    /* ================= GENERIC HANDLERS ================= */
     thunks.forEach((thunk) => {
       builder
         .addCase(thunk.pending, (state) => {
@@ -193,61 +233,77 @@ const userSlice = createSlice({
         })
         .addCase(thunk.rejected, (state, action) => {
           state.loading = false;
-          state.error = action.payload;
+          state.error = action.payload?.message || 'Something went wrong';
         });
     });
 
-    /* SUCCESS CASES ------------------------- */
+    /* ================= SUCCESS ================= */
+
     builder
       .addCase(fetchUserProfile.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload;
+        state.user = action.payload.user;
+        state.stats = action.payload.stats;
       })
 
       .addCase(updateProfile.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload;
-        state.message = "Profile updated successfully";
-      })
-
-      .addCase(updatePassword.fulfilled, (state) => {
-        state.loading = false;
-        state.message = "Password updated successfully";
+        state.user = action.payload.user;
+        state.message = 'Profile updated successfully';
       })
 
       .addCase(updateAvatar.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload;
-        state.message = "Avatar updated";
+        if (state.user) {
+          state.user.profile.avatar = action.payload.avatar;
+        }
+        state.message = 'Avatar updated';
       })
 
-      .addCase(deleteAvatar.fulfilled, (state, action) => {
+      .addCase(deleteAvatar.fulfilled, (state) => {
         state.loading = false;
-        state.user = action.payload;
-        state.message = "Avatar deleted";
+        if (state.user) {
+          state.user.profile.avatar = { url: null, publicId: null };
+        }
+        state.message = 'Avatar deleted';
       })
 
-      .addCase(deactivateAccount.fulfilled, (state) => {
+      .addCase(updateCoverPhoto.fulfilled, (state, action) => {
         state.loading = false;
-        state.message = "Account deactivated";
+        if (state.user) {
+          state.user.profile.coverPhoto = action.payload.coverPhoto;
+        }
+        state.message = 'Cover photo updated';
       })
 
-      .addCase(reactivateAccount.fulfilled, (state) => {
+      .addCase(deleteCoverPhoto.fulfilled, (state) => {
         state.loading = false;
-        state.message = "Account reactivated";
+        if (state.user) {
+          state.user.profile.coverPhoto = { url: null, publicId: null };
+        }
+        state.message = 'Cover photo deleted';
       })
 
-      .addCase(enable2FA.fulfilled, (state) => {
+      .addCase(fetchEnrolledPrograms.fulfilled, (state, action) => {
         state.loading = false;
-        state.message = "2FA enabled";
+        state.enrolledPrograms = action.payload.programs;
       })
 
-      .addCase(disable2FA.fulfilled, (state) => {
+      .addCase(fetchCompletedPrograms.fulfilled, (state, action) => {
         state.loading = false;
-        state.message = "2FA disabled";
+        state.completedPrograms = action.payload.programs;
+      })
+
+      .addCase(updatePassword.fulfilled, (state) => {
+        state.loading = false;
+        state.message = 'Password updated successfully';
       });
-  },
+  }
 });
 
-export const { triggerRefetch, clearUser } = userSlice.actions;
+export const {
+  clearUser,
+  updateProfileOptimistic
+} = userSlice.actions;
+
 export default userSlice.reducer;

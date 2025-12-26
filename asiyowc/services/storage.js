@@ -1,4 +1,7 @@
+import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+
+const isWeb = Platform.OS === 'web';
 
 export const secureStore = {
   /* ============================================================
@@ -6,7 +9,11 @@ export const secureStore = {
   ============================================================ */
   async setItem(key, value) {
     try {
-      await SecureStore.setItemAsync(key, value);
+      if (isWeb) {
+        localStorage.setItem(key, value);
+      } else {
+        await SecureStore.setItemAsync(key, value);
+      }
       return true;
     } catch (error) {
       console.error('Error saving to secure store:', error);
@@ -16,7 +23,11 @@ export const secureStore = {
 
   async getItem(key) {
     try {
-      return await SecureStore.getItemAsync(key);
+      if (isWeb) {
+        return localStorage.getItem(key);
+      } else {
+        return await SecureStore.getItemAsync(key);
+      }
     } catch (error) {
       console.error('Error reading from secure store:', error);
       return null;
@@ -25,7 +36,11 @@ export const secureStore = {
 
   async removeItem(key) {
     try {
-      await SecureStore.deleteItemAsync(key);
+      if (isWeb) {
+        localStorage.removeItem(key);
+      } else {
+        await SecureStore.deleteItemAsync(key);
+      }
       return true;
     } catch (error) {
       console.error('Error removing from secure store:', error);
@@ -35,10 +50,21 @@ export const secureStore = {
 
   async clear() {
     try {
-      await SecureStore.deleteItemAsync("token");
-      await SecureStore.deleteItemAsync("onboarding");
-      await SecureStore.deleteItemAsync("hasRegistered");
-      await SecureStore.deleteItemAsync("enrolledPrograms");
+      const keys = [
+        "token",
+        "onboarding",
+        "hasRegistered",
+        "enrolledPrograms"
+      ];
+
+      for (const key of keys) {
+        if (isWeb) {
+          localStorage.removeItem(key);
+        } else {
+          await SecureStore.deleteItemAsync(key);
+        }
+      }
+
       return true;
     } catch (error) {
       console.error("Error clearing secure store:", error);
@@ -51,10 +77,12 @@ export const secureStore = {
      Used by Redux programSlice
   ============================================================ */
 
-  // Load saved enrolled program IDs
   async getEnrolledPrograms() {
     try {
-      const json = await SecureStore.getItemAsync("enrolledPrograms");
+      const json = isWeb
+        ? localStorage.getItem("enrolledPrograms")
+        : await SecureStore.getItemAsync("enrolledPrograms");
+
       return json ? JSON.parse(json) : [];
     } catch (error) {
       console.error("Error loading enrolled programs:", error);
@@ -62,20 +90,25 @@ export const secureStore = {
     }
   },
 
-  // Save a newly enrolled program
   async saveEnrollment(programId) {
     try {
-      const json = await SecureStore.getItemAsync("enrolledPrograms");
+      const json = isWeb
+        ? localStorage.getItem("enrolledPrograms")
+        : await SecureStore.getItemAsync("enrolledPrograms");
+
       const arr = json ? JSON.parse(json) : [];
 
       if (!arr.includes(programId)) {
         arr.push(programId);
       }
 
-      await SecureStore.setItemAsync(
-        "enrolledPrograms",
-        JSON.stringify(arr)
-      );
+      const updated = JSON.stringify(arr);
+
+      if (isWeb) {
+        localStorage.setItem("enrolledPrograms", updated);
+      } else {
+        await SecureStore.setItemAsync("enrolledPrograms", updated);
+      }
 
       return true;
     } catch (error) {
@@ -84,18 +117,22 @@ export const secureStore = {
     }
   },
 
-  // Remove a program from enrollment list
   async removeEnrollment(programId) {
     try {
-      const json = await SecureStore.getItemAsync("enrolledPrograms");
+      const json = isWeb
+        ? localStorage.getItem("enrolledPrograms")
+        : await SecureStore.getItemAsync("enrolledPrograms");
+
       const arr = json ? JSON.parse(json) : [];
+      const updated = arr.filter(id => id !== programId);
 
-      const updated = arr.filter((id) => id !== programId);
+      const str = JSON.stringify(updated);
 
-      await SecureStore.setItemAsync(
-        "enrolledPrograms",
-        JSON.stringify(updated)
-      );
+      if (isWeb) {
+        localStorage.setItem("enrolledPrograms", str);
+      } else {
+        await SecureStore.setItemAsync("enrolledPrograms", str);
+      }
 
       return true;
     } catch (error) {

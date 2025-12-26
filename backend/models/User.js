@@ -2,7 +2,26 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const validator = require('validator');
 
+const emergencyContactSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  phone: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  relationship: {
+    type: String,
+    trim: true
+  }
+}, { _id: false });
+
 const userSchema = new mongoose.Schema({
+
+  /* ================= AUTH ================= */
   email: {
     type: String,
     required: [true, 'Email is required'],
@@ -31,7 +50,7 @@ const userSchema = new mongoose.Schema({
     select: false
   },
 
-  /* ✅ Profile data */
+  /* ================= PROFILE ================= */
   profile: {
     fullName: {
       type: String,
@@ -39,29 +58,52 @@ const userSchema = new mongoose.Schema({
       trim: true,
       maxlength: 100
     },
+
     role: {
       type: String,
-      enum: ['mentor', 'entrepreneur', 'advocate', 'changemaker', 'professional', 'student'],
+      enum: [
+        'mentor',
+        'entrepreneur',
+        'advocate',
+        'changemaker',
+        'professional',
+        'learner'
+      ],
       default: 'professional'
     },
+
     bio: {
       type: String,
       maxlength: 500,
       default: ''
     },
+
     avatar: {
+      url: { type: String, default: null },
+      publicId: { type: String, default: null }
+    },
+
+    coverPhoto: {
       url: { type: String, default: null },
       publicId: { type: String, default: null }
     }
   },
 
-  /* Interests */
+  /* ================= INTERESTS & BADGES ================= */
   interests: [{
     type: String,
     enum: [
-      'leadership', 'finance', 'health', 'advocacy',
-      'entrepreneurship', 'education', 'technology',
-      'arts', 'mentorship', 'community', 'wellness'
+      'leadership',
+      'finance',
+      'health',
+      'advocacy',
+      'entrepreneurship',
+      'education',
+      'technology',
+      'arts',
+      'mentorship',
+      'community',
+      'wellness'
     ]
   }],
 
@@ -69,7 +111,7 @@ const userSchema = new mongoose.Schema({
     type: String
   }],
 
-  /* Verification */
+  /* ================= VERIFICATION ================= */
   verification: {
     emailToken: String,
     emailTokenExpires: Date,
@@ -82,13 +124,13 @@ const userSchema = new mongoose.Schema({
     phone: { type: Boolean, default: false }
   },
 
-  /* 2FA */
+  /* ================= TWO FACTOR AUTH ================= */
   twoFactorAuth: {
     enabled: { type: Boolean, default: false },
     secret: String
   },
 
-  /* Activity */
+  /* ================= ACTIVITY ================= */
   lastActive: {
     type: Date,
     default: Date.now
@@ -99,12 +141,18 @@ const userSchema = new mongoose.Schema({
     default: true
   },
 
-  /* ⭐ NEW FIELD — Persist onboarding skip state */
   hasRegistered: {
     type: Boolean,
-    default: false,
+    default: false
   },
 
+  /* ================= SAFETY & SOS ================= */
+  safety: {
+    emergencyContacts: [emergencyContactSchema],
+    lastSOSUsed: Date
+  },
+
+  /* ================= PROGRAM PROGRESS (LEGACY / OPTIONAL) ================= */
   programProgress: [{
     program: { type: mongoose.Schema.Types.ObjectId, ref: 'Program' },
     enrolledAt: Date,
@@ -118,7 +166,7 @@ const userSchema = new mongoose.Schema({
       issuedAt: Date,
       downloadUrl: String
     }]
-  }],
+  }]
 
 }, {
   timestamps: true,
@@ -126,25 +174,23 @@ const userSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-/* Indexes */
-userSchema.index({ email: 1 });
-userSchema.index({ phone: 1 });
+/* ================= INDEXES ================= */
 userSchema.index({ interests: 1 });
 userSchema.index({ createdAt: -1 });
 
-/* Password hashing */
+/* ================= PASSWORD HASHING ================= */
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
-/* Compare password */
+/* ================= PASSWORD COMPARISON ================= */
 userSchema.methods.correctPassword = async function (candidatePassword, userPassword) {
   return await bcrypt.compare(candidatePassword, userPassword);
 };
 
-/* Generate email verification code */
+/* ================= VERIFICATION TOKENS ================= */
 userSchema.methods.generateEmailVerificationCode = function () {
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   this.verification.emailToken = code;
@@ -152,7 +198,6 @@ userSchema.methods.generateEmailVerificationCode = function () {
   return code;
 };
 
-/* Generate phone verification code */
 userSchema.methods.generatePhoneVerificationCode = function () {
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   this.verification.phoneToken = code;
@@ -160,11 +205,10 @@ userSchema.methods.generatePhoneVerificationCode = function () {
   return code;
 };
 
-/* Profile URL */
+/* ================= VIRTUALS ================= */
 userSchema.virtual('profileUrl').get(function () {
   return `/users/${this._id}/profile`;
 });
-
 
 const User = mongoose.model('User', userSchema);
 module.exports = User;

@@ -1,3 +1,4 @@
+// app/index.js
 import { Redirect } from "expo-router";
 import { useDispatch, useSelector } from "react-redux";
 import { useEffect } from "react";
@@ -30,10 +31,15 @@ export default function Index() {
     return <Redirect href="/(tabs)" />;
   }
 
+  // 🔴 NO TOKEN = FORCE LOGIN (ALWAYS)
+  // if (!token || token === null) {
+  //   return <Redirect href="/(auth)/login" />;
+  // }
+
   // 2️⃣ User has ever registered → ALWAYS skip onboarding
-  if (hasRegistered) {
-    return <Redirect href="/(auth)/login" />;
-  }
+  // if (hasRegistered) {
+  //   return <Redirect href="/(auth)/login" />;
+  // }
 
   // 3️⃣ Brand new user → show onboarding flow
   return <Redirect href="/(auth)/onboarding" />;

@@ -19,7 +19,8 @@ const postRoutes = require('./routes/posts.js');
 const feedRoutes = require('./routes/feed.js');
 const programRoutes = require('./routes/programs.js');
 const savingsRoutes = require('./routes/savings.js');
-const chatRoutes = require('./routes/chat.js');
+const communityRoutes = require('./routes/community.js');
+const aiRoutes = require("./routes/ai.js");
 // const eventRoutes = require('./routes/events.js');
 // const marketplaceRoutes = require('./routes/marketplace.js');
 // const mentorshipRoutes = require('./routes/mentorship.js');
@@ -31,12 +32,14 @@ const errorHandler = require('./middleware/errorHandler.js');
 const { responseFormatter } = require('./middleware/responseFormatter.js');
 
 // Socket handlers
-// const { setupSocket } = require('./socket/index.js');
+// const { setupSocket } = require('./socket/index.js'); // ❗ KEPT COMMENTED
 
 dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
+
+// 🔹 Existing Socket.IO instance (kept)
 const io = new Server(server, {
   cors: {
     origin: process.env.CLIENT_URL || "http://localhost:8081",
@@ -44,6 +47,11 @@ const io = new Server(server, {
     credentials: true
   }
 });
+
+// 🔹 NEW: initialize socket using existing io instance
+// (does NOT replace commented setupSocket)
+const initSocket = require('./socket/index.js');
+initSocket(io);
 
 // Security middleware
 app.use(helmet({
@@ -91,8 +99,7 @@ app.use(responseFormatter);
 // DB Connection
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-    });
+    const conn = await mongoose.connect(process.env.MONGODB_URI, {});
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error('Database connection error:', error);
@@ -107,15 +114,14 @@ app.use('/api/posts', postRoutes);
 app.use('/api/feed', feedRoutes);
 app.use('/api/programs', programRoutes);
 app.use('/api/savings', savingsRoutes);
+app.use("/api/ai", aiRoutes);
+app.use('/api/community', communityRoutes);
 // app.use('/api/chat', chatRoutes);
 // app.use('/api/events', eventRoutes);
 // app.use('/api/marketplace', marketplaceRoutes);
 // app.use('/api/mentorship', mentorshipRoutes);
 // app.use('/api/moderation', moderationRoutes);
 // app.use('/api/upload', uploadRoutes);
-
-// Socket.io setup
-// setupSocket(io);
 
 // Error handler
 app.use(errorHandler);
@@ -136,7 +142,6 @@ const startServer = async () => {
     console.log(`🔗 API URL: http://localhost:${PORT}`);
   });
 };
-
 
 startServer();
 

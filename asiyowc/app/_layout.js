@@ -1,85 +1,78 @@
-import React, { useEffect } from 'react';
-import { Stack } from 'expo-router';
-import { Provider, useDispatch, useSelector } from 'react-redux';
-import { store } from '../store/store';
+// app/_layout.js
+import React, { useEffect } from "react";
+import { Stack, useRouter, useSegments } from "expo-router";
+import { Provider, useDispatch, useSelector } from "react-redux";
+import { store } from "../store/store";
 
-import { AuthProvider } from '../context/AuthContext';
-import { ThemeProvider } from '../context/ThemeContext';
-import { AnimationProvider } from '../context/AnimationContext';
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ThemeProvider } from "../context/ThemeContext";
+import { AnimationProvider } from "../context/AnimationContext";
+import { AuthProvider } from "../context/AuthContext";
 
-import "../styles/global.css";
+import * as SplashScreen from "expo-splash-screen";
+import { useFonts } from "../hooks/useFonts";
 
-import * as SplashScreen from 'expo-splash-screen';
-import { useFonts } from '../hooks/useFonts';
+import { restoreToken, fetchAuthenticatedUser } from "../store/slices/authSlice";
+import useCommunitySocket from "../hooks/useCommunitySocket";
 
-import { restoreToken, fetchAuthenticatedUser } from '../store/slices/authSlice';
-
-/* Prevent splash from auto-hiding */
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
-/* ================================================================
-   APP INITIALIZER
-   - Restores token
-   - Fetches authenticated user
-   - Hides splash ONLY when ready
-================================================================ */
-function AppInitializer({ children }) {
+/* ============================================================
+   APP SHELL (SAFE TO USE REDUX HERE)
+============================================================ */
+function AppShell() {
   const dispatch = useDispatch();
-  const { appLoaded, token } = useSelector((state) => state.auth);
+  const router = useRouter();
+  const segments = useSegments();
 
+  const { token, appLoaded } = useSelector((state) => state.auth);
+  const { fontsLoaded } = useFonts();
+  useCommunitySocket();
+
+  /* Restore token ONCE */
   useEffect(() => {
-    const bootstrap = async () => {
-      try {
-        // 1️⃣ Restore token from secure store
-        const result = await dispatch(restoreToken());
-
-        const restoredToken = result.payload?.token;
-
-        // 2️⃣ Fetch user only if token exists
-        if (restoredToken) {
-          await dispatch(fetchAuthenticatedUser());
-        }
-      } catch (err) {
-        console.error("❌ INIT ERROR:", err);
-      } finally {
-        // 3️⃣ Hide splash once all auth loading is complete
-        await SplashScreen.hideAsync().catch(() => {});
-      }
-    };
-
-    bootstrap();
+    dispatch(restoreToken()).finally(() => {
+      SplashScreen.hideAsync().catch(() => {});
+    });
   }, []);
 
-  // Prevent app rendering before initialization is complete
-  if (!appLoaded) return null;
+  /* Fetch user when token exists */
+  useEffect(() => {
+    if (appLoaded && token) {
+      dispatch(fetchAuthenticatedUser());
+      
+    }
+  }, [appLoaded, token]);
 
-  return children;
+  /* 🔒 AUTH GUARD */
+  useEffect(() => {
+    if (!appLoaded) return;
+
+    const inAuth = segments[0] === "(auth)";
+
+    if (!token && !inAuth) {
+      router.replace("/(auth)/login");
+    }
+
+    if (token && inAuth) {
+      router.replace("/(tabs)");
+    }
+  }, [token, appLoaded, segments]);
+
+  if (!fontsLoaded) return null;
+
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="modals" />
+    </Stack>
+  );
 }
 
-/* ================================================================
-   MAIN ROOT LAYOUT
-================================================================ */
 export default function RootLayout() {
-  const { fontsLoaded, fontError } = useFonts();
-
-  useEffect(() => {
-    if (fontsLoaded) {
-      // Splash will hide from AppInitializer, not twice here.
-      // Do NOT hide splash screen here.
-    }
-  }, [fontsLoaded]);
-
-  if (fontError) {
-    console.warn("Font loading error:", fontError);
-  }
-
-  if (!fontsLoaded) {
-    return null; // Wait for fonts before rendering
-  }
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -87,18 +80,7 @@ export default function RootLayout() {
           <ThemeProvider>
             <AnimationProvider>
               <AuthProvider>
-
-                {/* ⭐ Initialize auth BEFORE rendering navigation */}
-                <AppInitializer>
-                  <Stack
-                    screenOptions={{
-                      headerShown: false,
-                      animation: "fade",
-                      animationDuration: 300,
-                    }}
-                  />
-                </AppInitializer>
-
+                <AppShell />
               </AuthProvider>
             </AnimationProvider>
           </ThemeProvider>

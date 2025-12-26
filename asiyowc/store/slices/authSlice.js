@@ -7,19 +7,23 @@ import { secureStore } from '../../services/storage';
 ============================================================ */
 export const fetchAuthenticatedUser = createAsyncThunk(
   'auth/fetchMe',
-  async (_, { rejectWithValue }) => {
+  async (_, { getState, rejectWithValue }) => {
     try {
-      const token = await secureStore.getItem('token');
+      const { token } = getState().auth;
+      console.log("Token:", token);
 
-      if (!token) return rejectWithValue("No token stored");
+      if (!token) {
+        return rejectWithValue("No token in state");
+      }
 
       const response = await authService.getMe(token);
-      return response.data.data; // backend returns { success, data: user }
+      return response.data.data;
     } catch (error) {
       return rejectWithValue(error.response?.data || error.message);
     }
   }
 );
+
 
 /* ============================================================
    RESTORE TOKEN (App Startup)
@@ -266,8 +270,14 @@ const authSlice = createSlice({
           secureStore.setItem("userId", action.payload._id);
         }
       })
-      .addCase(fetchAuthenticatedUser.rejected, (state, action) => {
-        state.error = action.payload;
+
+      .addCase(fetchAuthenticatedUser.rejected, (state) => {
+        state.token = null;
+        state.user = null;
+        state.isAuthenticated = false;
+
+        secureStore.removeItem("token");
+        secureStore.removeItem("userId");
       })
 
       /* ============================================================
@@ -281,11 +291,11 @@ const authSlice = createSlice({
   },
 });
 
-export const { 
-  setOnboardingData, 
-  clearError, 
-  resetAuth, 
-  setToken 
+export const {
+  setOnboardingData,
+  clearError,
+  resetAuth,
+  setToken
 } = authSlice.actions;
 
 export default authSlice.reducer;

@@ -1,63 +1,60 @@
-const socketIo = require('socket.io');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const socketAuth = require('./auth');
+const registerPresence = require('./presence');
+const registerChat = require('./chat');
+const registerGroup = require('./group');
+const registerVoice = require('./voice');
 
-let io;
+/* =====================================================
+   SOCKET INITIALIZER
+===================================================== */
 
-const initialize = (server) => {
-  io = socketIo(server, {
-    cors: {
-      origin: process.env.CLIENT_URL || "*",
-      methods: ["GET", "POST"]
-    }
-  });
+module.exports = function initSocket(io) {
+  if (!io) {
+    throw new Error('Socket initialization failed: io instance required');
+  }
 
-  io.use(async (socket, next) => {
-    try {
-      const token = socket.handshake.auth.token;
-      if (!token) {
-        return next(new Error('Authentication error'));
-      }
+  /* =====================================================
+     AUTH MIDDLEWARE
+     - Runs BEFORE connection event
+     - Attaches socket.user
+  ===================================================== */
+  io.use(socketAuth);
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded.id);
-      
-      if (!user) {
-        return next(new Error('Authentication error'));
-      }
-
-      socket.userId = user._id;
-      next();
-    } catch (error) {
-      next(new Error('Authentication error'));
-    }
-  });
-
+  /* =====================================================
+     CONNECTION HANDLER
+  ===================================================== */
   io.on('connection', (socket) => {
-    console.log(`User ${socket.userId} connected`);
+    if (!socket.user || !socket.user.id) {
+      socket.disconnect(true);
+      return;
+    }
 
-    // Join user to their personal room
-    socket.join(socket.userId.toString());
+    console.log(`🟢 Socket connected: ${socket.user.id}`);
 
-    // Handle chat events
-    require('./chat')(socket, io);
-    
-    // Handle notification events
-    require('./notifications')(socket, io);
+    /* =====================================================
+       MODULE REGISTRATION
+       Each module binds its own listeners
+    ===================================================== */
+    try {
+      registerPresence(io, socket);
+      registerChat(io, socket);
+      registerGroup(io, socket);
+      registerVoice(io, socket);
+    } catch (e) {
+      console.error('❌ Socket module registration failed:', e);
+      socket.disconnect(true);
+      return;
+    }
 
-    socket.on('disconnect', () => {
-      console.log(`User ${socket.userId} disconnected`);
+    /* =====================================================
+       DISCONNECT
+    ===================================================== */
+    socket.on('disconnect', (reason) => {
+      console.log(
+        `🔴 Socket disconnected: ${socket.user.id} | reason: ${reason}`
+      );
     });
   });
 
   return io;
 };
-
-const getIO = () => {
-  if (!io) {
-    throw new Error('Socket.io not initialized');
-  }
-  return io;
-};
-
-module.exports = { initialize, getIO };
