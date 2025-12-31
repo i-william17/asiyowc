@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
   ScrollView,
   View,
@@ -8,7 +9,6 @@ import {
   SafeAreaView,
   Animated,
 } from "react-native";
-import { useRouter } from "expo-router";
 import { useDispatch, useSelector } from "react-redux";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -30,6 +30,21 @@ import HubCard from "../../components/community/HubCard";
 import LoadingBlock from "../../components/community/LoadingBlock";
 import EmptyState from "../../components/community/EmptyState";
 
+/* =====================================================
+   HELPERS (SOURCE OF TRUTH = JWT)
+===================================================== */
+
+const getUserIdFromToken = (token) => {
+  try {
+    if (!token) return null;
+    const base64 = token.split(".")[1];
+    const payload = JSON.parse(atob(base64));
+    return String(payload.id || payload._id || payload.userId);
+  } catch {
+    return null;
+  }
+};
+
 export default function CommunityScreen() {
   const router = useRouter();
   const dispatch = useDispatch();
@@ -40,12 +55,17 @@ export default function CommunityScreen() {
     (s) => s.community
   );
 
+  const { token } = useSelector((s) => s.auth);
+  const myId = getUserIdFromToken(token);
+
   const [activeTab, setActiveTab] = useState("groups");
   const [refreshing, setRefreshing] = useState(false);
 
   const fadeAnim = useState(new Animated.Value(0))[0];
 
-
+  /* =====================================================
+     LOADERS
+  ===================================================== */
   const loadAll = async () => {
     await Promise.all([
       dispatch(fetchGroups()),
@@ -57,7 +77,6 @@ export default function CommunityScreen() {
 
   useEffect(() => {
     loadAll();
-
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 600,
@@ -65,16 +84,21 @@ export default function CommunityScreen() {
     }).start();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      dispatch(fetchChats());
+    }, [dispatch])
+  );
+
   const onRefresh = async () => {
     setRefreshing(true);
     await loadAll();
     setRefreshing(false);
   };
 
-  /* ============================================================
+  /* =====================================================
      TABS
-  ============================================================= */
-
+  ===================================================== */
   const Tabs = () => (
     <View style={tw`px-1 -mt-4 mb-6`}>
       <View style={tw`bg-white rounded-2xl p-2 flex-row shadow-sm`}>
@@ -89,9 +113,7 @@ export default function CommunityScreen() {
             onPress={() => setActiveTab(t.id)}
             style={[
               tw`flex-1 py-3 rounded-xl flex-row justify-center items-center`,
-              activeTab === t.id
-                ? tw`bg-purple-600`
-                : tw`bg-transparent`,
+              activeTab === t.id ? tw`bg-purple-600` : tw`bg-transparent`,
             ]}
           >
             <Ionicons
@@ -114,13 +136,44 @@ export default function CommunityScreen() {
     </View>
   );
 
-  /* ============================================================
-     CONTENT RENDERER
-  ============================================================= */
+  /* =====================================================
+     CREATE CHAT ROW
+  ===================================================== */
+  const CreateChatRow = () => (
+    <TouchableOpacity
+      onPress={() => router.push("/community/new-chat")}
+      activeOpacity={0.85}
+      style={tw`flex-row items-center px-4 py-4 mb-3 bg-white border border-gray-200 rounded-2xl`}
+    >
+      <View style={tw`w-11 h-11 rounded-full bg-purple-600 items-center justify-center`}>
+        <Ionicons name="add" size={22} color="#fff" />
+      </View>
 
+      <View style={tw`ml-4`}>
+        <Text style={{ fontFamily: "Poppins-SemiBold", fontSize: 15 }}>
+          New chat
+        </Text>
+        <Text
+          style={{
+            fontFamily: "Poppins-Regular",
+            fontSize: 13,
+            color: "#6B7280",
+            marginTop: 2,
+          }}
+        >
+          Start a conversation
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  /* =====================================================
+     CONTENT RENDERER
+  ===================================================== */
   const renderList = () => {
     if (loadingList) return <LoadingBlock />;
 
+    /* -------- GROUPS -------- */
     if (activeTab === "groups") {
       if (!groups.length) {
         return (
@@ -132,7 +185,6 @@ export default function CommunityScreen() {
       }
 
       return groups.map((g) => (
-        console.log(g),
         <GroupCard
           key={g._id}
           id={g._id}
@@ -143,40 +195,61 @@ export default function CommunityScreen() {
           isJoined={g.isMember}
           onPress={(id) => {
             if (g.isMember && g.chatId) {
-              console.log("Navigating to group chat:", g.chatId);
               router.push(`/community/group-chat/${g.chatId}`);
             } else {
-              console.log("Navigating to Group Details:", id);
               router.push(`/community/group/${id}`);
             }
           }}
-
         />
-
       ));
     }
 
+    /* -------- CHATS (FIXED) -------- */
     if (activeTab === "chats") {
-      if (!chats.length) {
-        return (
-          <EmptyState
-            title="No chats yet"
-            subtitle="Start a conversation from a user profile."
-          />
-        );
-      }
+      return (
+        <>
+          <CreateChatRow />
 
-      return chats.map((c) => (
-        <ChatCard
-          key={c._id}
-          id={c._id}
-          title={c.title || "Chat"}
-          lastMessage={c.lastMessage || "Open conversation"}
-          onPress={(id) => router.push(`/community/chat/${id}`)}
-        />
-      ));
+          {!chats || chats.length === 0 ? (
+            <EmptyState
+              title="No chats yet"
+              subtitle="Start a conversation with someone."
+            />
+          ) : (
+            chats.map((c) => {
+              if (c.type !== "dm") return null;
+
+              // ✅ CORRECT DM RECEIVER RESOLUTION
+              const other = c.participants?.find(
+                (p) => String(p?._id) !== String(myId)
+              );
+
+              if (!other) return null;
+
+              return (
+                <ChatCard
+                  key={c._id}
+                  id={c._id}
+                  title={other.profile?.fullName || "Chat"}
+                  avatar={
+                    other.profile?.avatar?.url ||
+                    other.profile?.avatar ||
+                    null
+                  }
+                  lastMessage={
+                    c.messages?.[c.messages.length - 1]?.ciphertext ||
+                    "Open conversation"
+                  }
+                  onPress={(id) => router.push(`/community/chat/${id}`)}
+                />
+              );
+            })
+          )}
+        </>
+      );
     }
 
+    /* -------- VOICES -------- */
     if (activeTab === "voices") {
       if (!voices.length) {
         return (
@@ -198,6 +271,7 @@ export default function CommunityScreen() {
       ));
     }
 
+    /* -------- HUBS -------- */
     if (activeTab === "hubs") {
       if (!hubs.length) {
         return (
@@ -222,10 +296,9 @@ export default function CommunityScreen() {
     return null;
   };
 
-  /* ============================================================
+  /* =====================================================
      MAIN UI
-  ============================================================= */
-
+  ===================================================== */
   return (
     <SafeAreaView style={tw`flex-1 bg-gray-50`}>
       <Animated.ScrollView
@@ -240,40 +313,32 @@ export default function CommunityScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* HEADER */}
         <LinearGradient
           colors={["#6A1B9A", "#8E24AA"]}
           style={tw`px-6 pt-16 pb-10 rounded-b-3xl shadow-sm`}
         >
-          <View style={tw`flex-row justify-between items-center`}>
-            <View>
-              <Text
-                style={{
-                  fontFamily: "Poppins-Bold",
-                  fontSize: 26,
-                  color: "white",
-                }}
-              >
-                Community
-              </Text>
-              <Text
-                style={{
-                  fontFamily: "Poppins-Regular",
-                  marginTop: 4,
-                  color: "white",
-                  opacity: 0.85,
-                }}
-              >
-                Interact with your sisters.
-              </Text>
-            </View>
-          </View>
+          <Text
+            style={{
+              fontFamily: "Poppins-Bold",
+              fontSize: 26,
+              color: "white",
+            }}
+          >
+            Community
+          </Text>
+          <Text
+            style={{
+              fontFamily: "Poppins-Regular",
+              marginTop: 4,
+              color: "white",
+              opacity: 0.85,
+            }}
+          >
+            Interact with your sisters.
+          </Text>
         </LinearGradient>
 
-        {/* TABS */}
         <Tabs />
-
-        {/* CONTENT */}
         <View style={tw`px-6 pb-10`}>{renderList()}</View>
       </Animated.ScrollView>
     </SafeAreaView>

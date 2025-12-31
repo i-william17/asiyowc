@@ -3,6 +3,24 @@ const Post = require('../models/Post');
 const Program = require('../models/Program');
 const { deleteFromCloudinary } = require('../middleware/upload');
 
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find()
+      .select('-password -twoFactorAuth.secret')
+      .sort({ 'profile.fullName': 1 });
+
+    res.json({
+      success: true,
+      data: { users }
+    });
+  } catch (error) {
+    console.error('❌ getAllUsers error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+}
 /* =====================================================
    GET MY PROFILE (USER + STATS)
 ===================================================== */

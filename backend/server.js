@@ -42,10 +42,15 @@ const server = http.createServer(app);
 // 🔹 Existing Socket.IO instance (kept)
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:8081",
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true
-  }
+    origin: "*",
+  },
+});
+
+app.set("io", io);
+
+app.use((req, res, next) => {
+  req.io = io;
+  next();
 });
 
 // 🔹 NEW: initialize socket using existing io instance

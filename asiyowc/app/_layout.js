@@ -52,13 +52,13 @@ function AppShell() {
 
     const inAuth = segments[0] === "(auth)";
 
-    if (!token && !inAuth) {
-      router.replace("/(auth)/login");
-    }
+    // if (!token && !inAuth) {
+    //   router.replace("/(auth)/login");
+    // }
 
-    if (token && inAuth) {
-      router.replace("/(tabs)");
-    }
+    // if (token && inAuth) {
+    //   router.replace("/(tabs)");
+    // }
   }, [token, appLoaded, segments]);
 
   if (!fontsLoaded) return null;

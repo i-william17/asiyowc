@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { Swipeable } from "react-native-gesture-handler";
+import { decode as atob } from "base-64";
 
 import {
   fetchGroupConversation,
@@ -29,9 +30,10 @@ import ConfirmModal from "../../components/community/ConfirmModal";
 
 import { connectSocket } from "../../services/socket";
 import tw from "../../utils/tw";
+import ShimmerLoader from "../../components/ui/ShimmerLoader";
 
 /* =====================================================
-   GROUP CHAT INTERFACE (PROFESSIONAL)
+   GROUP CHAT INTERFACE (PROFESSIONAL - FIXED VERSION)
 ===================================================== */
 
 export default function GroupChatInterface({ chatId }) {
@@ -42,8 +44,10 @@ export default function GroupChatInterface({ chatId }) {
   const typingStopTimerRef = useRef(null);
 
   const { token, user } = useSelector((s) => s.auth);
-  const { selectedChat, loadingDetail, error } = useSelector((s) => s.community);
+  const { selectedChat, loadingDetail } = useSelector((s) => s.community);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [inputHeight, setInputHeight] = useState(0);
+  const hasAutoScrolledRef = useRef(false);
 
   console.log("TOKEN AND USER:", token, user);
 
@@ -62,25 +66,13 @@ export default function GroupChatInterface({ chatId }) {
 
   const [text, setText] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
-
-  // Reply state (swipe-to-reply + long-press reply can reuse this)
   const [replyTo, setReplyTo] = useState(null);
-
-  // Presence / typing
   const [onlineUserIds, setOnlineUserIds] = useState(() => new Set());
   const [typingUserIds, setTypingUserIds] = useState(() => new Set());
-
-  // Long-press context menu
   const [contextMessage, setContextMessage] = useState(null);
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
-
-  // Pinning (local UI-safe)
   const [pinnedMessageIds, setPinnedMessageIds] = useState(() => new Set());
-
-  // Reactions (local UI-safe)
   const [reactionsByMessageId, setReactionsByMessageId] = useState({});
-
-  // Local “deleted for me” (UI-only)
   const [hiddenMessageIds, setHiddenMessageIds] = useState(() => new Set());
 
   const resolvedUserId = user?._id || getUserIdFromToken(token);
@@ -91,7 +83,7 @@ export default function GroupChatInterface({ chatId }) {
   const messages = selectedChat?.messages || [];
 
   /* =====================================================
-     HELPERS
+     HELPERS (FIXED ORDER)
   ===================================================== */
 
   const safeId = (v) => {
@@ -203,10 +195,9 @@ export default function GroupChatInterface({ chatId }) {
       return next;
     });
 
-    // Optional socket emit (won’t break if server ignores)
+    // Emit socket event
     try {
-      socketRef.current?.emit?.("message:pin", { chatId, messageId: message._id });
-      socketRef.current?.emit?.("chat:message:pin", { chatId, messageId: message._id });
+      socketRef.current?.emit("message:pin", { chatId, messageId: message._id });
     } catch { }
   };
 
@@ -233,7 +224,6 @@ export default function GroupChatInterface({ chatId }) {
 
       const nextForMsg = { ...current, [emoji]: Array.from(users) };
 
-      // Cleanup empty reaction buckets
       if ((nextForMsg[emoji] || []).length === 0) {
         const cleaned = { ...nextForMsg };
         delete cleaned[emoji];
@@ -243,14 +233,9 @@ export default function GroupChatInterface({ chatId }) {
       return { ...prev, [mid]: nextForMsg };
     });
 
-    // Optional socket emit (won’t break if server ignores)
+    // Emit socket event
     try {
-      socketRef.current?.emit?.("message:reaction", {
-        chatId,
-        messageId: message._id,
-        emoji,
-      });
-      socketRef.current?.emit?.("chat:message:reaction", {
+      socketRef.current?.emit("message:reaction", {
         chatId,
         messageId: message._id,
         emoji,
@@ -273,13 +258,11 @@ export default function GroupChatInterface({ chatId }) {
   };
 
   /* =====================================================
-     READ RECEIPTS (UI SAFE)
-     - Supports common shapes; if not present, will show single check.
+     READ RECEIPTS
   ===================================================== */
   const getReceiptState = (message, isMine) => {
     if (!isMine) return { icon: null, color: null };
 
-    // Try common patterns (your backend can map to any of these later)
     const delivered =
       !!message?.deliveredAt ||
       message?.status === "delivered" ||
@@ -290,30 +273,22 @@ export default function GroupChatInterface({ chatId }) {
       message?.status === "read" ||
       (Array.isArray(message?.readBy) && message.readBy.length > 0);
 
-    if (read) return { icon: "checkmark-done", color: "#2563EB" }; // blue ✓✓
-    if (delivered) return { icon: "checkmark-done", color: "#9CA3AF" }; // gray ✓✓
-    return { icon: "checkmark", color: "#9CA3AF" }; // gray ✓
+    if (read) return { icon: "checkmark-done", color: "#2563EB" };
+    if (delivered) return { icon: "checkmark-done", color: "#9CA3AF" };
+    return { icon: "checkmark", color: "#9CA3AF" };
   };
 
   /* =====================================================
      TYPING EMITS
   ===================================================== */
   const emitTypingStart = () => {
-    const myId = getMyId();
-    if (!socketRef.current || !chatId || !myId) return;
-
-    socketRef.current.emit("typing:start", { chatId, userId: myId });
-    socketRef.current.emit("chat:typing:start", { chatId, userId: myId });
-    socketRef.current.emit("chat:typing", { chatId, userId: myId, typing: true });
+    if (!socketRef.current || !groupId) return;
+    socketRef.current.emit("group:typing:start", { groupId });
   };
 
   const emitTypingStop = () => {
-    const myId = getMyId();
-    if (!socketRef.current || !chatId || !myId) return;
-
-    socketRef.current.emit("typing:stop", { chatId, userId: myId });
-    socketRef.current.emit("chat:typing:stop", { chatId, userId: myId });
-    socketRef.current.emit("chat:typing", { chatId, userId: myId, typing: false });
+    if (!socketRef.current || !groupId) return;
+    socketRef.current.emit("group:typing:stop", { groupId });
   };
 
   const scheduleTypingStop = () => {
@@ -324,18 +299,38 @@ export default function GroupChatInterface({ chatId }) {
   };
 
   /* =====================================================
-     WHATSAPP-LIKE DATE TAGS
+     MESSAGE PROCESSING (FIXED ORDER)
   ===================================================== */
+  const uniqueMessages = useMemo(() => {
+    const map = new Map();
+    messages.forEach((m) => {
+      if (m?._id) {
+        map.set(String(m._id), m);
+      }
+    });
+    return Array.from(map.values());
+  }, [messages]);
+
   const visibleMessages = useMemo(() => {
-    if (!hiddenMessageIds.size) return messages;
-    return messages.filter((m) => !hiddenMessageIds.has(String(m._id)));
-  }, [messages, hiddenMessageIds]);
+    if (!hiddenMessageIds.size) return uniqueMessages;
+    return uniqueMessages.filter(
+      (m) => !hiddenMessageIds.has(String(m._id))
+    );
+  }, [uniqueMessages, hiddenMessageIds]);
+
+  const sortedMessages = useMemo(() => {
+    return [...visibleMessages].sort(
+      (a, b) =>
+        new Date(a.createdAt || a.updatedAt) -
+        new Date(b.createdAt || b.updatedAt)
+    );
+  }, [visibleMessages]);
 
   const messagesWithDates = useMemo(() => {
     const result = [];
     let lastDate = null;
 
-    visibleMessages.forEach((msg) => {
+    sortedMessages.forEach((msg) => {
       const raw = msg?.createdAt || msg?.updatedAt;
       const msgDate = raw ? new Date(raw) : new Date();
 
@@ -355,7 +350,7 @@ export default function GroupChatInterface({ chatId }) {
     });
 
     return result;
-  }, [visibleMessages]);
+  }, [sortedMessages]);
 
   /* =====================================================
      LOAD GROUP CHAT
@@ -370,183 +365,113 @@ export default function GroupChatInterface({ chatId }) {
     }
   }, [groupId, chatId]);
 
+  useEffect(() => {
+    hasAutoScrolledRef.current = false;
+  }, [chatId]);
+
   /* =====================================================
-     SOCKET (REALTIME + ONLINE + TYPING)
+     SOCKET (REALTIME + ONLINE + TYPING - FIXED)
   ===================================================== */
   useEffect(() => {
-    if (!token || !chatId) return;
+    if (!token || !groupId) return;
 
     const socket = connectSocket(token);
     socketRef.current = socket;
 
-    const myId = getMyId() || getUserIdFromToken(token);
+    /* ================= JOIN GROUP ROOM ================= */
+    socket.emit("group:join", { groupId }, (res) => {
+      if (!res?.success) {
+        console.warn("❌ Failed to join group room", res);
+      }
+    });
 
-    // Join chat room
-    socket.emit("chat:join", { chatId });
-
-    // Presence: announce online (safe emits)
-    if (myId) {
-      socket.emit("user:online", { userId: myId });
-      socket.emit("presence:join", { chatId, userId: myId });
-      socket.emit("chat:presence:join", { chatId, userId: myId });
-    }
-
-    const onMessage = ({ chatId: id, message }) => {
-      if (id === chatId) {
+    /* ================= GROUP MESSAGES ================= */
+    const onGroupMessage = ({ groupId: gid, message }) => {
+      if (String(gid) === String(groupId)) {
         dispatch(pushIncomingMessage({ chatId, message }));
+        
+        // Auto-scroll after receiving message
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToEnd({ animated: true });
+        });
       }
     };
 
-    const onTypingStart = (payload) => {
-      const pid = payload?.chatId || payload?.roomId;
-      const uid = payload?.userId || payload?.senderId;
-      if (!uid) return;
-      if (pid && String(pid) !== String(chatId)) return;
+    socket.on("group:message:new", onGroupMessage);
 
-      const my = getMyId();
-      if (my && String(uid) === String(my)) return;
+    /* ================= GROUP TYPING ================= */
+    socket.on("group:typing:start", ({ userId }) => {
+      if (!userId) return;
+      if (String(userId) === String(resolvedUserId)) return;
 
       setTypingUserIds((prev) => {
         const next = new Set(prev);
-        next.add(String(uid));
+        next.add(String(userId));
         return next;
       });
-    };
+    });
 
-    const onTypingStop = (payload) => {
-      const pid = payload?.chatId || payload?.roomId;
-      const uid = payload?.userId || payload?.senderId;
-      if (!uid) return;
-      if (pid && String(pid) !== String(chatId)) return;
+    socket.on("group:typing:stop", ({ userId }) => {
+      if (!userId) return;
 
       setTypingUserIds((prev) => {
         const next = new Set(prev);
-        next.delete(String(uid));
+        next.delete(String(userId));
         return next;
       });
-    };
+    });
 
-    const onTypingGeneric = (payload) => {
-      const pid = payload?.chatId || payload?.roomId;
-      const uid = payload?.userId || payload?.senderId;
-      const typing = payload?.typing;
-      if (!uid) return;
-      if (pid && String(pid) !== String(chatId)) return;
+    /* ================= GROUP PRESENCE ================= */
+    // Initial presence check
+    socket.emit("group:presence:whois", { groupId }, (res) => {
+      if (res?.success) {
+        const onlineIds = new Set(res.data.map(u => String(u.userId)));
+        setOnlineUserIds(onlineIds);
+      }
+    });
 
-      const my = getMyId();
-      if (my && String(uid) === String(my)) return;
+    // Live presence updates
+    socket.on("group:user:online", ({ userId }) => {
+      setOnlineUserIds(prev => new Set(prev).add(String(userId)));
+    });
 
-      if (typing) onTypingStart(payload);
-      else onTypingStop(payload);
-    };
-
-    const onPresence = (payload) => {
-      const pid = payload?.chatId || payload?.roomId;
-      const uid = payload?.userId || payload?.id;
-      const online =
-        typeof payload?.online === "boolean"
-          ? payload.online
-          : typeof payload?.isOnline === "boolean"
-            ? payload.isOnline
-            : payload?.status === "online"
-              ? true
-              : payload?.status === "offline"
-                ? false
-                : null;
-
-      if (!uid) return;
-      if (pid && String(pid) !== String(chatId)) return;
-      if (online === null) return;
-
-      const my = getMyId();
-      if (my && String(uid) === String(my)) return;
-
-      setOnlineUserIds((prev) => {
+    socket.on("group:user:offline", ({ userId }) => {
+      setOnlineUserIds(prev => {
         const next = new Set(prev);
-        if (online) next.add(String(uid));
-        else next.delete(String(uid));
+        next.delete(String(userId));
         return next;
       });
-    };
+    });
 
-    const onPresenceList = (payload) => {
-      const pid = payload?.chatId || payload?.roomId;
-      const users = payload?.users || payload?.onlineUsers || payload?.membersOnline;
-      if (pid && String(pid) !== String(chatId)) return;
-      if (!Array.isArray(users)) return;
-
-      const my = getMyId();
-      setOnlineUserIds(() => {
-        const next = new Set(
-          users
-            .map((u) => String(u?.userId || u?._id || u?.id || u))
-            .filter(Boolean)
-            .filter((id) => !(my && String(id) === String(my)))
-        );
-        return next;
-      });
-    };
-
-    socket.on("message:new", onMessage);
-
-    socket.on("typing:start", onTypingStart);
-    socket.on("typing:stop", onTypingStop);
-    socket.on("chat:typing:start", onTypingStart);
-    socket.on("chat:typing:stop", onTypingStop);
-    socket.on("chat:typing", onTypingGeneric);
-
-    socket.on("presence:update", onPresence);
-    socket.on("chat:presence", onPresence);
-    socket.on("presence:list", onPresenceList);
-    socket.on("chat:presence:list", onPresenceList);
-
-    // Optional: receipts events (won’t break if server ignores)
-    const onReceipts = (payload) => {
-      // If your server later emits receipt updates, you can handle them here.
-      // This file remains safe even if unused.
-    };
-    socket.on("message:receipts", onReceipts);
-    socket.on("chat:message:receipts", onReceipts);
-
+    /* ================= CLEANUP ================= */
     return () => {
       try {
         emitTypingStop();
       } catch { }
 
-      socket.emit("chat:leave", { chatId });
-      if (myId) {
-        socket.emit("presence:leave", { chatId, userId: myId });
-        socket.emit("chat:presence:leave", { chatId, userId: myId });
-        socket.emit("user:offline", { userId: myId });
-      }
+      socket.emit("group:leave", { groupId });
 
-      socket.off("message:new", onMessage);
+      socket.off("group:message:new", onGroupMessage);
+      socket.off("group:typing:start");
+      socket.off("group:typing:stop");
+      socket.off("group:user:online");
+      socket.off("group:user:offline");
 
-      socket.off("typing:start", onTypingStart);
-      socket.off("typing:stop", onTypingStop);
-      socket.off("chat:typing:start", onTypingStart);
-      socket.off("chat:typing:stop", onTypingStop);
-      socket.off("chat:typing", onTypingGeneric);
-
-      socket.off("presence:update", onPresence);
-      socket.off("chat:presence", onPresence);
-      socket.off("presence:list", onPresenceList);
-      socket.off("chat:presence:list", onPresenceList);
-
-      socket.off("message:receipts", onReceipts);
-      socket.off("chat:message:receipts", onReceipts);
-
+      socket.disconnect();
       socketRef.current = null;
     };
-  }, [chatId, token]);
+  }, [groupId, token, chatId, resolvedUserId]);
 
+  /* =====================================================
+     LEAVE GROUP HANDLING
+  ===================================================== */
   const handleLeaveConfirmed = async () => {
     if (!groupId) return;
 
     try {
-      // 🔌 Gracefully leave socket room
+      // Gracefully leave socket room
       try {
-        socketRef.current?.emit("chat:leave", { chatId });
+        socketRef.current?.emit("group:leave", { groupId });
         socketRef.current?.disconnect();
       } catch { }
 
@@ -554,7 +479,7 @@ export default function GroupChatInterface({ chatId }) {
 
       setShowLeaveModal(false);
 
-      // ⬅️ Back to community
+      // Back to community
       router.replace("/community");
     } catch (err) {
       console.error("[GroupChat] ❌ Leave failed", err);
@@ -565,18 +490,8 @@ export default function GroupChatInterface({ chatId }) {
     }
   };
 
-
   /* =====================================================
-     AUTO SCROLL
-  ===================================================== */
-  useEffect(() => {
-    if (visibleMessages.length) {
-      setTimeout(() => listRef.current?.scrollToEnd?.({ animated: true }), 120);
-    }
-  }, [visibleMessages.length]);
-
-  /* =====================================================
-     SEND
+     SEND MESSAGE
   ===================================================== */
   const onSend = () => {
     const trimmed = text.trim();
@@ -602,7 +517,7 @@ export default function GroupChatInterface({ chatId }) {
   };
 
   /* =====================================================
-     HEADER STATUS TEXT (ONLINE / TYPING)
+     HEADER STATUS TEXT
   ===================================================== */
   const typingNames = useMemo(() => {
     const arr = Array.from(typingUserIds);
@@ -616,14 +531,14 @@ export default function GroupChatInterface({ chatId }) {
     if (typingNames.length) {
       if (typingNames.length === 1) return `${typingNames[0]} is typing…`;
       if (typingNames.length === 2) return `${typingNames[0]} & ${typingNames[1]} are typing…`;
-      return `Typing…`;
+      return `Several people are typing…`;
     }
-    if (onlineCount > 0) return `${onlineCount} online`;
+    if (onlineCount > 0) return `${onlineCount} online • ${members.length} members`;
     return `${members.length} members`;
   }, [typingNames, onlineCount, members.length]);
 
   /* =====================================================
-     DATE TAG UI
+     DATE TAG COMPONENT
   ===================================================== */
   const DateTag = React.memo(function DateTag({ label }) {
     return (
@@ -680,16 +595,26 @@ export default function GroupChatInterface({ chatId }) {
   };
 
   const doDeleteForEveryone = () => {
-    // UI-safe placeholder (won’t break). Hook your backend event when ready.
+    if (!contextMessage?._id) return;
     closeContextMenu();
+    
+    // Emit delete event
+    try {
+      socketRef.current?.emit("message:deleted", {
+        chatId,
+        messageId: contextMessage._id,
+      });
+    } catch { }
+    
     Alert.alert(
-      "Delete for everyone",
-      "Backend delete-for-everyone is not wired here yet. Add a socket/API endpoint, then call it from this action."
+      "Deleted",
+      "Message deleted for everyone",
+      [{ text: "OK" }]
     );
   };
 
   /* =====================================================
-     SWIPE-TO-REPLY ROW + LONG PRESS + REACTIONS + PIN + RECEIPTS
+     MESSAGE ROW COMPONENT
   ===================================================== */
   const MessageRow = React.memo(function MessageRow({ item }) {
     const swipeRef = useRef(null);
@@ -805,7 +730,7 @@ export default function GroupChatInterface({ chatId }) {
                 </Text>
               )}
 
-              {/* REPLY PREVIEW (IF MESSAGE IS A REPLY) */}
+              {/* REPLY PREVIEW */}
               {!!replyPreviewText && (
                 <View
                   style={[
@@ -847,10 +772,22 @@ export default function GroupChatInterface({ chatId }) {
                   color: isMine ? "#111827" : "#FFFFFF",
                 }}
               >
-                {String(item.ciphertext ?? "")}
+                {item.isDeletedForEveryone ? (
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Italic",
+                      fontSize: 13,
+                      color: isMine ? "#9CA3AF" : "#E9D5FF",
+                    }}
+                  >
+                    This message was deleted
+                  </Text>
+                ) : (
+                  String(item.ciphertext ?? "")
+                )}
               </Text>
 
-              {/* REACTIONS ROW (DISPLAY) */}
+              {/* REACTIONS ROW */}
               {reactionSummary.length > 0 && (
                 <View style={tw`mt-2 flex-row flex-wrap`}>
                   {reactionSummary.map((r) => (
@@ -898,7 +835,7 @@ export default function GroupChatInterface({ chatId }) {
   });
 
   /* =====================================================
-     LIST RENDERER (DATE TAG OR MESSAGE)
+     RENDER LIST ITEM
   ===================================================== */
   const renderListItem = ({ item }) => {
     if (item?.type === "date") return <DateTag label={item.label} />;
@@ -906,20 +843,26 @@ export default function GroupChatInterface({ chatId }) {
   };
 
   /* =====================================================
-     LOADING
+     LOADING STATE
   ===================================================== */
   if (loadingDetail || !selectedChat) {
     return (
-      <View style={tw`flex-1 items-center justify-center bg-white`}>
-        <Text style={{ fontFamily: "Poppins-Regular" }}>
-          {error ? String(error) : "Loading group chat…"}
-        </Text>
+      <View style={tw`flex-1 bg-gray-50`}>
+        <View
+          style={{
+            height: 110,
+            backgroundColor: "#6A1B9A",
+            borderBottomLeftRadius: 32,
+            borderBottomRightRadius: 32,
+          }}
+        />
+        <ShimmerLoader />
       </View>
     );
   }
 
   /* =====================================================
-     UI
+     MAIN UI RENDER
   ===================================================== */
   return (
     <KeyboardAvoidingView
@@ -927,21 +870,14 @@ export default function GroupChatInterface({ chatId }) {
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       {/* ================= HEADER ================= */}
-
       <View
         style={{
           backgroundColor: "#6A1B9A",
-
-          /* ✅ Safe top padding (notch-aware) */
           paddingTop: insets.top + 18,
-
-          /* ✅ Increased visual height */
           paddingBottom: 22,
           paddingHorizontal: 16,
-
           borderBottomLeftRadius: 32,
           borderBottomRightRadius: 32,
-
           elevation: 8,
           shadowColor: "#000",
           shadowOpacity: 0.18,
@@ -949,7 +885,7 @@ export default function GroupChatInterface({ chatId }) {
         }}
       >
         <View style={tw`flex-row items-center justify-between`}>
-          {/* ================= LEFT ================= */}
+          {/* LEFT SIDE */}
           <View style={tw`flex-row items-center flex-1`}>
             {/* Back */}
             <TouchableOpacity
@@ -1023,7 +959,7 @@ export default function GroupChatInterface({ chatId }) {
             </View>
           </View>
 
-          {/* ================= RIGHT ================= */}
+          {/* RIGHT MENU */}
           <View style={tw`relative`}>
             <TouchableOpacity
               onPress={() => setMenuOpen(!menuOpen)}
@@ -1039,8 +975,6 @@ export default function GroupChatInterface({ chatId }) {
           </View>
         </View>
       </View>
-
-
 
       {/* ================= PINNED PREVIEW ================= */}
       {pinnedMessages.length > 0 && (
@@ -1077,15 +1011,29 @@ export default function GroupChatInterface({ chatId }) {
       <FlatList
         ref={listRef}
         data={messagesWithDates}
-        keyExtractor={(i) => String(i._id)}
+        keyExtractor={(item, index) => {
+          if (item.type === "date") {
+            return `date-${item.label}-${index}`;
+          }
+          return `msg-${item._id}`;
+        }}
         renderItem={renderListItem}
-        contentContainerStyle={tw`px-4 pt-4 pb-44`}
         showsVerticalScrollIndicator={false}
-
-        // ✅ IMPORTANT FIX
-        refreshControl={null}
-        overScrollMode="never"      // Android
-        bounces={false}             // iOS
+        onContentSizeChange={() => {
+          if (!hasAutoScrolledRef.current) {
+            requestAnimationFrame(() => {
+              listRef.current?.scrollToEnd({ animated: false });
+              hasAutoScrolledRef.current = true;
+            });
+          }
+        }}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 12,
+          paddingBottom: inputHeight + 24,
+        }}
+        overScrollMode="never"
+        bounces={false}
       />
 
       {/* ================= LONG PRESS MENU ================= */}
@@ -1103,12 +1051,11 @@ export default function GroupChatInterface({ chatId }) {
             onPress={() => { }}
             style={tw`bg-white rounded-2xl w-full max-w-[340px] overflow-hidden border border-gray-200`}
           >
-            {/* Quick reactions row */}
+            {/* Quick reactions */}
             <View style={tw`px-4 py-3 flex-row items-center justify-between`}>
               <Text style={{ fontFamily: "Poppins-SemiBold", color: "#111827" }}>
                 React
               </Text>
-
               <View style={tw`flex-row items-center`}>
                 {["❤️", "😂", "👍", "🔥"].map((e) => (
                   <Pressable
@@ -1202,7 +1149,7 @@ export default function GroupChatInterface({ chatId }) {
         </Pressable>
       </Modal>
 
-      {/* ================= REPLY BAR (when replying) ================= */}
+      {/* ================= REPLY BAR ================= */}
       {replyTo && (
         <View
           style={tw`absolute left-0 right-0 bottom-16 bg-white border-t border-gray-200 px-4 py-3 flex-row items-center`}
@@ -1227,6 +1174,12 @@ export default function GroupChatInterface({ chatId }) {
 
       {/* ================= INPUT ================= */}
       <View
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          if (h !== inputHeight) {
+            setInputHeight(h);
+          }
+        }}
         style={tw`absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 flex-row items-center`}
       >
         <TextInput
@@ -1256,6 +1209,97 @@ export default function GroupChatInterface({ chatId }) {
         </TouchableOpacity>
       </View>
 
+      {/* ================= GROUP MENU MODAL ================= */}
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <Pressable
+          style={{
+            flex: 1,
+            backgroundColor: "transparent",
+          }}
+          onPress={() => setMenuOpen(false)}
+        >
+          <Pressable
+            onPress={() => { }}
+            style={{
+              position: "absolute",
+              top: insets.top + 70,
+              right: 16,
+              backgroundColor: "#FFFFFF",
+              borderRadius: 16,
+              width: 200,
+              borderWidth: 1,
+              borderColor: "#E5E7EB",
+              elevation: 50,
+              zIndex: 999999,
+              shadowColor: "#000",
+              shadowOpacity: 0.25,
+              shadowRadius: 16,
+            }}
+          >
+            {/* Group Info */}
+            <Pressable
+              style={tw`px-4 py-3`}
+              onPress={() => {
+                setMenuOpen(false);
+                router.push({
+                  pathname: "/community/group/[id]",
+                  params: { id: group?._id },
+                });
+              }}
+            >
+              <Text style={{ fontFamily: "Poppins-Regular" }}>
+                Group Info
+              </Text>
+            </Pressable>
+
+            {/* Report */}
+            <Pressable
+              style={tw`px-4 py-3`}
+              onPress={() => {
+                setMenuOpen(false);
+                router.push({
+                  pathname: "/modals/report",
+                  params: {
+                    type: "group",
+                    targetId: group?._id,
+                  },
+                });
+              }}
+            >
+              <Text style={{ fontFamily: "Poppins-Regular" }}>
+                Report Group
+              </Text>
+            </Pressable>
+
+            <View style={tw`h-px bg-gray-200`} />
+
+            {/* Leave Group */}
+            <Pressable
+              style={tw`px-4 py-3`}
+              onPress={() => {
+                setMenuOpen(false);
+                setShowLeaveModal(true);
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: "Poppins-SemiBold",
+                  color: "#DC2626",
+                }}
+              >
+                Leave Group
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* ================= LEAVE CONFIRM MODAL ================= */}
       <ConfirmModal
         visible={showLeaveModal}
@@ -1267,103 +1311,6 @@ export default function GroupChatInterface({ chatId }) {
         onCancel={() => setShowLeaveModal(false)}
         onConfirm={handleLeaveConfirmed}
       />
-
-      <Modal
-  visible={menuOpen}
-  transparent
-  animationType="fade"
-  statusBarTranslucent
-  onRequestClose={() => setMenuOpen(false)}
->
-  {/* BACKDROP */}
-  <Pressable
-    style={{
-      flex: 1,
-      backgroundColor: "transparent",
-    }}
-    onPress={() => setMenuOpen(false)} // 👈 outside click closes
-  >
-    {/* MENU */}
-    <Pressable
-      onPress={() => {}}
-      style={{
-        position: "absolute",
-        top: insets.top + 70,
-        right: 16,
-
-        backgroundColor: "#FFFFFF",
-        borderRadius: 16,
-        width: 200,
-
-        borderWidth: 1,
-        borderColor: "#E5E7EB",
-
-        elevation: 50,        // Android
-        zIndex: 999999,       // iOS
-        shadowColor: "#000",
-        shadowOpacity: 0.25,
-        shadowRadius: 16,
-      }}
-    >
-      {/* Group Info */}
-      <Pressable
-        style={tw`px-4 py-3`}
-        onPress={() => {
-          setMenuOpen(false);
-          router.push({
-            pathname: "/community/group/[id]",
-            params: { id: group?._id },
-          });
-        }}
-      >
-        <Text style={{ fontFamily: "Poppins-Regular" }}>
-          Group Info
-        </Text>
-      </Pressable>
-
-      {/* Report */}
-      <Pressable
-        style={tw`px-4 py-3`}
-        onPress={() => {
-          setMenuOpen(false);
-          router.push({
-            pathname: "/modals/report",
-            params: {
-              type: "group",
-              targetId: group?._id,
-            },
-          });
-        }}
-      >
-        <Text style={{ fontFamily: "Poppins-Regular" }}>
-          Report Group
-        </Text>
-      </Pressable>
-
-      <View style={tw`h-px bg-gray-200`} />
-
-      {/* Leave Group */}
-      <Pressable
-        style={tw`px-4 py-3`}
-        onPress={() => {
-          setMenuOpen(false);
-          setShowLeaveModal(true);
-        }}
-      >
-        <Text
-          style={{
-            fontFamily: "Poppins-SemiBold",
-            color: "#DC2626",
-          }}
-        >
-          Leave Group
-        </Text>
-      </Pressable>
-    </Pressable>
-  </Pressable>
-</Modal>
-
-
     </KeyboardAvoidingView>
   );
 }

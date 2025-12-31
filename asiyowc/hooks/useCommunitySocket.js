@@ -1,10 +1,7 @@
 // asiyowc/hooks/useCommunitySocket.js
 import { useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import {
-  connectSocket,
-  disconnectSocket,
-} from "../services/socket";
+import { connectSocket } from "../services/socket";
 
 import {
   setUserOnline,
@@ -12,14 +9,23 @@ import {
   hydratePresenceBatch,
 } from "../store/slices/presenceSlice";
 
-import { pushIncomingMessage } from "../store/slices/communitySlice";
+import {
+  pushIncomingMessage,
+  // ✅ You MUST have these in your communitySlice:
+  // - updateMessageReactions
+  // - markMessageDeleted
+  // If you don’t yet, I’ll give you exact reducers next.
+  updateMessageReactions,
+  markMessageDeleted,
+} from "../store/slices/communitySlice";
 
 /* ============================================================
-   COMMUNITY SOCKET HOOK
-   - Global socket lifecycle
-   - Presence (online / offline / lastSeen)
-   - Incoming messages (group + DM)
-   - Safe reconnect handling
+   COMMUNITY SOCKET HOOK (FIXED)
+   - Single connection
+   - No duplicate listeners
+   - Safe across Fast Refresh
+   - Presence + messages + group messages
+   - Reaction + delete realtime
 ============================================================ */
 
 export default function useCommunitySocket() {
@@ -27,12 +33,19 @@ export default function useCommunitySocket() {
   const token = useSelector((s) => s.auth.token);
 
   const socketRef = useRef(null);
+  const bootedRef = useRef(false);
 
   useEffect(() => {
+    // If token is missing, do nothing.
+    // Logout flow should explicitly disconnect socket elsewhere.
     if (!token) return;
 
+    // ✅ Prevent double-binding listeners
+    if (bootedRef.current) return;
+    bootedRef.current = true;
+
     /* =====================================================
-       CONNECT
+       CONNECT (singleton)
     ===================================================== */
     const socket = connectSocket(token);
     socketRef.current = socket;
@@ -41,23 +54,33 @@ export default function useCommunitySocket() {
        SOCKET CONNECT
     ===================================================== */
     const onConnect = () => {
-      // Optional global join (backend already supports this)
+      // Join all chats (DM rooms)
       socket.emit("chat:joinAll", {}, () => {});
+
+      // ✅ Hydrate presence (your backend supports presence:hydrate via callback)
+      socket.emit("presence:hydrate", {}, (resp) => {
+        const data = resp?.data?.online ? resp.data : resp?.data?.data;
+        // expected: { online: { userId: true }, lastSeen?: { userId: iso } }
+        if (resp?.success && data) {
+          dispatch(
+            hydratePresenceBatch({
+              online: data.online || {},
+              lastSeen: data.lastSeen || {},
+            })
+          );
+        }
+      });
     };
 
     /* =====================================================
-       PRESENCE EVENTS
+       PRESENCE EVENTS (backend emits user:online/offline)
     ===================================================== */
-
-    // Single user online
     const onUserOnline = (payload = {}) => {
       const userId = payload.userId || payload.id;
       if (!userId) return;
-
       dispatch(setUserOnline({ userId }));
     };
 
-    // Single user offline
     const onUserOffline = (payload = {}) => {
       const userId = payload.userId || payload.id;
       if (!userId) return;
@@ -70,102 +93,86 @@ export default function useCommunitySocket() {
       );
     };
 
-    // Batch presence list (on join / reconnect)
-    const onPresenceList = (payload = {}) => {
-      const users =
-        payload.users ||
-        payload.onlineUsers ||
-        payload.members ||
-        [];
-
-      if (!Array.isArray(users)) return;
-
-      const online = {};
-      const lastSeen = {};
-
-      users.forEach((u) => {
-        const id =
-          u?.userId ||
-          u?._id ||
-          u?.id ||
-          u;
-
-        if (!id) return;
-
-        if (
-          u?.online === true ||
-          u?.status === "online"
-        ) {
-          online[id] = true;
-        } else {
-          lastSeen[id] =
-            u?.lastSeen || new Date().toISOString();
-        }
-      });
-
-      dispatch(
-        hydratePresenceBatch({
-          online,
-          lastSeen,
-        })
-      );
-    };
-
     /* =====================================================
-       INCOMING MESSAGES
+       INCOMING MESSAGES (DM)
+       backend emits: message:new { chatId, message }
     ===================================================== */
     const onIncomingMessage = (payload = {}) => {
       const { chatId, message } = payload || {};
       if (!chatId || !message) return;
-
       dispatch(pushIncomingMessage({ chatId, message }));
     };
 
     /* =====================================================
-       REGISTER LISTENERS
+       INCOMING GROUP MESSAGES
+       backend emits: group:message:new { groupId, chatId, message }
+    ===================================================== */
+    const onIncomingGroupMessage = (payload = {}) => {
+      const { chatId, message } = payload || {};
+      if (!chatId || !message) return;
+      dispatch(pushIncomingMessage({ chatId, message }));
+    };
+
+    /* =====================================================
+       REACTIONS REALTIME
+       backend emits: message:reaction:update { chatId, message }
+    ===================================================== */
+    const onReactionUpdate = (payload = {}) => {
+      const { chatId, message } = payload || {};
+      if (!chatId || !message) return;
+      dispatch(updateMessageReactions({ chatId, message }));
+    };
+
+    /* =====================================================
+       DELETE REALTIME
+       backend emits: message:deleted { chatId, messageId, mode }
+    ===================================================== */
+    const onMessageDeleted = (payload = {}) => {
+      const { chatId, messageId, mode } = payload || {};
+      if (!chatId || !messageId) return;
+      dispatch(markMessageDeleted({ chatId, messageId, mode }));
+    };
+
+    /* =====================================================
+       REGISTER LISTENERS (AUTHORITATIVE)
     ===================================================== */
     socket.on("connect", onConnect);
 
-    // Presence (support all common variants)
-    socket.on("presence:online", onUserOnline);
+    // Presence from backend/presence.js
     socket.on("user:online", onUserOnline);
-    socket.on("chat:user:online", onUserOnline);
-
-    socket.on("presence:offline", onUserOffline);
     socket.on("user:offline", onUserOffline);
-    socket.on("chat:user:offline", onUserOffline);
 
-    socket.on("presence:list", onPresenceList);
-    socket.on("chat:presence:list", onPresenceList);
-
-    // Messages
-    socket.on("chat:newMessage", onIncomingMessage);
+    // DM messages
     socket.on("message:new", onIncomingMessage);
+
+    // Group messages (emitted by controller)
+    socket.on("group:message:new", onIncomingGroupMessage);
+
+    // Reactions + delete realtime (controller emits these)
+    socket.on("message:reaction:update", onReactionUpdate);
+    socket.on("message:deleted", onMessageDeleted);
 
     /* =====================================================
        CLEANUP
+       ✅ Remove listeners only
+       ❌ Do NOT disconnect socket here (prevents killing realtime)
     ===================================================== */
     return () => {
       try {
         socket.off("connect", onConnect);
 
-        socket.off("presence:online", onUserOnline);
         socket.off("user:online", onUserOnline);
-        socket.off("chat:user:online", onUserOnline);
-
-        socket.off("presence:offline", onUserOffline);
         socket.off("user:offline", onUserOffline);
-        socket.off("chat:user:offline", onUserOffline);
 
-        socket.off("presence:list", onPresenceList);
-        socket.off("chat:presence:list", onPresenceList);
-
-        socket.off("chat:newMessage", onIncomingMessage);
         socket.off("message:new", onIncomingMessage);
+        socket.off("group:message:new", onIncomingGroupMessage);
+
+        socket.off("message:reaction:update", onReactionUpdate);
+        socket.off("message:deleted", onMessageDeleted);
       } catch {}
 
-      disconnectSocket();
       socketRef.current = null;
+      bootedRef.current = false;
     };
   }, [token, dispatch]);
 }

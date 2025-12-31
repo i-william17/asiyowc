@@ -125,14 +125,11 @@ export const communityService = {
       throw new Error("Encrypted message payload required");
     }
 
-    return fetch(
-      `${server}/community/groups/${gid}/chat/${cid}/messages`,
-      {
-        method: "POST",
-        headers: headers(token),
-        body: JSON.stringify(payload),
-      }
-    ).then(json);
+    return fetch(`${server}/community/groups/${gid}/chat/${cid}/messages`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify(payload),
+    }).then(json);
   },
 
   deleteGroupMessage: (groupId, chatId, messageId, token) => {
@@ -146,6 +143,44 @@ export const communityService = {
       {
         method: "DELETE",
         headers: headers(token),
+      }
+    ).then(json);
+  },
+
+  /* ============================================================
+     🔥 GROUP MESSAGE ACTIONS (ADDED, NON-BREAKING)
+  ============================================================ */
+
+  // Pin a message in a group chat (admin/creator)
+  pinGroupMessage: (groupId, chatId, messageId, token) => {
+    const gid = normalizeId(groupId);
+    const cid = normalizeId(chatId);
+    const mid = normalizeId(messageId);
+    if (!gid || !cid || !mid) throw new Error("Invalid ids");
+
+    return fetch(
+      `${server}/community/groups/${gid}/chat/${cid}/messages/${mid}/pin`,
+      {
+        method: "POST",
+        headers: headers(token),
+      }
+    ).then(json);
+  },
+
+  // React to a group message (if you wire it in controller)
+  reactToGroupMessage: (groupId, chatId, messageId, emoji, token) => {
+    const gid = normalizeId(groupId);
+    const cid = normalizeId(chatId);
+    const mid = normalizeId(messageId);
+    if (!gid || !cid || !mid) throw new Error("Invalid ids");
+    if (!emoji) throw new Error("Emoji required");
+
+    return fetch(
+      `${server}/community/groups/${gid}/chat/${cid}/messages/${mid}/react`,
+      {
+        method: "POST",
+        headers: headers(token),
+        body: JSON.stringify({ emoji }),
       }
     ).then(json);
   },
@@ -197,6 +232,77 @@ export const communityService = {
       method: "POST",
       headers: headers(token),
       body: JSON.stringify(payload),
+    }).then(json);
+  },
+
+  /* ============================================================
+     🔥 DM MESSAGE ACTIONS (ADDED, NON-BREAKING)
+  ============================================================ */
+
+  // React to a message (controller already has reactToMessage)
+  reactToMessage: (chatId, messageId, emoji, token) => {
+    const cid = normalizeId(chatId);
+    const mid = normalizeId(messageId);
+    if (!cid || !mid) throw new Error("Invalid chat/message id");
+    if (!emoji) throw new Error("Emoji required");
+
+    return fetch(`${server}/community/chats/${cid}/messages/${mid}/react`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify({ emoji }),
+    }).then(json);
+  },
+
+  // Soft delete (me / everyone) (controller already has softDeleteMessage)
+  softDeleteMessage: (chatId, messageId, mode = "me", token) => {
+    const cid = normalizeId(chatId);
+    const mid = normalizeId(messageId);
+    if (!cid || !mid) throw new Error("Invalid chat/message id");
+    if (!["me", "everyone"].includes(mode)) {
+      throw new Error("Invalid mode: use 'me' or 'everyone'");
+    }
+
+    return fetch(`${server}/community/chats/${cid}/messages/${mid}/soft-delete`, {
+      method: "PATCH",
+      headers: headers(token),
+      body: JSON.stringify({ mode }),
+    }).then(json);
+  },
+
+  // Mark as read (controller already has markMessageAsRead)
+  markMessageAsRead: (chatId, messageId, token) => {
+    const cid = normalizeId(chatId);
+    const mid = normalizeId(messageId);
+    if (!cid || !mid) throw new Error("Invalid chat/message id");
+
+    return fetch(`${server}/community/chats/${cid}/messages/${mid}/read`, {
+      method: "POST",
+      headers: headers(token),
+    }).then(json);
+  },
+
+  // Edit message (controller already has editMessageById)
+  editMessageById: (chatId, messageId, payload, token) => {
+    const cid = normalizeId(chatId);
+    const mid = normalizeId(messageId);
+    if (!cid || !mid) throw new Error("Invalid chat/message id");
+
+    return fetch(`${server}/community/chats/${cid}/messages/${mid}`, {
+      method: "PUT",
+      headers: headers(token),
+      body: JSON.stringify(payload || {}),
+    }).then(json);
+  },
+
+  // Delete message (hard delete) (controller already has deleteMessageById)
+  deleteMessageById: (chatId, messageId, token) => {
+    const cid = normalizeId(chatId);
+    const mid = normalizeId(messageId);
+    if (!cid || !mid) throw new Error("Invalid chat/message id");
+
+    return fetch(`${server}/community/chats/${cid}/messages/${mid}`, {
+      method: "DELETE",
+      headers: headers(token),
     }).then(json);
   },
 

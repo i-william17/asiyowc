@@ -19,6 +19,7 @@ import AnimatedButton from '../../components/ui/AnimatedButton';
 import AnimatedBackground from '../../components/animations/AnimatedBackground';
 import { MaterialIcons, FontAwesome5, Ionicons, Feather } from '@expo/vector-icons';
 import tw from '../../utils/tw';
+import { Platform } from 'react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -28,6 +29,7 @@ const OnboardingScreen = () => {
   const [step, setStep] = useState(1);
   const [selectedInterests, setSelectedInterests] = useState([]);
   const [selectedRole, setSelectedRole] = useState('');
+  const Container = Platform.OS === 'web' ? View : SafeAreaView;
 
   const fadeAnim = useState(new Animated.Value(1))[0];
   const slideAnim = useState(new Animated.Value(0))[0];
@@ -97,12 +99,12 @@ const OnboardingScreen = () => {
       icon: 'public',
       library: MaterialIcons
     },
-        {
+    {
       id: 'learner',
       name: 'Learner',
       description: 'Get up and going',
       gradient: ['#44B5', '#44A0'],
-      icon: 'public',
+      icon: 'book',
       library: MaterialIcons
     },
   ];
@@ -529,13 +531,23 @@ const OnboardingScreen = () => {
   };
 
   return (
-    <SafeAreaView style={tw`flex-1 bg-white`}>
-      <AnimatedBackground type="floating" opacity={0.08} speed={0.2} />
+    <Container style={tw`flex-1 bg-white`}>
+      {Platform.OS !== 'web' && (
+        <AnimatedBackground
+          type="floating"
+          opacity={0.08}
+          speed={0.2}
+        />
+      )}
 
       {/* Enhanced Header with Professional Gradient */}
       <LinearGradient
         colors={['#1E3A8A', '#3730A3', '#6A1B9A']}
-        style={tw`h-52 mt-[-750] rounded-b-3xl shadow-lg`}
+        style={[
+          tw`h-52 rounded-b-3xl shadow-lg`,
+          Platform.OS === 'web' ? { marginTop: 0 } : tw`mt-[-750]`,
+        ]}
+
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
@@ -584,7 +596,7 @@ const OnboardingScreen = () => {
           {renderStep()}
         </Animated.View>
       </View>
-    </SafeAreaView>
+    </Container>
   );
 };
 

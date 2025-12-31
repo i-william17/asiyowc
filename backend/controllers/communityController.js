@@ -125,18 +125,24 @@ const ensureGroupChatExistsAndSynced = async (group) => {
     chat = await Chat.findById(group.chat);
   }
 
+  // 🔒 Normalize member IDs safely
+  const memberIds = group.members
+    .map((m) => (typeof m === 'object' ? m.user : m))
+    .filter(Boolean)
+    .map(String);
+
   if (!chat || chat.isRemoved) {
     chat = await Chat.create({
       type: 'group',
-      participants: group.members.map(m => m.user),
+      participants: memberIds,
       messages: []
     });
 
     group.chat = chat._id;
     await group.save();
+    return chat;
   }
 
-  const memberIds = group.members.map((m) => String(m.user));
   const chatParticipants = chat.participants.map(String);
 
   const toAdd = memberIds.filter((id) => !chatParticipants.includes(id));
@@ -155,7 +161,6 @@ const ensureGroupChatExistsAndSynced = async (group) => {
 
   return chat;
 };
-
 
 const sliceMessagesProjection = (skip, limit) => ({
   messages: { $slice: [skip, limit] }
@@ -279,76 +284,48 @@ exports.getGroups = async (req, res) => {
 // 3. Get group by id (full group info)
 exports.getGroupById = async (req, res) => {
   try {
-    const userId = req.user?.id || req.user?._id;
+    const userId = req.user?.id;
     const { groupId } = req.params;
 
-    console.log("[getGroupById] userId:", userId);
-    console.log("[getGroupById] groupId:", groupId);
-
     if (!mongoose.Types.ObjectId.isValid(groupId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid group ID",
-      });
+      return bad(res, 'Invalid group ID');
     }
 
     const group = await Group.findOne({
       _id: groupId,
-      isRemoved: false,
+      isRemoved: false
     })
-      .populate("createdBy", "profile.fullName profile.avatar")
-      .populate("admins", "profile.fullName profile.avatar")
-      .lean();
+      .populate('createdBy', 'profile.fullName profile.avatar')
+      .populate('admins', 'profile.fullName profile.avatar')
+      .populate('members.user', 'profile.fullName profile.avatar');
 
-    if (!group) {
-      return res.status(404).json({
-        success: false,
-        message: "Group not found",
-      });
-    }
+    if (!group) return notFound(res, 'Group not found');
 
-    const isMember = userId
-      ? group.members.some(
-          (m) => String(m.user) === String(userId)
-        )
-      : false;
+    const isMember = group.members.some(
+      (m) => String(m.user?._id) === String(userId)
+    );
 
-    const isAdmin = userId
-      ? String(group.createdBy?._id) === String(userId) ||
-        group.admins.some((a) => String(a._id) === String(userId))
-      : false;
+    const isAdmin =
+      String(group.createdBy?._id) === String(userId) ||
+      group.admins.some((a) => String(a._id) === String(userId));
 
-    const members = await User.find({
-      _id: { $in: group.members.map((m) => m.user) },
-    }).select("profile.fullName profile.avatar");
+    const members = group.members.map((m) => ({
+      _id: m.user?._id,
+      fullName: m.user?.profile?.fullName,
+      avatar: m.user?.profile?.avatar,
+      joinedAt: m.joinedAt
+    }));
 
-    const chat = isMember
-      ? await Chat.findOne({ group: group._id })
-      : null;
-
-    res.json({
-      success: true,
-      data: {
-        ...group,
-        isMember,
-        isAdmin,
-        membersCount: group.members.length,
-        members: members.map((u, i) => ({
-          _id: u._id,
-          fullName: u.profile.fullName,
-          avatar: u.profile.avatar,
-          joinedAt: group.members[i]?.joinedAt,
-        })),
-        chatId: group.chat || null,
-        posts: [],
-      },
+    return ok(res, {
+      ...group.toObject(),
+      members,
+      isMember,
+      isAdmin,
+      membersCount: members.length,
+      chatId: group.chat || null
     });
   } catch (err) {
-    console.error("[getGroupById] ❌ ERROR:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error loading group",
-    });
+    return serverError(res, err);
   }
 };
 
@@ -358,74 +335,47 @@ exports.joinGroup = async (req, res) => {
     const userId = req.user?.id || req.user?._id;
     const { groupId } = req.params;
 
-    console.log("[joinGroup] userId:", userId);
-    console.log("[joinGroup] groupId:", groupId);
-
     if (!mongoose.Types.ObjectId.isValid(groupId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid group ID",
-      });
+      return bad(res, 'Invalid group ID');
     }
 
     const group = await Group.findOne({
       _id: groupId,
-      isRemoved: false,
+      isRemoved: false
     });
 
-    if (!group) {
-      return res.status(404).json({
-        success: false,
-        message: "Group not found",
-      });
-    }
+    if (!group) return notFound(res, 'Group not found');
 
     const alreadyMember = group.members.some(
       (m) => String(m.user) === String(userId)
     );
 
     if (alreadyMember) {
-      return res.status(400).json({
-        success: false,
-        message: "User already a member of this group",
-      });
+      return bad(res, 'User already a member of this group');
     }
 
     group.members.push({
       user: userId,
-      joinedAt: new Date(),
+      joinedAt: new Date()
     });
 
     await group.save();
 
-    // Ensure group chat exists
-    let chat = await Chat.findOne({ group: group._id });
+    // ✅ AUTHORITATIVE chat creation
+    const chat = await ensureGroupChatExistsAndSynced(group);
 
-    if (!chat) {
-      chat = await Chat.create({
-        type: "group",
-        group: group._id,
-        participants: group.members.map((m) => m.user),
-      });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        _id: group._id,
-        isMember: true,
-        chatId: chat._id,
-        membersCount: group.members.length,
-      },
+    return ok(res, {
+      _id: group._id,
+      isMember: true,
+      chatId: chat._id,
+      membersCount: group.members.length
     });
   } catch (err) {
-    console.error("[joinGroup] ❌ ERROR:", err);
-    res.status(500).json({
-      success: false,
-      message: "Server error joining group",
-    });
+    console.error('[joinGroup]', err);
+    return serverError(res, err);
   }
 };
+
 
 // 6. Leave group
 exports.leaveGroup = async (req, res) => {
@@ -471,6 +421,7 @@ exports.leaveGroup = async (req, res) => {
     );
 
     await group.save();
+    await ensureGroupChatExistsAndSynced(group);
 
     res.json({
       success: true,
@@ -644,51 +595,37 @@ exports.getGroupMessages = async (req, res) => {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
-    const { groupId, chatId } = req.params;
-    if (!ensureObjectIdParam(res, groupId, 'groupId')) return;
-    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
-
-    const group = await Group.findOne({ _id: groupId, isRemoved: false });
-    const vis = await ensureGroupVisibility(group, user.id);
-    if (!vis.ok) {
-      return vis.code === 403 ? forbidden(res, vis.message) : notFound(res, vis.message);
-    }
-
-    // Ensure chat belongs to group snapshot (synced participants)
-    await ensureGroupChatExistsAndSynced(group);
-
+    const { chatId } = req.params;
     const { page, limit, skip } = parsePage(req);
 
     const chat = await Chat.findOne(
-      {
-        _id: chatId,
-        type: 'group',
-        isRemoved: false
-      },
-      sliceMessagesProjection(skip, limit)
-    ).populate('messages.sender', 'profile.fullName profile.avatar');
+      { _id: chatId, participants: user.id, isRemoved: false },
+      { messages: { $slice: [skip, limit] } }
+    )
+      .populate({
+        path: 'messages.sender',
+        select: 'profile.fullName profile.avatar'
+      })
+      .populate({
+        path: 'messages.replyTo',
+        populate: {
+          path: 'sender',
+          select: 'profile.fullName profile.avatar'
+        }
+      })
+      .populate({
+        path: 'messages.reactions.user',
+        select: 'profile.fullName profile.avatar'
+      });
 
     if (!chat) return notFound(res, 'Chat not found');
 
-    // 🔐 explicit access check
-    const isParticipant = chat.participants.some(
-      (p) => String(p) === String(user.id)
-    );
-
-    if (!isParticipant) {
-      return forbidden(res, 'Not a participant in this chat');
-    }
-
-    const totalMessages = await Chat.findById(chatId).select('messages').lean();
-    const total = totalMessages?.messages?.length || 0;
-
-    return ok(res, chat.messages || [], null, {
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
-    });
-  } catch (error) {
-    return serverError(res, error);
+    return ok(res, chat.messages);
+  } catch (e) {
+    return serverError(res, e);
   }
 };
+
 
 // 5. Send message in group chat
 exports.sendGroupMessage = async (req, res) => {
@@ -700,52 +637,54 @@ exports.sendGroupMessage = async (req, res) => {
     if (!ensureObjectIdParam(res, groupId, 'groupId')) return;
     if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
 
-    const { ciphertext, iv, tag, type = 'text', sharedPost } = req.body;
-
-    if (!ciphertext || !iv || !tag) return bad(res, 'ciphertext, iv, and tag are required');
-    if (!['text', 'share'].includes(type)) return bad(res, 'Invalid message type');
-
-    const group = await Group.findOne({ _id: groupId, isRemoved: false });
-    const vis = await ensureGroupVisibility(group, user.id);
-    if (!vis.ok) {
-      return vis.code === 403 ? forbidden(res, vis.message) : notFound(res, vis.message);
-    }
-
-    // Ensure synced
-    await ensureGroupChatExistsAndSynced(group);
-
-    // Validate shared post if share
-    if (type === 'share') {
-      if (!sharedPost || !isValidObjectId(sharedPost)) return bad(res, 'sharedPost is required');
-      const postExists = await Post.exists({ _id: sharedPost, isRemoved: false });
-      if (!postExists) return notFound(res, 'Post not found');
-    }
-
-    const updated = await Chat.findOneAndUpdate(
-      { _id: chatId, type: 'group', isRemoved: false, participants: user.id },
+    const chat = await Chat.findOneAndUpdate(
+      {
+        _id: chatId,
+        type: 'group',
+        isRemoved: false,
+        participants: user.id
+      },
       {
         $push: {
           messages: {
             sender: user.id,
-            ciphertext,
-            iv,
-            tag,
-            type,
-            sharedPost: type === 'share' ? sharedPost : null
+            ciphertext: req.body.ciphertext,
+            iv: req.body.iv,
+            tag: req.body.tag,
+            type: req.body.type || 'text',
+            replyTo: req.body.replyTo || null
           }
         },
         $set: { updatedAt: new Date() }
       },
       { new: true }
-    ).populate('messages.sender', 'name avatar');
+    )
+      .populate('messages.sender', 'profile.fullName profile.avatar')
+      .populate({
+        path: 'messages.replyTo',
+        populate: {
+          path: 'sender',
+          select: 'profile.fullName profile.avatar'
+        }
+      })
+      .populate('messages.reactions.user', 'profile.fullName profile.avatar');
 
-    if (!updated) return notFound(res, 'Chat not found or access denied');
+    if (!chat) return notFound(res, 'Chat not found');
 
-    return ok(res, updated.messages[updated.messages.length - 1], 'Message sent');
+    const message = chat.messages.at(-1);
+
+    /* ✅ REALTIME (SAME AS DM) */
+    req.io.to(`chat:${chatId}`).emit('message:new', {
+      chatId,
+      message
+    });
+
+    return ok(res, message, 'Message sent');
   } catch (error) {
     return serverError(res, error);
   }
 };
+
 
 // 5. Delete message in group chat
 exports.deleteGroupMessage = async (req, res) => {
@@ -764,24 +703,37 @@ exports.deleteGroupMessage = async (req, res) => {
       return vis.code === 403 ? forbidden(res, vis.message) : notFound(res, vis.message);
     }
 
-    const chat = await Chat.findOne({ _id: chatId, type: 'group', isRemoved: false });
+    const chat = await Chat.findOne({
+      _id: chatId,
+      type: 'group',
+      isRemoved: false,
+      'messages._id': messageId
+    });
+
     if (!chat) return notFound(res, 'Chat not found');
 
-    // Find message to authorize deletion
-    const msg = (chat.messages || []).find((m) => String(m._id) === String(messageId));
-    if (!msg) return notFound(res, 'Message not found');
+    const msg = chat.messages.id(messageId);
 
     const canDelete =
       String(msg.sender) === String(user.id) ||
       isGroupAdminOrCreator(group, user.id) ||
       hasRole(user, ['moderator', 'admin']);
 
-    if (!canDelete) return forbidden(res, 'Not allowed to delete this message');
+    if (!canDelete) return forbidden(res, 'Not allowed');
 
-    await Chat.updateOne(
-      { _id: chatId },
-      { $pull: { messages: { _id: messageId } }, $set: { updatedAt: new Date() } }
-    );
+    msg.isDeletedForEveryone = true;
+    msg.ciphertext = '';
+    msg.iv = '';
+    msg.tag = '';
+    msg.reactions = [];
+
+    await chat.save();
+
+    req.io.to(`chat:${chatId}`).emit('message:deleted', {
+      chatId,
+      messageId,
+      mode: 'everyone'
+    });
 
     return ok(res, null, 'Message deleted');
   } catch (error) {
@@ -800,28 +752,23 @@ exports.reactToMessage = async (req, res) => {
     const { chatId, messageId } = req.params;
     const { emoji } = req.body;
 
-    if (!emoji || typeof emoji !== 'string') {
-      return bad(res, 'emoji is required');
-    }
-
     const chat = await Chat.findOne({
       _id: chatId,
       participants: user.id,
       'messages._id': messageId
-    });
+    }).populate('messages.sender', 'profile.fullName profile.avatar');
 
     if (!chat) return notFound(res, 'Message not found');
 
     const msg = chat.messages.id(messageId);
 
-    // Toggle reaction (WhatsApp-style)
     const existing = msg.reactions.find(
-      (r) => String(r.user) === String(user.id) && r.emoji === emoji
+      r => String(r.user) === String(user.id) && r.emoji === emoji
     );
 
     if (existing) {
       msg.reactions = msg.reactions.filter(
-        (r) => !(String(r.user) === String(user.id) && r.emoji === emoji)
+        r => !(String(r.user) === String(user.id) && r.emoji === emoji)
       );
     } else {
       msg.reactions.push({ user: user.id, emoji });
@@ -829,11 +776,20 @@ exports.reactToMessage = async (req, res) => {
 
     await chat.save();
 
-    return ok(res, msg.reactions, 'Reaction updated');
+    const updatedMessage = msg.toObject();
+
+    /* 🔥 REALTIME REACTION UPDATE 🔥 */
+    req.io.to(`chat:${chatId}`).emit("message:reaction:update", {
+      chatId,
+      message: updatedMessage
+    });
+
+    return ok(res, updatedMessage, 'Reaction updated');
   } catch (error) {
     return serverError(res, error);
   }
 };
+
 
 /* =====================================================
    PIN MESSAGE (GROUP)
@@ -844,28 +800,31 @@ exports.pinGroupMessage = async (req, res) => {
     if (!user) return;
 
     const { groupId, chatId, messageId } = req.params;
-    if (!ensureObjectIdParam(res, groupId, 'groupId')) return;
-    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
-    if (!ensureObjectIdParam(res, messageId, 'messageId')) return;
 
-    const group = await Group.findOne({ _id: groupId, isRemoved: false });
+    const group = await Group.findById(groupId);
     if (!group) return notFound(res, 'Group not found');
 
     if (!isGroupAdminOrCreator(group, user.id)) {
-      return forbidden(res, 'Only admins can pin messages');
+      return forbidden(res, 'Only admins can pin');
     }
 
-    const chat = await Chat.findOne({ _id: chatId, type: 'group' });
+    const chat = await Chat.findById(chatId);
     if (!chat) return notFound(res, 'Chat not found');
 
     chat.pinnedMessage = messageId;
     await chat.save();
 
-    return ok(res, messageId, 'Message pinned');
-  } catch (error) {
-    return serverError(res, error);
+    req.io.to(`chat:${chatId}`).emit('message:pinned', {
+      chatId,
+      messageId
+    });
+
+    return ok(res, messageId);
+  } catch (e) {
+    return serverError(res, e);
   }
 };
+
 
 /* =====================================================
    DELETE MESSAGE (SOFT)
@@ -889,24 +848,33 @@ exports.softDeleteMessage = async (req, res) => {
     const msg = chat.messages.id(messageId);
 
     if (mode === 'everyone') {
-      const canDelete =
-        String(msg.sender) === String(user.id) ||
-        hasRole(user, ['admin', 'moderator']);
-
-      if (!canDelete) return forbidden(res, 'Not allowed');
+      if (String(msg.sender) !== String(user.id)) {
+        return forbidden(res, 'Not allowed');
+      }
 
       msg.isDeletedForEveryone = true;
+      msg.ciphertext = '';
+      msg.iv = '';
+      msg.tag = '';
+      msg.reactions = [];
     } else {
       msg.deletedFor.addToSet(user.id);
     }
 
     await chat.save();
 
-    return ok(res, null, 'Message deleted');
-  } catch (error) {
-    return serverError(res, error);
+    req.io.to(`chat:${chatId}`).emit('message:deleted', {
+      chatId,
+      messageId,
+      mode
+    });
+
+    return ok(res);
+  } catch (e) {
+    return serverError(res, e);
   }
 };
+
 
 exports.markMessageAsRead = async (req, res) => {
   const user = ensureAuthUser(req, res);
@@ -1228,36 +1196,29 @@ exports.createChat = async (req, res) => {
 // 2. Get chats
 exports.getChats = async (req, res) => {
   try {
-    const user = ensureAuthUser(req, res);
-    if (!user) return;
+    const userId = req.user.id;
 
-    const { page, limit, skip } = parsePage(req);
-    const { type } = req.query;
-
-    const query = {
-      participants: user.id,
+    const chats = await Chat.find({
+      participants: userId,
       isRemoved: false,
-      ...(type ? { type } : {})
-    };
+    })
+      .populate("participants", "profile.fullName profile.avatar")
+      .sort({ lastMessageAt: -1 })
+      .lean();
 
-    const [chats, total] = await Promise.all([
-      Chat.find(query).sort({ updatedAt: -1 }).skip(skip).limit(limit),
-      Chat.countDocuments(query)
-    ]);
-
-    // unreadCount cannot be truly computed without a read state model; keep stable shape.
-    const data = chats.map((c) => ({
-      ...c.toObject(),
-      unreadCount: 0
-    }));
-
-    return ok(res, data, null, {
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+    res.json({
+      success: true,
+      data: chats,
     });
-  } catch (error) {
-    return serverError(res, error);
+  } catch (err) {
+    console.error("[getChats] ❌", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch chats",
+    });
   }
 };
+
 
 // 3. Get chat by Id
 // controllers/communityController.js
@@ -1268,47 +1229,43 @@ exports.getChatById = async (req, res) => {
 
     const { chatId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(chatId)) {
-      return res.status(400).json({ success: false, message: 'Invalid chatId' });
+      return bad(res, 'Invalid chatId');
     }
 
-    // 1️⃣ Fetch chat WITHOUT participant filter
     const chat = await Chat.findOne({
       _id: chatId,
       isRemoved: false
-    }).populate('messages.sender', 'profile.fullName profile.avatar');
+    })
+      .populate('participants', 'profile.fullName profile.avatar')
+      .populate({
+        path: 'messages.sender',
+        select: 'profile.fullName profile.avatar'
+      })
+      .populate({
+        path: 'messages.replyTo',
+        populate: {
+          path: 'sender',
+          select: 'profile.fullName profile.avatar'
+        }
+      })
+      .populate({
+        path: 'messages.reactions.user',
+        select: 'profile.fullName profile.avatar'
+      })
+      .lean();
 
-    if (!chat) {
-      return res.status(404).json({
-        success: false,
-        message: 'Chat not found'
-      });
-    }
+    if (!chat) return notFound(res, 'Chat not found');
 
-    // 2️⃣ Explicit participant check (robust)
     const isParticipant = chat.participants.some(
-      (p) => String(p) === String(user.id)
+      (p) => String(p._id) === String(user.id)
     );
+    if (!isParticipant) return forbidden(res, 'Not a participant');
 
-    if (!isParticipant) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are not a participant in this chat'
-      });
-    }
-
-    return res.json({
-      success: true,
-      data: chat
-    });
-  } catch (error) {
-    console.error('[getChatById]', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    return ok(res, chat);
+  } catch (e) {
+    return serverError(res, e);
   }
 };
-
 
 // 4. Get messages (paginated)
 exports.getMessages = async (req, res) => {
@@ -1317,25 +1274,35 @@ exports.getMessages = async (req, res) => {
     if (!user) return;
 
     const { chatId } = req.params;
-    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
+    if (!isValidObjectId(chatId)) return bad(res, 'Invalid chatId');
 
     const { page, limit, skip } = parsePage(req);
 
     const chat = await Chat.findOne(
       { _id: chatId, participants: user.id, isRemoved: false },
-      sliceMessagesProjection(skip, limit)
-    ).populate('messages.sender', 'name avatar');
+      { messages: { $slice: [skip, limit] } }
+    )
+      .populate({
+        path: 'messages.sender',
+        select: 'profile.fullName profile.avatar'
+      })
+      .populate({
+        path: 'messages.replyTo',
+        populate: {
+          path: 'sender',
+          select: 'profile.fullName profile.avatar'
+        }
+      })
+      .populate({
+        path: 'messages.reactions.user',
+        select: 'profile.fullName profile.avatar'
+      });
 
-    if (!chat) return notFound(res, 'Chat not found or access denied');
+    if (!chat) return notFound(res, 'Chat not found');
 
-    const totalDoc = await Chat.findById(chatId).select('messages').lean();
-    const total = totalDoc?.messages?.length || 0;
-
-    return ok(res, chat.messages || [], null, {
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
-    });
-  } catch (error) {
-    return serverError(res, error);
+    return ok(res, chat.messages);
+  } catch (e) {
+    return serverError(res, e);
   }
 };
 
@@ -1374,21 +1341,10 @@ exports.sendMessage = async (req, res) => {
     if (!user) return;
 
     const { chatId } = req.params;
-    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
+    const { ciphertext, iv, tag, type = 'text', replyTo } = req.body;
 
-    const { ciphertext, iv, tag, type = 'text', sharedPost } = req.body;
-
-    if (!ciphertext || !iv || !tag) return bad(res, 'ciphertext, iv, and tag are required');
-    if (!['text', 'share'].includes(type)) return bad(res, 'Invalid message type');
-
-    if (type === 'share') {
-      if (!sharedPost || !isValidObjectId(sharedPost)) return bad(res, 'sharedPost is required');
-      const postExists = await Post.exists({ _id: sharedPost, isRemoved: false });
-      if (!postExists) return notFound(res, 'Post not found');
-    }
-
-    const updatedChat = await Chat.findOneAndUpdate(
-      { _id: chatId, isRemoved: false, participants: user.id },
+    const updated = await Chat.findOneAndUpdate(
+      { _id: chatId, participants: user.id, isRemoved: false },
       {
         $push: {
           messages: {
@@ -1397,20 +1353,41 @@ exports.sendMessage = async (req, res) => {
             iv,
             tag,
             type,
-            sharedPost: type === 'share' ? sharedPost : null
+            replyTo: replyTo || null
           }
         },
         $set: { updatedAt: new Date() }
       },
       { new: true }
-    ).populate('messages.sender', 'name avatar');
+    )
+      .populate({
+        path: 'messages.sender',
+        select: 'profile.fullName profile.avatar'
+      })
+      .populate({
+        path: 'messages.replyTo',
+        populate: {
+          path: 'sender',
+          select: 'profile.fullName profile.avatar'
+        }
+      })
+      .populate({
+        path: 'messages.reactions.user',
+        select: 'profile.fullName profile.avatar'
+      });
 
-    if (!updatedChat) return notFound(res, 'Chat not found or access denied');
+    if (!updated) return notFound(res, 'Chat not found');
 
-    const newMsg = updatedChat.messages[updatedChat.messages.length - 1];
-    return ok(res, newMsg, 'Message sent');
-  } catch (error) {
-    return serverError(res, error);
+    const message = updated.messages.at(-1);
+
+    req.io.to(`chat:${chatId}`).emit('message:new', {
+      chatId,
+      message
+    });
+
+    return ok(res, message);
+  } catch (e) {
+    return serverError(res, e);
   }
 };
 

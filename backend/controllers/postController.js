@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Post = require('../models/Post');
 const Group = require('../models/Group');
 const Hub = require('../models/Hub');
+const Report = require('../models/Report');
 const { deleteFromCloudinary } = require('../middleware/upload');
 
 /* =========================================================================
@@ -61,7 +62,7 @@ async function getAccessibleGroups(userId) {
     isRemoved: false,
     isArchived: false,
     $or: [
-      { members: userId },
+      { 'members.user': userId },
       { admins: userId },
       { createdBy: userId },
       { privacy: 'public' }
@@ -70,6 +71,7 @@ async function getAccessibleGroups(userId) {
 
   return groups.map(g => g._id);
 }
+
 
 async function getAccessibleHubs(userId) {
   const hubs = await Hub.find({
@@ -80,6 +82,7 @@ async function getAccessibleHubs(userId) {
   return hubs.map(h => h._id);
 }
 
+
 async function assertGroupPostAccess(userId, groupId) {
   if (!isValidObjectId(groupId)) return false;
 
@@ -88,7 +91,7 @@ async function assertGroupPostAccess(userId, groupId) {
     isRemoved: false,
     isArchived: false,
     $or: [
-      { members: userId },
+      { 'members.user': userId },   // ✅ FIX
       { admins: userId },
       { createdBy: userId },
       { privacy: 'public' }
@@ -97,6 +100,7 @@ async function assertGroupPostAccess(userId, groupId) {
 
   return !!group;
 }
+
 
 async function assertHubPostAccess(userId, hubId) {
   if (!isValidObjectId(hubId)) return false;
@@ -198,26 +202,24 @@ exports.createPost = async (req, res) => {
 
     const postData = {
       author,
-      type,
+      type: req.body.type || type,
       visibility,
-      content: {},
+      content: {
+        ...(req.body.content || {})   // ✅ PRESERVE imageUrl / videoUrl
+      },
       sharedTo: {
         groups: sharedTo.groups || [],
         hubs: sharedTo.hubs || []
       }
     };
 
-    if (content.text) postData.content.text = content.text;
-    if (content.linkUrl) postData.content.linkUrl = content.linkUrl;
+    /* ✅ MERGE TEXT / LINK */
+    if (content.text !== undefined) {
+      postData.content.text = content.text;
+    }
 
-    media = extractMedia(req);
-    if (media) {
-      const isVideo = media.mimetype.startsWith('video/');
-      postData.type = isVideo ? 'video' : 'image';
-      postData.content.imageUrl = isVideo ? null : media.url;
-      postData.content.videoUrl = isVideo ? media.url : null;
-      postData.content.mediaPublicId = media.publicId;
-      postData.content.mediaMime = media.mimetype;
+    if (content.linkUrl !== undefined) {
+      postData.content.linkUrl = content.linkUrl;
     }
 
     const post = await Post.create(postData);
@@ -225,7 +227,7 @@ exports.createPost = async (req, res) => {
   } catch (error) {
     // cleanup uploaded media if create fails
     if (media?.publicId) {
-      await deleteFromCloudinary(media.publicId).catch(() => {});
+      await deleteFromCloudinary(media.publicId).catch(() => { });
     }
     return res.status(500).json({ success: false, message: 'Create failed', error: error.message });
   }
@@ -284,7 +286,7 @@ exports.updatePost = async (req, res) => {
     newMedia = extractMedia(req);
     if (newMedia) {
       if (post.content?.mediaPublicId) {
-        await deleteFromCloudinary(post.content.mediaPublicId).catch(() => {});
+        await deleteFromCloudinary(post.content.mediaPublicId).catch(() => { });
       }
 
       const isVideo = newMedia.mimetype.startsWith('video/');
@@ -309,7 +311,7 @@ exports.updatePost = async (req, res) => {
   } catch (error) {
     // cleanup newly uploaded media on failure
     if (newMedia?.publicId) {
-      await deleteFromCloudinary(newMedia.publicId).catch(() => {});
+      await deleteFromCloudinary(newMedia.publicId).catch(() => { });
     }
     return res.status(500).json({ success: false, message: 'Update failed', error: error.message });
   }
@@ -327,7 +329,7 @@ exports.deletePost = async (req, res) => {
     }
 
     if (post.content?.mediaPublicId) {
-      await deleteFromCloudinary(post.content.mediaPublicId).catch(() => {});
+      await deleteFromCloudinary(post.content.mediaPublicId).catch(() => { });
     }
 
     post.isRemoved = true;
@@ -549,40 +551,71 @@ exports.removeReaction = async (req, res) => {
 ======================================================================== */
 exports.addComment = async (req, res) => {
   try {
-    const author = req.user.id;
+    const userId = req.user.id;
     const { postId } = req.params;
     const { text, parentCommentId = null } = req.body;
 
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ success: false, message: 'text is required' });
+    /* ================= VALIDATION ================= */
+    if (!text || !text.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Text required'
+      });
     }
 
-    const post = await Post.findOne({ _id: postId, isRemoved: false });
-    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
-
-    const hasAccess = await checkPostAccess(post, author);
-    if (!hasAccess) return res.status(403).json({ success: false, message: 'Access denied' });
-
-    const comment = {
-      author,
-      text,
-      parent: parentCommentId || null,
+    /* ================= LOAD POST ================= */
+    const post = await Post.findOne({
+      _id: postId,
       isRemoved: false
-    };
+    });
 
-    const updatedPost = await Post.findByIdAndUpdate(
-      postId,
-      {
-        $push: { comments: comment },
-        $inc: { commentsCount: 1 }
-      },
-      { new: true }
-    );
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found'
+      });
+    }
 
-    const createdComment = updatedPost.comments[updatedPost.comments.length - 1];
-    return res.json({ success: true, data: createdComment });
+    /* ================= ACCESS CHECK ================= */
+    const allowed = await checkPostAccess(post, userId);
+    if (!allowed) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied'
+      });
+    }
+
+    /* ================= ADD COMMENT ================= */
+    post.comments.push({
+      author: userId,
+      text: text.trim(),
+      parent: parentCommentId || null
+    });
+
+    post.commentsCount = (post.commentsCount || 0) + 1;
+
+    await post.save();
+
+    /* ================= POPULATE CORRECTLY ================= */
+    await post.populate({
+      path: 'comments.author',
+      select: 'profile.fullName profile.avatar'
+    });
+
+    /* ================= RETURN LAST COMMENT ================= */
+    const comment = post.comments[post.comments.length - 1];
+
+    return res.status(201).json({
+      success: true,
+      data: comment
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Error adding comment', error: error.message });
+    console.error('[addComment]', error);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Comment failed'
+    });
   }
 };
 
@@ -665,57 +698,80 @@ exports.getPostById = async (req, res) => {
     const { postId } = req.params;
 
     const post = await Post.findOne({ _id: postId, isRemoved: false })
-      .populate('author', 'name avatar')
+      .populate({
+        path: 'author',
+        select: 'profile.fullName profile.avatar'
+      })
       .populate('sharedTo.groups', 'name avatar privacy')
-      .populate('sharedTo.hubs', 'name type region');
+      .populate('sharedTo.hubs', 'name type region')
+      .lean();
 
-    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
 
     const hasAccess = await checkPostAccess(post, userId);
-    if (!hasAccess) return res.status(403).json({ success: false, message: 'Access denied' });
+    if (!hasAccess) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
 
-    return res.json({ success: true, data: post });
+    return res.json({
+      success: true,
+      data: {
+        ...post,
+        author: {
+          _id: post.author?._id,
+          fullName: post.author?.profile?.fullName || 'Unknown User',
+          avatar: post.author?.profile?.avatar || null
+        }
+      }
+    });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Error fetching post', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching post',
+      error: error.message
+    });
   }
 };
 
+
 /* =========================================================================
-  GET COMMENTS (paged, embedded)
+  GET COMMENTS
 ======================================================================== */
 exports.getComments = async (req, res) => {
   try {
     const userId = req.user.id;
     const { postId } = req.params;
-    const { page, limit, skip } = parsePagination(req);
-    const includeRemoved = req.query.includeRemoved === 'true';
 
-    const post = await Post.findOne({ _id: postId, isRemoved: false });
-    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
+    const post = await Post.findOne({ _id: postId, isRemoved: false })
+      .populate({
+        path: 'comments.author',
+        select: 'profile.fullName profile.avatar'
+      })
+      .lean();
 
-    const hasAccess = await checkPostAccess(post, userId);
-    if (!hasAccess) return res.status(403).json({ success: false, message: 'Access denied' });
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
 
-    const all = post.comments || [];
-    const filtered = includeRemoved ? all : all.filter(c => !c.isRemoved);
-
-    const sorted = [...filtered].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    const paged = sorted.slice(skip, skip + limit);
+    if (!(await checkPostAccess(post, userId))) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
 
     return res.json({
       success: true,
-      data: paged,
-      pagination: {
-        page,
-        limit,
-        total: filtered.length,
-        pages: Math.ceil(filtered.length / limit)
-      }
+      data: post.comments.filter(c => !c.isRemoved)
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Error fetching comments', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch comments',
+      error: error.message
+    });
   }
 };
+
 
 /* =========================================================================
   GET COMMUNITY FEED (public + group + hub + own posts)
@@ -739,34 +795,58 @@ exports.getFeed = async (req, res) => {
     ];
 
     if (groupId) {
-      if (!userGroups.some(g => g.equals(groupId))) {
+      const gid = mongoose.Types.ObjectId(groupId);
+      if (!userGroups.some(g => g.equals(gid))) {
         return res.status(403).json({ success: false, message: 'Access denied to this group' });
       }
-      query['sharedTo.groups'] = groupId;
+      query['sharedTo.groups'] = gid;
     }
 
     if (hubId) {
-      if (!userHubs.some(h => h.equals(hubId))) {
+      const hid = mongoose.Types.ObjectId(hubId);
+      if (!userHubs.some(h => h.equals(hid))) {
         return res.status(403).json({ success: false, message: 'Access denied to this hub' });
       }
-      query['sharedTo.hubs'] = hubId;
+      query['sharedTo.hubs'] = hid;
     }
 
     if (type) query.type = type;
 
     const posts = await Post.find(query)
-      .populate('author', 'name avatar')
+      .populate({
+        path: 'author',
+        select: 'profile.fullName profile.avatar'
+      })
       .populate('sharedTo.groups', 'name avatar privacy')
       .populate('sharedTo.hubs', 'name type region')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
+
+    const normalized = posts.map(p => {
+      const likesArray = p.reactions?.likes || [];
+      const hasLiked = likesArray.some(
+        id => String(id) === String(userId)
+      );
+
+      return {
+        ...p,
+        likesCount: p.likesCount || likesArray.length,
+        userHasLiked: hasLiked,
+        author: {
+          _id: p.author?._id,
+          fullName: p.author?.profile?.fullName || 'Unknown User',
+          avatar: p.author?.profile?.avatar || null
+        }
+      };
+    });
 
     const total = await Post.countDocuments(query);
 
     return res.json({
       success: true,
-      data: posts,
+      data: normalized,
       pagination: {
         page,
         limit,
@@ -775,9 +855,121 @@ exports.getFeed = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Error fetching feed', error: error.message });
+    console.error('[FEED ERROR]', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching feed',
+      error: error.message
+    });
   }
 };
+
+/* =========================================================================
+  TOGGLE LIKE (Instagram-style)
+======================================================================== */
+exports.toggleLike = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { postId } = req.params;
+
+    const post = await Post.findOne({
+      _id: postId,
+      isRemoved: false
+    });
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found'
+      });
+    }
+
+    const alreadyLiked = post.reactions.likes.some(
+      id => String(id) === String(userId)
+    );
+
+    if (alreadyLiked) {
+      // UNLIKE
+      post.reactions.likes.pull(userId);
+      post.likesCount = Math.max((post.likesCount || 1) - 1, 0);
+    } else {
+      // LIKE
+      post.reactions.likes.push(userId);
+      post.likesCount = (post.likesCount || 0) + 1;
+    }
+
+    await post.save();
+
+    return res.json({
+      success: true,
+      data: {
+        postId: post._id,
+        liked: !alreadyLiked,
+        likesCount: post.likesCount
+      }
+    });
+  } catch (error) {
+    console.error('[toggleLike] error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to toggle like'
+    });
+  }
+};
+
+/* =========================================================================
+  TOGGLE COMMENT LIKE
+======================================================================== */
+exports.toggleLikeComment = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { postId, commentId } = req.params;
+
+    const post = await Post.findOne({ _id: postId, isRemoved: false });
+    if (!post) return res.status(404).json({ success: false });
+
+    const comment = post.comments.id(commentId);
+    if (!comment || comment.isRemoved) {
+      return res.status(404).json({ success: false });
+    }
+
+    comment.likes = comment.likes || [];
+    comment.likesCount = comment.likesCount || 0;
+
+    const idx = comment.likes.findIndex(
+      id => String(id) === String(userId)
+    );
+
+    let liked;
+
+    if (idx === -1) {
+      comment.likes.push(userId);
+      comment.likesCount += 1;
+      liked = true;
+    } else {
+      comment.likes.splice(idx, 1);
+      comment.likesCount = Math.max(comment.likesCount - 1, 0);
+      liked = false;
+    }
+
+    await post.save();
+
+    return res.json({
+      success: true,
+      data: {
+        liked,
+        likesCount: comment.likesCount
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Comment like failed',
+      error: error.message
+    });
+  }
+};
+
 
 /* =========================================================================
   GET PUBLIC HIGHLIGHTS (Home-safe read)
@@ -787,25 +979,34 @@ exports.getPublicHighlights = async (req, res) => {
     const { page, limit, skip } = parsePagination(req);
     const { type } = req.query;
 
-    const query = {
-      isRemoved: false,
-      visibility: 'public'
-    };
-
+    const query = { isRemoved: false, visibility: 'public' };
     if (type) query.type = type;
 
     const posts = await Post.find(query)
-      .populate('author', 'name avatar')
+      .populate({
+        path: 'author',
+        select: 'profile.fullName profile.avatar'
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .select('-comments');
+      .select('-comments')
+      .lean();
+
+    const normalized = posts.map(p => ({
+      ...p,
+      author: {
+        _id: p.author?._id,
+        fullName: p.author?.profile?.fullName || 'Unknown User',
+        avatar: p.author?.profile?.avatar || null
+      }
+    }));
 
     const total = await Post.countDocuments(query);
 
     return res.json({
       success: true,
-      data: posts,
+      data: normalized,
       pagination: {
         page,
         limit,
@@ -814,6 +1015,88 @@ exports.getPublicHighlights = async (req, res) => {
       }
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Error fetching highlights', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching highlights',
+      error: error.message
+    });
   }
 };
+
+/* =========================================================================
+  REPORT POST
+======================================================================== */
+exports.reportPost = async (req, res) => {
+  try {
+    const reporterId = req.user.id;
+    const { postId } = req.params;
+    const { reason } = req.body;
+
+    /* ================= VALIDATION ================= */
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Reason required'
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid post ID'
+      });
+    }
+
+    /* ================= TARGET EXISTS ================= */
+    const post = await Post.findOne({
+      _id: postId,
+      isRemoved: false
+    }).select('_id');
+
+    if (!post) {
+      return res.status(404).json({
+        success: false,
+        message: 'Post not found'
+      });
+    }
+
+    /* ================= DUPLICATE PREVENTION ================= */
+    const alreadyReported = await Report.exists({
+      reporter: reporterId,
+      targetType: 'post',
+      targetId: postId
+    });
+
+    if (alreadyReported) {
+      return res.status(409).json({
+        success: false,
+        message: 'You have already reported this post'
+      });
+    }
+
+    /* ================= CREATE REPORT ================= */
+    const report = await Report.create({
+      reporter: reporterId,
+      targetType: 'post',
+      targetId: postId,
+      reason: reason.trim()
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Report submitted successfully',
+      data: {
+        id: report._id,
+        status: report.status,
+        createdAt: report.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('[REPORT POST ERROR]', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Report failed'
+    });
+  }
+};
+

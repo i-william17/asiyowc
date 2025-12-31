@@ -1,3 +1,4 @@
+// backend/socket/presence.js
 const User = require('../models/User');
 
 /*
@@ -10,31 +11,55 @@ const onlineMap = new Map();
    INTERNAL HELPERS
 ===================================================== */
 
+/**
+ * Add socketId to user's active socket set
+ * Returns true if user transitioned OFFLINE -> ONLINE
+ */
 const addSocket = (userId, socketId) => {
-  const key = String(userId);
-  if (!onlineMap.has(key)) {
-    onlineMap.set(key, new Set());
+  const uid = String(userId);
+
+  if (!onlineMap.has(uid)) {
+    onlineMap.set(uid, new Set([socketId]));
+    return true; // first socket → user just came online
   }
-  onlineMap.get(key).add(socketId);
+
+  onlineMap.get(uid).add(socketId);
+  return false;
 };
 
+/**
+ * Remove socketId from user's socket set
+ * Returns true if user transitioned ONLINE -> OFFLINE
+ */
 const removeSocket = (userId, socketId) => {
-  const key = String(userId);
-  const set = onlineMap.get(key);
-  if (!set) return false;
+  const uid = String(userId);
+  const sockets = onlineMap.get(uid);
 
-  set.delete(socketId);
+  if (!sockets) return false;
 
-  // user goes offline only when last socket disconnects
-  if (set.size === 0) {
-    onlineMap.delete(key);
-    return true;
+  sockets.delete(socketId);
+
+  if (sockets.size === 0) {
+    onlineMap.delete(uid);
+    return true; // last socket → user just went offline
   }
 
   return false;
 };
 
-const isOnline = (userId) => onlineMap.has(String(userId));
+/**
+ * Check if user is currently online
+ */
+const isOnline = (userId) => {
+  return onlineMap.has(String(userId));
+};
+
+/**
+ * Get all online users (ids)
+ */
+const getOnlineUsers = () => {
+  return Array.from(onlineMap.keys());
+};
 
 /* =====================================================
    SOCKET PRESENCE HANDLER
@@ -46,68 +71,95 @@ module.exports = (io, socket) => {
   const userId = String(socket.user.id);
 
   /* ===================== CONNECT ===================== */
-  addSocket(userId, socket.id);
+  const becameOnline = addSocket(userId, socket.id);
 
-  // Notify everyone
-  io.emit('user:online', {
-    userId
-  });
+  // Emit ONLY if user actually became online
+  if (becameOnline) {
+    io.emit('user:online', {
+      userId,
+      at: new Date().toISOString(),
+    });
+  }
 
   /* ===================== WHO IS ONLINE ===================== */
-  // Client usage:
-  // socket.emit('presence:whois', { userIds }, cb)
+  /**
+   * Client usage:
+   * socket.emit('presence:whois', { userIds }, cb)
+   */
   socket.on('presence:whois', ({ userIds = [] }, cb) => {
-    if (!Array.isArray(userIds)) {
-      return typeof cb === 'function' &&
-        cb({ success: false, message: 'userIds must be array' });
-    }
+    try {
+      if (!Array.isArray(userIds)) {
+        return cb?.({
+          success: false,
+          message: 'userIds must be an array',
+        });
+      }
 
-    const data = userIds.map((id) => ({
-      userId: String(id),
-      online: isOnline(id)
-    }));
+      const data = userIds.map((uid) => ({
+        userId: String(uid),
+        online: isOnline(uid),
+      }));
 
-    if (typeof cb === 'function') {
-      cb({ success: true, data });
+      cb?.({
+        success: true,
+        data,
+      });
+    } catch (e) {
+      cb?.({
+        success: false,
+        message: e.message,
+      });
     }
   });
 
-  /* ===================== BATCH PRESENCE ===================== */
-  // Optional: hydrate presence in bulk
+  /* ===================== BULK HYDRATION ===================== */
+  /**
+   * Optional: hydrate presence in bulk
+   * socket.emit('presence:hydrate', {}, cb)
+   */
   socket.on('presence:hydrate', (_, cb) => {
-    const online = {};
-    onlineMap.forEach((_, uid) => {
-      online[uid] = true;
-    });
+    try {
+      const online = {};
+      onlineMap.forEach((_, uid) => {
+        online[uid] = true;
+      });
 
-    if (typeof cb === 'function') {
-      cb({
+      cb?.({
         success: true,
-        data: {
-          online
-        }
+        data: { online },
+      });
+    } catch (e) {
+      cb?.({
+        success: false,
+        message: e.message,
       });
     }
   });
 
   /* ===================== DISCONNECT ===================== */
-  socket.on('disconnect', async () => {
+  socket.on('disconnect', async (reason) => {
     const wentOffline = removeSocket(userId, socket.id);
 
+    // Emit ONLY if user truly went offline
     if (!wentOffline) return;
+
+    const lastSeen = new Date();
 
     io.emit('user:offline', {
       userId,
-      lastSeen: new Date().toISOString()
+      lastSeen: lastSeen.toISOString(),
+      reason,
     });
 
-    // Persist last seen (safe, optional)
+    // Persist last seen (safe & optional)
     try {
-      await User.findByIdAndUpdate(userId, {
-        lastSeenAt: new Date()
-      });
-    } catch (err) {
-      // silently fail (schema may not support lastSeenAt)
+      await User.findByIdAndUpdate(
+        userId,
+        { lastSeenAt: lastSeen },
+        { lean: true }
+      );
+    } catch (_) {
+      // silently ignore (schema may not support lastSeenAt)
     }
   });
 };
@@ -117,3 +169,4 @@ module.exports = (io, socket) => {
 ===================================================== */
 
 module.exports.isOnline = isOnline;
+module.exports.getOnlineUsers = getOnlineUsers;

@@ -1,3 +1,4 @@
+// app/community/group/[id].js
 import React, { useEffect, useState } from "react";
 import {
   View,
@@ -20,6 +21,8 @@ import {
   joinGroup,
   leaveGroup,
 } from "../../../store/slices/communitySlice";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 
 /* =====================================================
    🔒 MOBILE-SAFE IMAGE NORMALIZER
@@ -46,6 +49,8 @@ export default function GroupDetail() {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [showAlreadyMemberModal, setShowAlreadyMemberModal] = useState(false);
+  const insets = useSafeAreaInsets();
+
 
   /* =====================================================
      FETCH GROUP
@@ -119,21 +124,43 @@ export default function GroupDetail() {
 
   return (
     <SafeAreaView style={tw`flex-1 bg-gray-50`}>
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={tw`pb-12`}
       >
         {/* =====================================================
-           HEADER
-        ===================================================== */}
-        <View style={tw`px-6 pt-6`}>
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={tw`w-10 h-10 items-center justify-center rounded-lg bg-white border border-gray-200`}
-          >
-            <Ionicons name="arrow-back" size={18} color="#111827" />
-          </TouchableOpacity>
+   HEADER – GROUP INFO
+===================================================== */}
+        <View style={tw`px-6 pt-10 pb-6`}>
+          <View style={tw`flex-row items-center`}>
+            {/* Back Button */}
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={tw`w-11 h-11 items-center justify-center rounded-xl bg-white border border-gray-200`}
+              hitSlop={12}
+            >
+              <Ionicons name="arrow-back" size={19} color="#111827" />
+            </TouchableOpacity>
+
+            {/* Title */}
+            <Text
+              style={{
+                marginLeft: 16,
+                fontFamily: "Poppins-SemiBold",
+                fontSize: 20,
+                color: "#111827",
+              }}
+            >
+              Group Info
+            </Text>
+          </View>
+
+          {/* Divider */}
+          <View style={tw`mt-6 h-px bg-purple-600`} />
         </View>
+
+
 
         {/* =====================================================
            GROUP SUMMARY
@@ -265,7 +292,16 @@ export default function GroupDetail() {
            POSTS
         ===================================================== */}
         <View style={tw`px-6 mt-10`}>
-          <Text style={tw`text-lg font-semibold text-gray-900`}>Posts</Text>
+          <Text
+            style={{
+              fontFamily: "Poppins-SemiBold",
+              fontSize: 18,
+              color: "#111827",
+            }}
+          >
+            Posts
+          </Text>
+
 
           {!g.posts?.length ? (
             <EmptyState
@@ -293,9 +329,16 @@ export default function GroupDetail() {
            MEMBERS
         ===================================================== */}
         <View style={tw`px-6 mt-10`}>
-          <Text style={tw`text-lg font-semibold text-gray-900`}>
+          <Text
+            style={{
+              fontFamily: "Poppins-SemiBold",
+              fontSize: 18,
+              color: "#111827",
+            }}
+          >
             Members
           </Text>
+
 
           {!Array.isArray(g.members) || g.members.length === 0 ? (
             <EmptyState title="No members yet" subtitle="Group is empty." />
@@ -385,7 +428,12 @@ export default function GroupDetail() {
         ===================================================== */}
         {isAdmin && (
           <View style={tw`px-6 mt-10`}>
-            <Text style={tw`text-sm font-semibold text-gray-500`}>
+            <Text s style={{
+              fontFamily: "Poppins-SemiBold",
+              fontSize: 18,
+              color: "#111827",
+            }}
+            >
               ADMIN ACTIONS
             </Text>
 

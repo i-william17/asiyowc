@@ -1,142 +1,161 @@
-const multer = require('multer');
-const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
-require('dotenv').config();
+const multer = require("multer");
+const cloudinary = require("cloudinary").v2;
+const fs = require("fs");
+const path = require("path");
+require("dotenv").config();
 
 /* =====================================================
    CLOUDINARY CONFIGURATION
 ===================================================== */
-console.log('[Cloudinary] Initializing configuration...');
+console.log("[Cloudinary] Initializing configuration...");
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true,
 });
 
-console.log('[Cloudinary] Config loaded:', {
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? '✅ set' : '❌ missing',
-  api_key: process.env.CLOUDINARY_API_KEY ? '✅ set' : '❌ missing',
-  api_secret: process.env.CLOUDINARY_API_SECRET ? '✅ set' : '❌ missing'
-});
-
-/* =====================================================
-   CLOUDINARY STORAGE (DIRECT UPLOAD)
-===================================================== */
-console.log('[Upload] Setting up Cloudinary storage...');
-
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: async (req, file) => {
-    console.log('[Upload] Preparing upload params:', {
-      filename: file.originalname,
-      mimetype: file.mimetype
-    });
-
-    return {
-      folder: 'asiyo-app',
-      allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'mp4', 'mov'],
-      resource_type: 'auto'
-    };
-  }
+console.log("[Cloudinary] Config loaded:", {
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? "✅ set" : "❌ missing",
+  api_key: process.env.CLOUDINARY_API_KEY ? "✅ set" : "❌ missing",
+  api_secret: process.env.CLOUDINARY_API_SECRET ? "✅ set" : "❌ missing",
 });
 
 /* =====================================================
-   MULTER INSTANCE (MEDIA IS OPTIONAL)
+   MULTER STORAGE (DISK — SAFE FOR VIDEO)
 ===================================================== */
-console.log('[Upload] Initializing multer instance...');
+const uploadDir = path.join(process.cwd(), "uploads/tmp");
 
-const upload = multer({ 
-  storage: storage,
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (_, __, cb) => cb(null, uploadDir),
+  filename: (_, file, cb) =>
+    cb(null, `${Date.now()}-${file.originalname}`),
+});
+
+/* =====================================================
+   MULTER INSTANCE
+===================================================== */
+console.log("[Upload] Initializing multer instance...");
+
+const upload = multer({
+  storage,
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
+    fileSize: 200 * 1024 * 1024, // 200MB
   },
   fileFilter: (req, file, cb) => {
-    console.log('[Upload] File received:', {
+    console.log("[Upload] File received:", {
       originalname: file.originalname,
-      mimetype: file.mimetype
+      mimetype: file.mimetype,
     });
 
     if (
-      file.mimetype.startsWith('image/') ||
-      file.mimetype.startsWith('video/')
+      file.mimetype.startsWith("image/") ||
+      file.mimetype.startsWith("video/")
     ) {
-      console.log('[Upload] File accepted');
+      console.log("[Upload] File accepted");
       cb(null, true);
     } else {
-      console.error('[Upload] File rejected: invalid type');
-      cb(new Error('Only image and video files are allowed'), false);
+      console.error("[Upload] File rejected: invalid type");
+      cb(new Error("Only image and video files are allowed"), false);
     }
-  }
+  },
 });
+
+/* =====================================================
+   CLOUDINARY UPLOAD (IMAGE + VIDEO WITH COMPRESSION)
+===================================================== */
+const uploadToCloudinary = async (filePath, mime) => {
+  const isVideo = mime.startsWith("video/");
+
+  console.log("[Cloudinary] Uploading:", {
+    filePath,
+    type: isVideo ? "video" : "image",
+  });
+
+  const result = await cloudinary.uploader.upload(filePath, {
+    folder: "asiyo-app",
+    resource_type: isVideo ? "video" : "image",
+    chunk_size: isVideo ? 6_000_000 : undefined,
+    timeout: 120_000,
+
+    // 🔥 OPTION 3: Cloudinary-side video compression
+    eager: isVideo
+      ? [
+          {
+            width: 720,
+            height: 720,
+            crop: "limit",
+            quality: "auto",
+            fetch_format: "mp4",
+          },
+        ]
+      : undefined,
+  });
+
+  // cleanup temp file
+  fs.unlinkSync(filePath);
+
+  console.log("[Cloudinary] Upload success:", {
+    public_id: result.public_id,
+    resource_type: result.resource_type,
+  });
+
+  return result;
+};
 
 /* =====================================================
    NORMALIZE MULTIPART POST PAYLOAD
 ===================================================== */
-const normalizePostPayload = (req, res, next) => {
+const normalizePostPayload = async (req, res, next) => {
   try {
-    console.log('[Normalize] Incoming multipart payload');
+    console.log("[Normalize] Incoming multipart payload");
 
-    if (typeof req.body.content === 'string') {
-      console.log('[Normalize] Parsing content JSON');
+    if (typeof req.body.content === "string") {
       req.body.content = JSON.parse(req.body.content);
     }
 
-    if (typeof req.body.sharedTo === 'string') {
-      console.log('[Normalize] Parsing sharedTo JSON');
+    if (typeof req.body.sharedTo === "string") {
       req.body.sharedTo = JSON.parse(req.body.sharedTo);
     }
 
-    if (req.file) {
-      console.log('[Normalize] Cloudinary file detected:', {
-        path: req.file.path,
-        resource_type: req.file.resource_type
-      });
-
-      const isImage = req.file.resource_type === 'image';
-      const isVideo = req.file.resource_type === 'video';
-
-      req.body.type = isImage ? 'image' : 'video';
-
-      req.body.content = {
-        ...(req.body.content || {}),
-        imageUrl: isImage ? req.file.path : null,
-        videoUrl: isVideo ? req.file.path : null
-      };
-    } else {
-      console.log('[Normalize] No media attached');
+    if (!req.file) {
+      console.log("[Normalize] No media attached");
+      return next();
     }
+
+    const uploaded = await uploadToCloudinary(
+      req.file.path,
+      req.file.mimetype
+    );
+
+    const isVideo = uploaded.resource_type === "video";
+
+    // 🔥 USE COMPRESSED VIDEO URL IF AVAILABLE
+    const compressedVideoUrl = isVideo
+      ? uploaded.eager?.[0]?.secure_url || uploaded.secure_url
+      : undefined;
+
+    req.body.type = isVideo ? "video" : "image";
+    req.body.content = {
+      ...(req.body.content || {}),
+      imageUrl: !isVideo ? uploaded.secure_url : undefined,
+      videoUrl: compressedVideoUrl,
+      publicId: uploaded.public_id,
+    };
 
     next();
   } catch (error) {
-    console.error('[Normalize] Payload parsing failed:', error.message);
-
-    return res.status(400).json({
+    console.error("[Normalize] Failed:", error.message);
+    return res.status(500).json({
       success: false,
-      message: 'Invalid multipart payload format',
-      error: error.message
+      message: "Media upload failed",
+      error: error.message,
     });
-  }
-};
-
-/* =====================================================
-   OPTIONAL DIRECT CLOUDINARY UPLOAD
-===================================================== */
-const uploadToCloudinary = async (filePath, options = {}) => {
-  try {
-    console.log('[Cloudinary] Direct upload started:', filePath);
-
-    const result = await cloudinary.uploader.upload(filePath, options);
-
-    console.log('[Cloudinary] Direct upload success:', {
-      public_id: result.public_id,
-      secure_url: result.secure_url
-    });
-
-    return result;
-  } catch (error) {
-    console.error('[Cloudinary] Direct upload failed:', error.message);
-    throw new Error(`Cloudinary upload failed: ${error.message}`);
   }
 };
 
@@ -145,20 +164,26 @@ const uploadToCloudinary = async (filePath, options = {}) => {
 ===================================================== */
 const deleteFromCloudinary = async (publicId) => {
   try {
-    console.log('[Cloudinary] Deleting asset:', publicId);
+    if (!publicId) return;
 
-    await cloudinary.uploader.destroy(publicId);
+    console.log("[Cloudinary] Deleting asset:", publicId);
+    await cloudinary.uploader.destroy(publicId, {
+      resource_type: "auto",
+    });
 
-    console.log('[Cloudinary] Asset deleted successfully');
+    console.log("[Cloudinary] Asset deleted successfully");
   } catch (error) {
-    console.error('[Cloudinary] Delete failed:', error.message);
+    console.error("[Cloudinary] Delete failed:", error.message);
     throw new Error(`Cloudinary delete failed: ${error.message}`);
   }
 };
 
-module.exports = { 
-  upload, 
+/* =====================================================
+   EXPORTS
+===================================================== */
+module.exports = {
+  upload,
   normalizePostPayload,
-  uploadToCloudinary, 
-  deleteFromCloudinary 
+  uploadToCloudinary,
+  deleteFromCloudinary,
 };

@@ -5,7 +5,7 @@ const registerGroup = require('./group');
 const registerVoice = require('./voice');
 
 /* =====================================================
-   SOCKET INITIALIZER
+   SOCKET INITIALIZER (AUTHORITATIVE)
 ===================================================== */
 
 module.exports = function initSocket(io) {
@@ -15,7 +15,7 @@ module.exports = function initSocket(io) {
 
   /* =====================================================
      AUTH MIDDLEWARE
-     - Runs BEFORE connection event
+     - Runs BEFORE connection
      - Attaches socket.user
   ===================================================== */
   io.use(socketAuth);
@@ -29,30 +29,84 @@ module.exports = function initSocket(io) {
       return;
     }
 
-    console.log(`🟢 Socket connected: ${socket.user.id}`);
+    const userId = String(socket.user.id);
+
+    console.log(`🟢 Socket connected: ${userId}`);
 
     /* =====================================================
-       MODULE REGISTRATION
-       Each module binds its own listeners
+       USER ROOM (1 user = 1 room)
+       - Used for presence, direct emits, receipts
+    ===================================================== */
+    socket.join(`user:${userId}`);
+
+    /* =====================================================
+       REQUIRED CHAT ROOM EVENTS
+       🔥 THIS FIXES YOUR REALTIME ISSUES
+    ===================================================== */
+
+    // DM chat room
+    socket.on('chat:join', ({ chatId }, cb) => {
+      if (!chatId) {
+        return typeof cb === 'function' &&
+          cb({ success: false, message: 'chatId required' });
+      }
+
+      socket.join(String(chatId));
+      typeof cb === 'function' && cb({ success: true });
+    });
+
+    socket.on('chat:leave', ({ chatId }) => {
+      if (!chatId) return;
+      socket.leave(String(chatId));
+    });
+
+    // Join ALL DM chats at once (used on reconnect)
+    socket.on('chat:joinAll', ({ chatIds = [] }, cb) => {
+      if (!Array.isArray(chatIds)) return;
+
+      chatIds.forEach((id) => socket.join(String(id)));
+      typeof cb === 'function' && cb({ success: true });
+    });
+
+    /* =====================================================
+       GROUP CHAT ROOMS
+    ===================================================== */
+
+    socket.on('group:join', ({ groupId }, cb) => {
+      if (!groupId) {
+        return typeof cb === 'function' &&
+          cb({ success: false, message: 'groupId required' });
+      }
+
+      socket.join(`group:${groupId}`);
+      typeof cb === 'function' && cb({ success: true });
+    });
+
+    socket.on('group:leave', ({ groupId }) => {
+      if (!groupId) return;
+      socket.leave(`group:${groupId}`);
+    });
+
+    /* =====================================================
+       REGISTER DOMAIN MODULES
+       (safe – they rely on rooms above)
     ===================================================== */
     try {
       registerPresence(io, socket);
       registerChat(io, socket);
       registerGroup(io, socket);
       registerVoice(io, socket);
-    } catch (e) {
-      console.error('❌ Socket module registration failed:', e);
+    } catch (err) {
+      console.error('❌ Socket module registration failed:', err);
       socket.disconnect(true);
       return;
     }
 
     /* =====================================================
-       DISCONNECT
+       CLEANUP
     ===================================================== */
     socket.on('disconnect', (reason) => {
-      console.log(
-        `🔴 Socket disconnected: ${socket.user.id} | reason: ${reason}`
-      );
+      console.log(`🔴 Socket disconnected: ${userId} | reason: ${reason}`);
     });
   });
 

@@ -21,27 +21,45 @@ export default function ConfirmModal({
     >
       <View style={tw`flex-1 bg-black/40 items-center justify-center px-6`}>
         <View style={tw`bg-white rounded-2xl w-full p-6`}>
+          {/* ================= TITLE ================= */}
           <Text
-            style={[
-              tw`text-lg font-semibold`,
-              danger ? tw`text-red-600` : tw`text-gray-900`,
-            ]}
+            style={{
+              fontFamily: "Poppins-SemiBold",
+              fontSize: 18,
+              color: danger ? "#DC2626" : "#111827",
+            }}
           >
             {title}
           </Text>
 
+          {/* ================= MESSAGE ================= */}
           {!!message && (
-            <Text style={tw`text-gray-600 mt-2 leading-6`}>
+            <Text
+              style={{
+                fontFamily: "Poppins-Regular",
+                fontSize: 14,
+                color: "#4B5563",
+                marginTop: 8,
+                lineHeight: 22,
+              }}
+            >
               {message}
             </Text>
           )}
 
+          {/* ================= ACTIONS ================= */}
           <View style={tw`flex-row justify-end mt-6`}>
             <TouchableOpacity
               onPress={onCancel}
-              style={tw`px-4 py-2 mr-2`}
+              style={tw`px-4 py-2 mr-3`}
             >
-              <Text style={tw`text-gray-600`}>
+              <Text
+                style={{
+                  fontFamily: "Poppins-Medium",
+                  fontSize: 14,
+                  color: "#6B7280",
+                }}
+              >
                 {cancelText}
               </Text>
             </TouchableOpacity>
@@ -53,7 +71,13 @@ export default function ConfirmModal({
                 danger ? tw`bg-red-600` : tw`bg-purple-600`,
               ]}
             >
-              <Text style={tw`text-white font-medium`}>
+              <Text
+                style={{
+                  fontFamily: "Poppins-Medium",
+                  fontSize: 14,
+                  color: "#FFFFFF",
+                }}
+              >
                 {confirmText}
               </Text>
             </TouchableOpacity>

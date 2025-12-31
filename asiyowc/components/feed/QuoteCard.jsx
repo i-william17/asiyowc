@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
-import { View, Text } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useMemo, useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, Animated } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { PHOEBE_ASIYO_QUOTES } from '../../constants/phoebeAsiyoQuotes';
 
 const QuoteCard = () => {
@@ -9,64 +9,137 @@ const QuoteCard = () => {
     return PHOEBE_ASIYO_QUOTES[dayIndex];
   }, []);
 
+  const [collapsed, setCollapsed] = useState(false);
+
+  const animatedHeight = useRef(new Animated.Value(1)).current;
+  const animatedOpacity = useRef(new Animated.Value(1)).current;
+
+  const collapse = () => {
+    Animated.parallel([
+      Animated.timing(animatedHeight, {
+        toValue: 0,
+        duration: 260,
+        useNativeDriver: false,
+      }),
+      Animated.timing(animatedOpacity, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: false,
+      }),
+    ]).start(() => setCollapsed(true));
+  };
+
+  const expand = () => {
+    Animated.parallel([
+      Animated.timing(animatedHeight, {
+        toValue: 1,
+        duration: 260,
+        useNativeDriver: false,
+      }),
+      Animated.timing(animatedOpacity, {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: false,
+      }),
+    ]).start(() => setCollapsed(false));
+  };
+
+  const contentHeight = animatedHeight.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 140],
+  });
+
   return (
     <View
       style={{
         backgroundColor: '#6A1B9A',
         borderRadius: 20,
-        padding: 22,
         marginBottom: 22,
-        shadowColor: '#000',
-        shadowOpacity: 0.08,
-        shadowRadius: 10,
-        elevation: 3
+        overflow: 'hidden',
+        elevation: 3,
       }}
     >
-      {/* Opening Quote */}
-      <Ionicons
-        name="quote"
-        size={26}
-        color="rgba(255,255,255,0.35)"
-        style={{ marginBottom: 10 }}
-      />
-
-      {/* Quote Text */}
-      <Text
+      {/* HEADER */}
+      <View
         style={{
-          color: '#FFFFFF',
-          fontFamily: 'Poppins-Regular',
-          fontSize: 16,
-          lineHeight: 26,
-          fontStyle: 'italic',
-          marginBottom: 14
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: 18,
         }}
       >
-        {quote.text}
-      </Text>
+        {/* Opening Quote (Golden) */}
+        <MaterialCommunityIcons
+          name="format-quote-open"
+          size={28}
+          color="#FACC15"
+        />
 
-      {/* Author */}
-      <Text
+        {/* Chevron Controls (Golden) */}
+        {collapsed ? (
+          <TouchableOpacity onPress={expand}>
+            <MaterialCommunityIcons
+              name="chevron-down"
+              size={28}
+              color="#FACC15"
+            />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity onPress={collapse}>
+            <MaterialCommunityIcons
+              name="chevron-up"
+              size={28}
+              color="#FACC15"
+            />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* COLLAPSIBLE CONTENT */}
+      <Animated.View
         style={{
-          color: 'rgba(255,255,255,0.9)',
-          fontFamily: 'Poppins-SemiBold',
-          fontSize: 14
+          height: contentHeight,
+          opacity: animatedOpacity,
+          paddingHorizontal: 18,
         }}
       >
-        — {quote.author}
-      </Text>
+        {/* Quote Text */}
+        <Text
+          style={{
+            color: '#FFFFFF',
+            fontFamily: 'Poppins-Regular',
+            fontSize: 16,
+            lineHeight: 26,
+            fontStyle: 'italic',
+            marginBottom: 14,
+          }}
+        >
+          {quote.text}
+        </Text>
 
-      {/* Closing Quote */}
-      <Ionicons
-        name="quote"
-        size={26}
-        color="rgba(255,255,255,0.25)"
-        style={{
-          position: 'absolute',
-          bottom: 16,
-          right: 18,
-          transform: [{ rotate: '180deg' }]
-        }}
-      />
+        {/* Author */}
+        <Text
+          style={{
+            color: 'rgba(255,255,255,0.9)',
+            fontFamily: 'Poppins-SemiBold',
+            fontSize: 14,
+          }}
+        >
+          — {quote.author}
+        </Text>
+
+        {/* Closing Quote (Golden) */}
+        <MaterialCommunityIcons
+          name="format-quote-close"
+          size={28}
+          color="#FACC15"
+          style={{
+            position: 'absolute',
+            bottom: 12,
+            right: 14,
+          }}
+        />
+      </Animated.View>
     </View>
   );
 };

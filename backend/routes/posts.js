@@ -1,4 +1,3 @@
-// routes/posts.js
 const express = require('express');
 const router = express.Router();
 
@@ -14,7 +13,7 @@ router.post(
   '/',
   auth,
   upload.single('media'),
-  normalizePostPayload,        // 🔑 REQUIRED
+  normalizePostPayload,
   postController.createPost
 );
 
@@ -25,16 +24,21 @@ router.put(
   '/:postId',
   auth,
   upload.single('media'),
-  normalizePostPayload,        // 🔑 REQUIRED
+  normalizePostPayload,
   postController.updatePost
 );
 
 /* =====================================================
-   FEED & READ ROUTES (UNCHANGED)
+   FEED & READ
 ===================================================== */
 router.get('/feed', auth, postController.getFeed);
 router.get('/highlights', auth, postController.getPublicHighlights);
 router.get('/:postId', auth, postController.getPostById);
+
+/* =====================================================
+   LIKES (INSTAGRAM-STYLE)
+===================================================== */
+router.post('/:postId/like', auth, postController.toggleLike);
 
 /* =====================================================
    COMMENTS
@@ -44,6 +48,13 @@ router.post('/:postId/comments', auth, postController.addComment);
 router.put('/:postId/comments/:commentId', auth, postController.editComment);
 router.delete('/:postId/comments/:commentId', auth, postController.removeComment);
 
+/* ----- COMMENT LIKES ----- */
+router.post(
+  '/:postId/comments/:commentId/like',
+  auth,
+  postController.toggleLikeComment
+);
+
 /* =====================================================
    SHARING
 ===================================================== */
@@ -51,13 +62,12 @@ router.post('/:postId/share', auth, postController.sharePost);
 router.post('/:postId/unshare', auth, postController.unsharePost);
 
 /* =====================================================
-   REACTIONS
+   REPORT
 ===================================================== */
-router.post('/:postId/react', auth, postController.reactToPost);
-router.post('/:postId/unreact', auth, postController.removeReaction);
+router.post('/:postId/report', auth, postController.reportPost);
 
 /* =====================================================
-   DELETE
+   DELETE POST
 ===================================================== */
 router.delete('/:postId', auth, postController.deletePost);
 

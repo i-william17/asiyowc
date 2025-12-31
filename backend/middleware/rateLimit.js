@@ -5,13 +5,13 @@ const authLimiter = rateLimit({
   max: 20, // 5 attempts
   message: {
     success: false,
-    message: 'Too many login attempts, please try again later'
+    message: 'Too many attempts, Please try again later in 15 minutes.'
   }
 });
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // 100 requests per windowMs
+  max: 50 // 100 requests per windowMs
 });
 
 const strictLimiter = rateLimit({
