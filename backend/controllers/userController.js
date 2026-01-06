@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Post = require('../models/Post');
 const Program = require('../models/Program');
 const { deleteFromCloudinary } = require('../middleware/upload');
+const cloudinary = require("cloudinary").v2;
 
 exports.getAllUsers = async (req, res) => {
   try {
@@ -86,35 +87,111 @@ exports.getProfile = async (req, res) => {
    UPDATE PROFILE (SAFE FIELDS ONLY)
 ===================================================== */
 exports.updateProfile = async (req, res) => {
+
+  const updates = {};
+
+  const {
+    fullName,
+    email,
+    bio,
+    role,
+    interests,
+    location,
+    safety
+  } = req.body;
+
+  /* =====================================================
+     BASIC PROFILE
+  ===================================================== */
+  if (typeof fullName === "string") {
+    updates["profile.fullName"] = fullName.trim();
+  }
+
+  if (typeof bio === "string") {
+    updates["profile.bio"] = bio.trim();
+  }
+
+  if (typeof role === "string") {
+    updates["profile.role"] = role.toLowerCase().trim();
+  }
+
+  if (Array.isArray(interests)) {
+    updates["interests"] = interests
+      .map(i => i.toLowerCase().trim())
+      .filter(Boolean);
+  }
+
+  /* =====================================================
+     LOCATION
+  ===================================================== */
+  if (location && typeof location === "object") {
+    updates["profile.location.country"] =
+      typeof location.country === "string" ? location.country.trim() : "";
+
+    updates["profile.location.countryCode"] =
+      typeof location.countryCode === "string" ? location.countryCode.trim() : "";
+
+    updates["profile.location.city"] =
+      typeof location.city === "string" ? location.city.trim() : "";
+  }
+
+  /* =====================================================
+     ⭐ EMERGENCY CONTACTS — FROM FRONTEND
+     william – your payload is:
+     safety: { emergencyContacts: [...] }
+  ===================================================== */
+
+  if (Array.isArray(safety?.emergencyContacts)) {
+
+    const normalized = safety.emergencyContacts.map(c => ({
+      name: typeof c?.name === "string" ? c.name.trim() : "",
+      phone: typeof c?.phone === "string" ? c.phone.trim() : "",
+      relationship:
+        typeof c?.relationship === "string" && c.relationship.length > 0
+          ? c.relationship.trim()
+          : "Other",
+    }));
+
+    // ⭐ overwrite the safety array in one atomic set
+    updates["safety.emergencyContacts"] = normalized;
+  }
+
+  /* =====================================================
+     EMAIL UNIQUE
+  ===================================================== */
+  if (typeof email === "string") {
+    updates["email"] = email.toLowerCase().trim();
+  }
+
   try {
-    const updates = {};
 
-    if (req.body.fullName !== undefined)
-      updates['profile.fullName'] = req.body.fullName;
+    const userId = req.user.id;
 
-    if (req.body.bio !== undefined)
-      updates['profile.bio'] = req.body.bio;
-
-    if (req.body.role !== undefined)
-      updates['profile.role'] = req.body.role;
-
-    if (req.body.interests !== undefined)
-      updates.interests = req.body.interests;
+    const exists = await User.findById(userId);
+    if (!exists) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
 
     const user = await User.findByIdAndUpdate(
-      req.user.id,
+      userId,
       { $set: updates },
       { new: true, runValidators: true }
-    ).select('-password -twoFactorAuth.secret');
+    ).select("-password -twoFactorAuth.secret");
 
-    res.json({
+    return res.json({
       success: true,
-      message: 'Profile updated successfully',
+      message: "Profile updated successfully",
       data: { user }
     });
+
   } catch (error) {
-    console.error('❌ updateProfile error:', error);
-    res.status(500).json({
+
+    console.error("❌ updateProfile mongo error:", error.message);
+
+    return res.status(500).json({
       success: false,
       message: error.message
     });
@@ -129,38 +206,48 @@ exports.uploadAvatar = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: 'Please upload an image'
+        message: "Please upload an image",
       });
     }
 
     const user = await User.findById(req.user.id);
 
-    // cleanup old avatar (safe optional)
+    // ⭐ DELETE OLD – BUT DO NOT STOP FLOW
     if (user?.profile?.avatar?.publicId) {
       await deleteFromCloudinary(user.profile.avatar.publicId);
     }
 
+    // ⭐ REAL CLOUDINARY UPLOAD
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: "asiyo-app",
+      resource_type: "image",
+    });
+
+    // ⭐ USE CLOUDINARY URL NOT LOCAL
     const avatar = {
-      url: req.file.path,
-      publicId: req.file.filename || req.file.public_id || null
+      url: result.secure_url,
+      publicId: result.public_id,
     };
 
     user.profile.avatar = avatar;
     await user.save();
 
-    res.json({
+    return res.json({
       success: true,
-      message: 'Avatar uploaded successfully',
-      data: { avatar }
+      message: "Avatar uploaded successfully",
+      data: { avatar },
     });
   } catch (error) {
-    console.error('❌ uploadAvatar error:', error);
-    res.status(500).json({
+    console.error("❌ uploadAvatar error:", error.message);
+
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: "Avatar upload failed",
+      error: error.message,
     });
   }
 };
+
 
 /* =====================================================
    DELETE AVATAR
@@ -204,34 +291,52 @@ exports.uploadCoverPhoto = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: 'Please upload an image'
+        message: "Please upload an image",
       });
     }
 
     const user = await User.findById(req.user.id);
 
+    // ⭐ clean OLD cover but do not block
     if (user?.profile?.coverPhoto?.publicId) {
-      await deleteFromCloudinary(user.profile.coverPhoto.publicId);
+      try {
+        await deleteFromCloudinary(user.profile.coverPhoto.publicId);
+      } catch (cleanupErr) {
+        console.log(
+          "[Cloudinary] Old cover cleanup failed – continuing save"
+        );
+      }
     }
 
+    // ⭐ CLOUDINARY UPLOAD
+    const result = await cloudinary.uploader.upload(
+      req.file.path,
+      {
+        folder: "asiyo-app",
+        resource_type: "image",
+      }
+    );
+
     const coverPhoto = {
-      url: req.file.path,
-      publicId: req.file.filename || req.file.public_id || null
+      url: result.secure_url,      // ✅ REAL CLOUD URL
+      publicId: result.public_id,  // ✅ PUBLIC ID
     };
 
     user.profile.coverPhoto = coverPhoto;
     await user.save();
 
-    res.json({
+    return res.json({
       success: true,
-      message: 'Cover photo uploaded successfully',
-      data: { coverPhoto }
+      message: "Cover photo uploaded successfully",
+      data: { coverPhoto },
     });
   } catch (error) {
-    console.error('❌ uploadCoverPhoto error:', error);
-    res.status(500).json({
+    console.error("❌ uploadCoverPhoto error:", error.message);
+
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: "Cover photo upload failed",
+      error: error.message,
     });
   }
 };

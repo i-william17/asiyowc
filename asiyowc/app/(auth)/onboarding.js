@@ -103,10 +103,11 @@ const OnboardingScreen = () => {
       id: 'learner',
       name: 'Learner',
       description: 'Get up and going',
-      gradient: ['#44B5', '#44A0'],
+      gradient: ['#2563EB', '#06B6D4'], // blue → teal
       icon: 'book',
       library: MaterialIcons
-    },
+    }
+
   ];
 
   // Enhanced step navigation with smooth transitions
@@ -544,7 +545,7 @@ const OnboardingScreen = () => {
       <LinearGradient
         colors={['#1E3A8A', '#3730A3', '#6A1B9A']}
         style={[
-          tw`h-52 rounded-b-3xl shadow-lg`,
+          tw`h-60 rounded-b-3xl shadow-lg`,
           Platform.OS === 'web' ? { marginTop: 0 } : tw`mt-[-750]`,
         ]}
 

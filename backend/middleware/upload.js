@@ -162,19 +162,46 @@ const normalizePostPayload = async (req, res, next) => {
 /* =====================================================
    DELETE FROM CLOUDINARY
 ===================================================== */
-const deleteFromCloudinary = async (publicId) => {
-  try {
-    if (!publicId) return;
+const deleteFromCloudinary = async function (publicId) {
 
-    console.log("[Cloudinary] Deleting asset:", publicId);
-    await cloudinary.uploader.destroy(publicId, {
-      resource_type: "auto",
+  if (!publicId || typeof publicId !== "string") {
+    return false;
+  }
+
+  // ⭐ INFER SAFELY FROM CLOUDINARY FOLDER CONVENTION
+  let resourceType = "image";
+
+  if (
+    publicId.includes("/video/") ||
+    publicId.endsWith(".mp4") ||
+    publicId.endsWith(".mov") ||
+    publicId.endsWith(".mkv")
+  ) {
+    resourceType = "video";
+  }
+
+  try {
+
+    console.log("[Cloudinary] Deleting asset:", publicId, "as", resourceType);
+
+    const result = await cloudinary.uploader.destroy(publicId, {
+      resource_type: resourceType,
+      invalidate: true,
     });
 
-    console.log("[Cloudinary] Asset deleted successfully");
-  } catch (error) {
-    console.error("[Cloudinary] Delete failed:", error.message);
-    throw new Error(`Cloudinary delete failed: ${error.message}`);
+    // ⭐ ACCEPTED RESULTS — DO NOT THROW
+    if (["ok", "not found"].includes(result.result)) {
+      return true;
+    }
+
+    console.error("[Cloudinary] Delete response:", result.result);
+    return false;
+
+  } catch (err) {
+
+    console.error("[Cloudinary] Delete failed:", err.message);
+    return false;   // ⭐ NEVER THROW OUTSIDE
+
   }
 };
 

@@ -30,7 +30,9 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "react-native-compressor"
+      "react-native-compressor",
+      "react-native-video",
+      "expo-video"
     ]
   }
 }

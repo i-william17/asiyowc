@@ -24,7 +24,6 @@ export const fetchAuthenticatedUser = createAsyncThunk(
   }
 );
 
-
 /* ============================================================
    RESTORE TOKEN (App Startup)
 ============================================================ */
@@ -32,17 +31,24 @@ export const restoreToken = createAsyncThunk(
   'auth/restoreToken',
   async () => {
     try {
+      console.log("Restoring token...");
       const storedToken = await secureStore.getItem('token');
+      console.log("Stored token:", storedToken);
+
       const storedOnboarding = await secureStore.getItem('onboarding');
       const storedHasRegistered = await secureStore.getItem('hasRegistered');
 
       return {
         token: storedToken || null,
         onboarding: storedOnboarding ? JSON.parse(storedOnboarding) : null,
-        hasRegistered: storedHasRegistered === 'true'
+        hasRegistered: storedHasRegistered === 'true',
       };
-    } catch (e) {
-      return { token: null, onboarding: null, hasRegistered: false };
+    } catch {
+      return {
+        token: null,
+        onboarding: null,
+        hasRegistered: false,
+      };
     }
   }
 );
@@ -78,6 +84,8 @@ export const loginUser = createAsyncThunk(
 
       if (response.data?.token) {
         await secureStore.setItem('token', response.data.token);
+        // 🔥 CRITICAL: persist registration state on login
+        await secureStore.setItem('hasRegistered', 'true');
       }
 
       return response;
@@ -88,7 +96,7 @@ export const loginUser = createAsyncThunk(
 );
 
 /* ============================================================
-   VERIFY OTP (after registration)
+   VERIFY OTP
 ============================================================ */
 export const verifyOTP = createAsyncThunk(
   'auth/verifyOTP',
@@ -171,13 +179,25 @@ const authSlice = createSlice({
     builder
 
       /* ============================================================
-         RESTORE TOKEN
+         RESTORE TOKEN (RACE-SAFE)
       ============================================================= */
+      .addCase(restoreToken.pending, (state) => {
+        state.appLoaded = false;
+      })
+
       .addCase(restoreToken.fulfilled, (state, action) => {
-        state.token = action.payload.token;
+        // 🔒 DO NOT overwrite an active token
+        if (!state.token) {
+          state.token = action.payload.token;
+          state.isAuthenticated = !!action.payload.token;
+        }
+
         state.onboardingData = action.payload.onboarding;
         state.hasRegistered = action.payload.hasRegistered;
-        state.isAuthenticated = !!action.payload.token;
+        state.appLoaded = true;
+      })
+
+      .addCase(restoreToken.rejected, (state) => {
         state.appLoaded = true;
       })
 
@@ -188,24 +208,27 @@ const authSlice = createSlice({
         state.loading = true;
         state.error = null;
       })
+
       .addCase(registerUser.fulfilled, (state, action) => {
         state.loading = false;
         state.user = action.payload.data.user;
         state.hasRegistered = true;
-        state.isAuthenticated = false; // must verify email
+        state.isAuthenticated = false;
       })
+
       .addCase(registerUser.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
 
       /* ============================================================
-         LOGIN (PATCHED)
+         LOGIN
       ============================================================= */
       .addCase(loginUser.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
+
       .addCase(loginUser.fulfilled, (state, action) => {
         state.loading = false;
 
@@ -221,23 +244,24 @@ const authSlice = createSlice({
         state.isAuthenticated = true;
         state.hasRegistered = true;
 
-        // ⭐ STORE USER ID PERSISTENTLY
         if (user?._id) {
-          secureStore.setItem("userId", user._id);
+          secureStore.setItem('userId', user._id);
         }
       })
+
       .addCase(loginUser.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
 
       /* ============================================================
-         VERIFY OTP (PATCHED)
+         VERIFY OTP
       ============================================================= */
       .addCase(verifyOTP.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
+
       .addCase(verifyOTP.fulfilled, (state, action) => {
         state.loading = false;
 
@@ -248,36 +272,32 @@ const authSlice = createSlice({
         state.isAuthenticated = true;
         state.hasRegistered = true;
 
-        // ⭐ STORE USER ID
         if (user?._id) {
-          secureStore.setItem("userId", user._id);
+          secureStore.setItem('userId', user._id);
         }
       })
+
       .addCase(verifyOTP.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
 
       /* ============================================================
-         FETCH AUTHENTICATED USER (PATCHED)
+         FETCH AUTHENTICATED USER
       ============================================================= */
       .addCase(fetchAuthenticatedUser.fulfilled, (state, action) => {
         state.user = action.payload;
         state.isAuthenticated = true;
 
-        // ⭐ STORE USER ID ON APP RELOAD
         if (action.payload?._id) {
-          secureStore.setItem("userId", action.payload._id);
+          secureStore.setItem('userId', action.payload._id);
         }
       })
 
       .addCase(fetchAuthenticatedUser.rejected, (state) => {
-        state.token = null;
         state.user = null;
         state.isAuthenticated = false;
-
-        secureStore.removeItem("token");
-        secureStore.removeItem("userId");
+        // ❌ DO NOT clear token here
       })
 
       /* ============================================================
@@ -295,7 +315,7 @@ export const {
   setOnboardingData,
   clearError,
   resetAuth,
-  setToken
+  setToken,
 } = authSlice.actions;
 
 export default authSlice.reducer;

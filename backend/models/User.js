@@ -2,181 +2,224 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const validator = require('validator');
 
-const emergencyContactSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  phone: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  relationship: {
-    type: String,
-    trim: true
-  }
-}, { _id: false });
-
-const userSchema = new mongoose.Schema({
-
-  /* ================= AUTH ================= */
-  email: {
-    type: String,
-    required: [true, 'Email is required'],
-    unique: true,
-    lowercase: true,
-    validate: [validator.isEmail, 'Please provide a valid email'],
-    index: true
-  },
-
-  phone: {
-    type: String,
-    required: [true, 'Phone number is required'],
-    unique: true,
-    validate: {
-      validator: function (v) {
-        return /^\+?[0-9\s-()]{7,20}$/.test(v);
-      },
-      message: 'Please provide a valid phone number'
-    }
-  },
-
-  password: {
-    type: String,
-    required: [true, 'Password is required'],
-    minlength: 8,
-    select: false
-  },
-
-  /* ================= PROFILE ================= */
-  profile: {
-    fullName: {
+/* ================= EMERGENCY CONTACT ================= */
+const emergencyContactSchema = new mongoose.Schema(
+  {
+    name: {
       type: String,
-      required: [true, 'Full name is required'],
+      required: true,
       trim: true,
-      maxlength: 100
     },
-
-    role: {
+    phone: {
       type: String,
-      enum: [
-        'mentor',
-        'entrepreneur',
-        'advocate',
-        'changemaker',
-        'professional',
-        'learner'
-      ],
-      default: 'professional'
+      required: true,
+      trim: true,
     },
-
-    bio: {
+    relationship: {
       type: String,
-      maxlength: 500,
-      default: ''
+      trim: true,
+    },
+  },
+  { _id: false }
+);
+
+/* ================= USER ================= */
+const userSchema = new mongoose.Schema(
+  {
+    /* ================= AUTH ================= */
+    email: {
+      type: String,
+      required: [true, 'Email is required'],
+      unique: true,
+      lowercase: true,
+      validate: [validator.isEmail, 'Please provide a valid email'],
+      index: true,
     },
 
-    avatar: {
-      url: { type: String, default: null },
-      publicId: { type: String, default: null }
+    phone: {
+      type: String,
+      required: [true, 'Phone number is required'],
+      unique: true,
+      validate: {
+        validator: function (v) {
+          return /^\+?[0-9\s-()]{7,20}$/.test(v);
+        },
+        message: 'Please provide a valid phone number',
+      },
     },
 
-    coverPhoto: {
-      url: { type: String, default: null },
-      publicId: { type: String, default: null }
-    }
+    password: {
+      type: String,
+      required: [true, 'Password is required'],
+      minlength: 8,
+      select: false,
+    },
+
+    /* ================= PROFILE ================= */
+    profile: {
+      fullName: {
+        type: String,
+        required: [true, 'Full name is required'],
+        trim: true,
+        maxlength: 100,
+      },
+
+      role: {
+        type: String,
+        enum: [
+          'mentor',
+          'entrepreneur',
+          'advocate',
+          'changemaker',
+          'professional',
+          'learner',
+        ],
+        default: 'professional',
+      },
+
+      bio: {
+        type: String,
+        maxlength: 500,
+        default: '',
+      },
+
+      /* ===== LOCATION (NEW) ===== */
+      location: {
+        country: {
+          type: String,
+          trim: true,
+          default: '',
+        },
+        countryCode: {
+          type: String,
+          trim: true,
+          uppercase: true,
+          minlength: 2,
+          maxlength: 2,
+          default: '',
+        },
+        city: {
+          type: String,
+          trim: true,
+          default: '',
+        },
+      },
+
+      avatar: {
+        url: { type: String, default: null },
+        publicId: { type: String, default: null },
+      },
+
+      coverPhoto: {
+        url: { type: String, default: null },
+        publicId: { type: String, default: null },
+      },
+    },
+
+    /* ================= INTERESTS ================= */
+    interests: [
+      {
+        type: String,
+        enum: [
+          'leadership',
+          'finance',
+          'health',
+          'advocacy',
+          'entrepreneurship',
+          'education',
+          'technology',
+          'arts',
+          'mentorship',
+          'community',
+          'wellness',
+        ],
+      },
+    ],
+
+    /* ================= BADGES ================= */
+    badges: [
+      {
+        type: String,
+        trim: true,
+      },
+    ],
+
+    /* ================= VERIFICATION ================= */
+    verification: {
+      emailToken: String,
+      emailTokenExpires: Date,
+      phoneToken: String,
+      phoneTokenExpires: Date,
+    },
+
+    isVerified: {
+      email: { type: Boolean, default: false },
+      phone: { type: Boolean, default: false },
+    },
+
+    /* ================= TWO FACTOR AUTH ================= */
+    twoFactorAuth: {
+      enabled: { type: Boolean, default: false },
+      secret: String,
+    },
+
+    /* ================= ACTIVITY ================= */
+    lastActive: {
+      type: Date,
+      default: Date.now,
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+
+    hasRegistered: {
+      type: Boolean,
+      default: false,
+    },
+
+    /* ================= SAFETY & SOS ================= */
+    safety: {
+      emergencyContacts: [emergencyContactSchema],
+      lastSOSUsed: Date,
+    },
+
+    /* ================= PROGRAM PROGRESS ================= */
+    programProgress: [
+      {
+        program: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Program',
+        },
+        enrolledAt: Date,
+        completedAt: Date,
+        progress: Number,
+        lastActive: Date,
+        completedModules: [mongoose.Schema.Types.ObjectId],
+        certificates: [
+          {
+            programId: mongoose.Schema.Types.ObjectId,
+            certificateId: String,
+            issuedAt: Date,
+            downloadUrl: String,
+          },
+        ],
+      },
+    ],
   },
-
-  /* ================= INTERESTS & BADGES ================= */
-  interests: [{
-    type: String,
-    enum: [
-      'leadership',
-      'finance',
-      'health',
-      'advocacy',
-      'entrepreneurship',
-      'education',
-      'technology',
-      'arts',
-      'mentorship',
-      'community',
-      'wellness'
-    ]
-  }],
-
-  badges: [{
-    type: String
-  }],
-
-  /* ================= VERIFICATION ================= */
-  verification: {
-    emailToken: String,
-    emailTokenExpires: Date,
-    phoneToken: String,
-    phoneTokenExpires: Date
-  },
-
-  isVerified: {
-    email: { type: Boolean, default: false },
-    phone: { type: Boolean, default: false }
-  },
-
-  /* ================= TWO FACTOR AUTH ================= */
-  twoFactorAuth: {
-    enabled: { type: Boolean, default: false },
-    secret: String
-  },
-
-  /* ================= ACTIVITY ================= */
-  lastActive: {
-    type: Date,
-    default: Date.now
-  },
-
-  isActive: {
-    type: Boolean,
-    default: true
-  },
-
-  hasRegistered: {
-    type: Boolean,
-    default: false
-  },
-
-  /* ================= SAFETY & SOS ================= */
-  safety: {
-    emergencyContacts: [emergencyContactSchema],
-    lastSOSUsed: Date
-  },
-
-  /* ================= PROGRAM PROGRESS (LEGACY / OPTIONAL) ================= */
-  programProgress: [{
-    program: { type: mongoose.Schema.Types.ObjectId, ref: 'Program' },
-    enrolledAt: Date,
-    completedAt: Date,
-    progress: Number,
-    lastActive: Date,
-    completedModules: [mongoose.Schema.Types.ObjectId],
-    certificates: [{
-      programId: mongoose.Schema.Types.ObjectId,
-      certificateId: String,
-      issuedAt: Date,
-      downloadUrl: String
-    }]
-  }]
-
-}, {
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
-});
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
+);
 
 /* ================= INDEXES ================= */
 userSchema.index({ interests: 1 });
 userSchema.index({ createdAt: -1 });
+// Optional future use:
+// userSchema.index({ 'profile.location.countryCode': 1 });
 
 /* ================= PASSWORD HASHING ================= */
 userSchema.pre('save', async function (next) {
@@ -186,7 +229,10 @@ userSchema.pre('save', async function (next) {
 });
 
 /* ================= PASSWORD COMPARISON ================= */
-userSchema.methods.correctPassword = async function (candidatePassword, userPassword) {
+userSchema.methods.correctPassword = async function (
+  candidatePassword,
+  userPassword
+) {
   return await bcrypt.compare(candidatePassword, userPassword);
 };
 

@@ -1,85 +1,34 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import { useSelector, useDispatch } from 'react-redux';
-import { setToken, resetAuth } from '../store/slices/authSlice';
-import { secureStore } from '../services/storage';
+import React, { createContext, useContext } from 'react';
 
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
-const authReducer = (state, action) => {
-  switch (action.type) {
-    case 'RESTORE_TOKEN':
-      return {
-        ...state,
-        userToken: action.token,
-        isLoading: false,
-      };
-    case 'SIGN_IN':
-      return {
-        ...state,
-        isSignout: false,
-        userToken: action.token,
-      };
-    case 'SIGN_OUT':
-      return {
-        ...state,
-        isSignout: true,
-        userToken: null,
-      };
-    default:
-      return state;
-  }
-};
-
+/**
+ * 🔒 AuthProvider (Redux is the source of truth)
+ * This provider is intentionally passive.
+ * DO NOT manage auth state here.
+ */
 export const AuthProvider = ({ children }) => {
-  const [state, dispatch] = useReducer(authReducer, {
-    isLoading: true,
-    isSignout: false,
-    userToken: null,
-  });
-
-  const reduxDispatch = useDispatch();
-  const authState = useSelector(state => state.auth);
-
-  useEffect(() => {
-    // Check for stored token on app start
-    const bootstrapAsync = async () => {
-      let userToken;
-
-      try {
-        userToken = await secureStore.getItem('token');
-        if (userToken) {
-          reduxDispatch(setToken(userToken));
-        }
-      } catch (e) {
-        console.warn('Failed to restore token:', e);
-      }
-
-      dispatch({ type: 'RESTORE_TOKEN', token: userToken });
-    };
-
-    bootstrapAsync();
-  }, []);
-
-  const authContext = React.useMemo(() => ({
-    signIn: async (token) => {
-      await secureStore.setItem('token', token);
-      reduxDispatch(setToken(token));
-      dispatch({ type: 'SIGN_IN', token });
+  const authContext = {
+    signIn: () => {
+      console.warn(
+        '[AuthContext] signIn called — auth is handled by Redux'
+      );
     },
-    signOut: async () => {
-      await secureStore.removeItem('token');
-      reduxDispatch(resetAuth());
-      dispatch({ type: 'SIGN_OUT' });
+    signOut: () => {
+      console.warn(
+        '[AuthContext] signOut called — use redux logoutUser'
+      );
     },
-    signUp: async (token) => {
-      await secureStore.setItem('token', token);
-      reduxDispatch(setToken(token));
-      dispatch({ type: 'SIGN_IN', token });
+    signUp: () => {
+      console.warn(
+        '[AuthContext] signUp called — auth is handled by Redux'
+      );
     },
-  }), []);
+    state: null,
+  };
 
   return (
-    <AuthContext.Provider value={{ ...authContext, state }}>
+    <AuthContext.Provider value={authContext}>
       {children}
     </AuthContext.Provider>
   );

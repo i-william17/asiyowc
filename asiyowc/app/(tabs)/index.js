@@ -1,3 +1,4 @@
+// (tabs)/index.js  
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import {
   View,
@@ -9,10 +10,15 @@ import {
   Animated,
   Modal,
   Pressable,
+  PanResponder,
+  Dimensions,
+  ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
+import { router } from 'expo-router';
 
 import { fetchFeed, deletePost } from '../../store/slices/postSlice';
 import PostCard from '../../components/feed/PostCard';
@@ -21,11 +27,10 @@ import CreatePostModal from '../../components/feed/CreatePostModal';
 import QuoteCard from '../../components/feed/QuoteCard';
 import ShimmerLoader from '../../components/ui/ShimmerLoader';
 
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
 /* ==========================================================
    POST SKELETON LIST (SHIMMER FOR POSTS)
-   Uses your existing <ShimmerLoader /> as a placeholder block.
-   If your ShimmerLoader already looks like a post skeleton, perfect.
-   If it’s a full-screen shimmer, you can create a lighter version later.
 ========================================================== */
 const PostSkeletonList = ({ count = 3 }) => {
   return (
@@ -39,12 +44,68 @@ const PostSkeletonList = ({ count = 3 }) => {
   );
 };
 
+/* ==========================================================
+   SWIPE INDICATOR COMPONENT
+========================================================== */
+const SwipeIndicator = ({ progress, isVisible }) => {
+  const translateX = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-50, 0],
+  });
+
+  const opacity = progress.interpolate({
+    inputRange: [0, 0.2, 1],
+    outputRange: [0, 0.5, 1],
+  });
+
+  if (!isVisible) return null;
+
+  return (
+    <Animated.View
+      style={[
+        styles.swipeIndicator,
+        {
+          opacity,
+          transform: [{ translateX }],
+        },
+      ]}
+      pointerEvents="none"
+    >
+      <View style={styles.swipeIconContainer}>
+        <Ionicons name="play" size={28} color="#FFFFFF" />
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 8 }}>
+          <MaterialCommunityIcons name="play-box-multiple" size={20} color="#FFFFFF" />
+          <Text style={styles.swipeText}>Reels</Text>
+        </View>
+      </View>
+      <View style={styles.swipeArrowContainer}>
+        <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
+        <Ionicons name="chevron-forward" size={20} color="#FFFFFF" style={{ marginLeft: -8 }} />
+      </View>
+    </Animated.View>
+  );
+};
+
+/* ==========================================================
+   LOADER COMPONENT FOR FLATLIST
+========================================================== */
+const FlatListLoader = ({ loading, hasMore, isRefreshing }) => {
+  if (!loading || isRefreshing) return null;
+  
+  return (
+    <View style={styles.loaderContainer}>
+      <ActivityIndicator size="small" color="#6A1B9A" />
+      <Text style={styles.loaderText}>Loading more posts...</Text>
+    </View>
+  );
+};
+
 const FeedScreen = () => {
   const dispatch = useDispatch();
-
+  
   // ⚠️ Your slice (from earlier) uses: loadingFeed not loading.
   // If your store really has `loading`, keep it.
-  // I’ll safely support both:
+  // I'll safely support both:
   const postsState = useSelector((state) => state.posts);
   const feed = postsState?.feed;
   const pagination = postsState?.pagination;
@@ -59,15 +120,103 @@ const FeedScreen = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [editingPost, setEditingPost] = useState(null);
-
   const [deletingPostId, setDeletingPostId] = useState(null);
-
+  const [loadingMore, setLoadingMore] = useState(false);
+  
   // ✅ Delete confirmation modal state
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [postToDelete, setPostToDelete] = useState(null);
 
+  // ✅ Swipe gesture state
+  const [swipeProgress] = useState(new Animated.Value(0));
+  const [showSwipeIndicator, setShowSwipeIndicator] = useState(false);
+  const [swipeActive, setSwipeActive] = useState(false);
+
   const hasTriggeredTopRefresh = useRef(false);
   const deleteAnim = useRef({}).current;
+  const flatListRef = useRef(null);
+  const swipeStartX = useRef(0);
+  const lastSwipeTime = useRef(0);
+
+  /* ==========================================================
+     PAN RESPONDER FOR SWIPE GESTURE
+  ========================================================== */
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // Only respond to horizontal swipes from left edge
+        const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const isFromLeftEdge = evt.nativeEvent.pageX < 50; // Start from left 50px
+        return isHorizontalSwipe && isFromLeftEdge;
+      },
+      onPanResponderGrant: (evt) => {
+        swipeStartX.current = evt.nativeEvent.pageX;
+        lastSwipeTime.current = Date.now();
+        setSwipeActive(true);
+        setShowSwipeIndicator(true);
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const swipeDistance = gestureState.dx;
+        const normalizedProgress = Math.min(Math.max(swipeDistance / 150, 0), 1);
+        
+        if (swipeDistance > 0) {
+          swipeProgress.setValue(normalizedProgress);
+        }
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        const swipeDistance = gestureState.dx;
+        const swipeVelocity = gestureState.vx;
+        const swipeDuration = Date.now() - lastSwipeTime.current;
+        
+        // Conditions to trigger reels screen:
+        // 1. Swipe distance > 80px OR
+        // 2. Fast swipe (> 0.5 velocity) OR
+        // 3. Long swipe (> 150px) with normal speed
+        if (
+          swipeDistance > 80 || 
+          (swipeVelocity > 0.5 && swipeDistance > 40) ||
+          (swipeDistance > 150 && swipeDuration < 500)
+        ) {
+          // Animate to completion and navigate
+          Animated.timing(swipeProgress, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+          }).start(() => {
+            // Navigate to reels screen
+            router.push('/more/reel');
+            // Reset after navigation
+            setTimeout(() => {
+              swipeProgress.setValue(0);
+              setShowSwipeIndicator(false);
+              setSwipeActive(false);
+            }, 300);
+          });
+        } else {
+          // Reset swipe animation
+          Animated.timing(swipeProgress, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }).start(() => {
+            setShowSwipeIndicator(false);
+            setSwipeActive(false);
+          });
+        }
+      },
+      onPanResponderTerminate: () => {
+        Animated.timing(swipeProgress, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start(() => {
+          setShowSwipeIndicator(false);
+          setSwipeActive(false);
+        });
+      },
+    })
+  ).current;
 
   /* ==========================================================
      LOAD FEED
@@ -107,28 +256,17 @@ const FeedScreen = () => {
     setRefreshing(false);
   }, [refreshing, loadFeed]);
 
-  const loadMore = () => {
-    if (loading) return;
+  const loadMore = useCallback(async () => {
+    if (loadingMore || refreshing) return;
     if (!pagination?.pages) return;
     if (page >= pagination.pages) return;
 
+    setLoadingMore(true);
     const nextPage = page + 1;
     setPage(nextPage);
-    loadFeed(nextPage);
-  };
-
-  const handleScroll = (event) => {
-    const offsetY = event.nativeEvent.contentOffset.y;
-
-    if (offsetY <= 0 && !refreshing && !hasTriggeredTopRefresh.current) {
-      hasTriggeredTopRefresh.current = true;
-      onRefresh();
-    }
-
-    if (offsetY > 40) {
-      hasTriggeredTopRefresh.current = false;
-    }
-  };
+    await loadFeed(nextPage);
+    setLoadingMore(false);
+  }, [loadingMore, refreshing, pagination, page, loadFeed]);
 
   /* ==========================================================
      POST ACTIONS
@@ -192,21 +330,11 @@ const FeedScreen = () => {
     );
   };
 
-  /* ==========================================================
-     INITIAL SHIMMER (FULLSCREEN)
-  ========================================================== */
-  if ((loading || refreshing) && safeFeed.length === 0) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#f8fafc' }}>
-        <View style={{ paddingHorizontal: 16, paddingTop: 10 }}>
-          <PostSkeletonList count={4} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#f8fafc' }}>
+      {/* ================= SWIPE INDICATOR ================= */}
+      <SwipeIndicator progress={swipeProgress} isVisible={showSwipeIndicator} />
+      
       {/* ================= DELETE CONFIRM MODAL ================= */}
       <Modal visible={deleteConfirmVisible} transparent animationType="fade">
         <Pressable
@@ -341,96 +469,124 @@ const FeedScreen = () => {
         </Pressable>
       </Modal>
 
-      {/* ================= HEADER ================= */}
-      <View
-        style={{
-          paddingHorizontal: 16,
-          paddingVertical: 14,
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
+      {/* ================= MAIN CONTENT WITH SWIPE HANDLER ================= */}
+      <View 
+        style={{ flex: 1 }}
+        {...panResponder.panHandlers}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <MaterialCommunityIcons name="account-group-outline" size={26} color="#6A1B9A" />
-          <Text
-            style={{
-              fontSize: 22,
-              fontFamily: 'Poppins-Bold',
-              marginLeft: 8,
-              color: '#1f2937',
-            }}
-          >
-            Feed
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          onPress={() => {
-            setEditingPost(null);
-            setShowCreateModal(true);
+        {/* ================= HEADER ================= */}
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
           }}
         >
-          <Ionicons name="add-circle" size={36} color="#6A1B9A" />
-        </TouchableOpacity>
-      </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <MaterialCommunityIcons name="account-group-outline" size={26} color="#6A1B9A" />
+            <Text
+              style={{
+                fontSize: 22,
+                fontFamily: 'Poppins-Bold',
+                marginLeft: 8,
+                color: '#1f2937',
+              }}
+            >
+              Feed
+            </Text>
+          </View>
 
-      {/* ================= QUOTE ================= */}
-      <View style={{ paddingHorizontal: 16 }}>
-        <QuoteCard />
-      </View>
+          <TouchableOpacity
+            onPress={() => {
+              setEditingPost(null);
+              setShowCreateModal(true);
+            }}
+          >
+            <Ionicons name="add-circle" size={36} color="#6A1B9A" />
+          </TouchableOpacity>
+        </View>
 
-      {/* ================= FILTERS ================= */}
-      <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
-        <FeedFilters active={filter} onChange={setFilter} />
-      </View>
+        {/* ================= QUOTE ================= */}
+        <View style={{ paddingHorizontal: 16 }}>
+          <QuoteCard />
+        </View>
 
-      {/* ================= FEED ================= */}
-      <FlatList
-        data={safeFeed}
-        keyExtractor={(item) => item._id}
-        renderItem={renderPost}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 80 }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6A1B9A" />
-        }
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.5}
-        ListEmptyComponent={
-          !loading && (
-            <View style={{ alignItems: 'center', marginTop: 40 }}>
-              <Ionicons name="chatbubbles-outline" size={52} color="#9ca3af" />
-              <Text
-                style={{
-                  marginTop: 12,
-                  fontFamily: 'Poppins-Medium',
-                  color: '#6b7280',
-                }}
-              >
-                No posts yet. Be the first to share.
-              </Text>
-            </View>
-          )
-        }
-        // ✅ Shimmer while pulling new posts (keeps header/filters visible)
-        ListHeaderComponent={
-          refreshing && safeFeed.length > 0 ? (
-            <View style={{ marginBottom: 14, marginTop: 6 }}>
-              <PostSkeletonList count={2} />
-            </View>
-          ) : null
-        }
-        // ✅ Shimmer while loading more pages
-        ListFooterComponent={
-          loading && safeFeed.length > 0 ? (
-            <View style={{ marginTop: 12, marginBottom: 18 }}>
-              <PostSkeletonList count={2} />
-            </View>
-          ) : null
-        }
-      />
+        {/* ================= FILTERS ================= */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+          <FeedFilters active={filter} onChange={setFilter} />
+        </View>
+
+        {/* ================= FEED ================= */}
+        <FlatList
+          ref={flatListRef}
+          data={safeFeed}
+          keyExtractor={(item) => item._id}
+          renderItem={renderPost}
+          alwaysBounceVertical
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 80 }}
+          refreshControl={
+            <RefreshControl 
+              refreshing={refreshing} 
+              onRefresh={onRefresh} 
+              tintColor="#6A1B9A" 
+              colors={['#6A1B9A']}
+            />
+          }
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.3}
+          ListEmptyComponent={
+            !loading && !refreshing && (
+              <View style={{ alignItems: 'center', marginTop: 40, paddingVertical: 40 }}>
+                <Ionicons name="chatbubbles-outline" size={52} color="#9ca3af" />
+                <Text
+                  style={{
+                    marginTop: 12,
+                    fontFamily: 'Poppins-Medium',
+                    color: '#6b7280',
+                    fontSize: 16,
+                  }}
+                >
+                  No posts yet. Be the first to share.
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setShowCreateModal(true)}
+                  style={{
+                    marginTop: 20,
+                    paddingHorizontal: 24,
+                    paddingVertical: 12,
+                    backgroundColor: '#6A1B9A',
+                    borderRadius: 12,
+                  }}
+                >
+                  <Text style={{ color: '#FFFFFF', fontFamily: 'Poppins-SemiBold', fontSize: 15 }}>
+                    Create First Post
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )
+          }
+          // ✅ Shimmer while pulling new posts (keeps header/filters visible)
+          ListHeaderComponent={
+            refreshing && safeFeed.length > 0 ? (
+              <View style={{ marginBottom: 14, marginTop: 6 }}>
+                <PostSkeletonList count={2} />
+              </View>
+            ) : null
+          }
+          // ✅ Custom loader for loading more
+          ListFooterComponent={
+            <FlatListLoader 
+              loading={loadingMore} 
+              hasMore={page < (pagination?.pages || 1)} 
+              isRefreshing={refreshing}
+            />
+          }
+          // Extra data to trigger re-render when loading states change
+          extraData={{ loadingMore, refreshing }}
+        />
+      </View>
 
       {/* ================= CREATE / EDIT MODAL ================= */}
       <CreatePostModal
@@ -448,5 +604,64 @@ const FeedScreen = () => {
     </SafeAreaView>
   );
 };
+
+const styles = StyleSheet.create({
+  swipeIndicator: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    height: '100%',
+    width: '100%',
+    backgroundColor: 'rgba(106, 27, 154, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+    elevation: 100,
+  },
+  swipeIconContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  swipeText: {
+    color: '#FFFFFF',
+    fontFamily: 'Poppins-Bold',
+    fontSize: 24,
+    marginLeft: 12,
+  },
+  swipeArrowContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  loaderContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  loaderText: {
+    marginLeft: 12,
+    color: '#6A1B9A',
+    fontFamily: 'Poppins-Medium',
+    fontSize: 14,
+  },
+  swipeHint: {
+    position: 'absolute',
+    left: 20,
+    top: 100,
+    backgroundColor: 'rgba(106, 27, 154, 0.15)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(106, 27, 154, 0.3)',
+  },
+  swipeHintText: {
+    color: '#6A1B9A',
+    fontFamily: 'Poppins-Medium',
+    fontSize: 13,
+  },
+});
 
 export default FeedScreen;

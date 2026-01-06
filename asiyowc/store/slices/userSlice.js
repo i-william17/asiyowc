@@ -135,6 +135,24 @@ export const deleteCoverPhoto = createAsyncThunk(
 );
 
 /* ============================================================
+   ADD EMERGENCY CONTACT
+============================================================ */
+export const addEmergencyContact = createAsyncThunk(
+  'user/addEmergencyContact',
+  async (payload, { rejectWithValue }) => {
+    try {
+      const token = await secureStore.getItem('token');
+      const res = await authService.addEmergencyContact(payload, token);
+      return res.data; // expect { user } OR { emergencyContacts }
+    } catch (error) {
+      return rejectWithValue(
+        error.response?.data || { message: error.message }
+      );
+    }
+  }
+);
+
+/* ============================================================
    FETCH ENROLLED PROGRAMS
 ============================================================ */
 export const fetchEnrolledPrograms = createAsyncThunk(
