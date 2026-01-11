@@ -22,7 +22,8 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.asiyowc"
+      "package": "com.anonymous.asiyowc",
+      "permissions": []
     },
     "web": {
       "favicon": "./assets/images/asiyo-nobg.png"
@@ -33,6 +34,13 @@
       "react-native-compressor",
       "react-native-video",
       "expo-video"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "bc56a75f-6b8a-4619-8118-6199e886c21b"
+      }
+    },
+    "owner": "williamwritescode"
   }
 }
