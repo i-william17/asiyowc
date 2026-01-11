@@ -96,6 +96,33 @@ export default function CommunityScreen() {
     setRefreshing(false);
   };
 
+  const getUnreadCount = (chat, myId) => {
+    if (!chat?.messages || !myId) return 0;
+
+    return chat.messages.filter((m) => {
+      if (!m?._id) return false;
+
+      // Ignore my own messages
+      if (String(m.sender?._id || m.sender) === String(myId)) return false;
+
+      // Ignore deleted-for-me
+      if (
+        Array.isArray(m.deletedFor) &&
+        m.deletedFor.map(String).includes(String(myId))
+      ) {
+        return false;
+      }
+
+      // Unread if readBy does NOT include me
+      const readBy = Array.isArray(m.readBy) ? m.readBy : [];
+      const hasRead = readBy.some(
+        (r) => String(r.user || r) === String(myId)
+      );
+
+      return !hasRead;
+    }).length;
+  };
+
   /* =====================================================
      TABS
   ===================================================== */
@@ -204,7 +231,7 @@ export default function CommunityScreen() {
       ));
     }
 
-    /* -------- CHATS (FIXED) -------- */
+    /* -------- CHATS -------- */
     if (activeTab === "chats") {
       return (
         <>
@@ -219,12 +246,28 @@ export default function CommunityScreen() {
             chats.map((c) => {
               if (c.type !== "dm") return null;
 
-              // ✅ CORRECT DM RECEIVER RESOLUTION
+              // Resolve receiver
               const other = c.participants?.find(
                 (p) => String(p?._id) !== String(myId)
               );
 
               if (!other) return null;
+
+              // 🔵 UNREAD COUNT (SOURCE OF TRUTH)
+              const unreadCount = getUnreadCount(c, myId);
+
+              // Last visible message
+              const lastMessage =
+                [...(c.messages || [])]
+                  .reverse()
+                  .find(
+                    (m) =>
+                      !m.isDeletedForEveryone &&
+                      !(
+                        Array.isArray(m.deletedFor) &&
+                        m.deletedFor.map(String).includes(String(myId))
+                      )
+                  )?.ciphertext || "Open conversation";
 
               return (
                 <ChatCard
@@ -236,10 +279,8 @@ export default function CommunityScreen() {
                     other.profile?.avatar ||
                     null
                   }
-                  lastMessage={
-                    c.messages?.[c.messages.length - 1]?.ciphertext ||
-                    "Open conversation"
-                  }
+                  lastMessage={lastMessage}
+                  unreadCount={unreadCount}
                   onPress={(id) => router.push(`/community/chat/${id}`)}
                 />
               );

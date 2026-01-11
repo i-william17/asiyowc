@@ -750,46 +750,23 @@ exports.reactToMessage = async (req, res) => {
     if (!user) return;
 
     const { chatId, messageId } = req.params;
-    const { emoji } = req.body;
+    const { emoji } = req.body; // emoji OPTIONAL
 
-    const chat = await Chat.findOne({
-      _id: chatId,
-      participants: user.id,
-      'messages._id': messageId
-    }).populate('messages.sender', 'profile.fullName profile.avatar');
+    /**
+     * 🚫 IMPORTANT:
+     * - NO database mutation
+     * - NO socket emission
+     * - NO reaction logic execution
+     *
+     * Reactions are handled AUTHORITATIVELY via socket:
+     * socket.on("message:reaction")
+     */
 
-    if (!chat) return notFound(res, 'Message not found');
-
-    const msg = chat.messages.id(messageId);
-
-    const existing = msg.reactions.find(
-      r => String(r.user) === String(user.id) && r.emoji === emoji
-    );
-
-    if (existing) {
-      msg.reactions = msg.reactions.filter(
-        r => !(String(r.user) === String(user.id) && r.emoji === emoji)
-      );
-    } else {
-      msg.reactions.push({ user: user.id, emoji });
-    }
-
-    await chat.save();
-
-    const updatedMessage = msg.toObject();
-
-    /* 🔥 REALTIME REACTION UPDATE 🔥 */
-    req.io.to(`chat:${chatId}`).emit("message:reaction:update", {
-      chatId,
-      message: updatedMessage
-    });
-
-    return ok(res, updatedMessage, 'Reaction updated');
+    return ok(res, null, "Reaction dispatched via socket");
   } catch (error) {
     return serverError(res, error);
   }
 };
-
 
 /* =====================================================
    PIN MESSAGE (GROUP)

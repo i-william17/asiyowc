@@ -272,88 +272,127 @@ const communitySlice = createSlice({
     /* =====================================================
        READ / DELIVERY RECEIPTS
     ===================================================== */
-    updateMessageReceipt: (s, a) => {
-      const { messageId, receipt } = a.payload || {};
-      const msg = s.selectedChat?.messages?.find(
+    updateMessageReceipt: (state, action) => {
+      const { messageId, userId } = action.payload;
+      if (!messageId || !userId) return;
+
+      // 1️⃣ Update selectedChat
+      const msg = state.selectedChat?.messages?.find(
         (m) => String(m._id) === String(messageId)
       );
-      if (msg) Object.assign(msg, receipt);
+
+      if (msg) {
+        msg.readBy = Array.isArray(msg.readBy) ? msg.readBy : [];
+
+        const exists = msg.readBy.some(
+          (r) => String(r.user || r) === String(userId)
+        );
+
+        if (!exists) {
+          msg.readBy.push({
+            user: userId,
+            readAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      // 2️⃣ ALSO update chats list (🔥 THIS FIXES UNREAD COUNT + REVERTING)
+      const chat = state.chats.find((c) =>
+        c.messages?.some((m) => String(m._id) === String(messageId))
+      );
+
+      if (chat) {
+        const chatMsg = chat.messages.find(
+          (m) => String(m._id) === String(messageId)
+        );
+
+        if (chatMsg) {
+          chatMsg.readBy = Array.isArray(chatMsg.readBy) ? chatMsg.readBy : [];
+
+          const exists = chatMsg.readBy.some(
+            (r) => String(r.user || r) === String(userId)
+          );
+
+          if (!exists) {
+            chatMsg.readBy.push({
+              user: userId,
+              readAt: new Date().toISOString(),
+            });
+          }
+        }
+      }
     },
 
     /* =====================================================
        REACTIONS (REALTIME SAFE)
     ===================================================== */
     updateMessageReactions: (state, action) => {
-      const { messageId, emoji, userId } = action.payload || {};
-      if (!messageId || !emoji || !userId) return;
+      const { chatId, message } = action.payload || {};
+      if (!chatId || !message?._id) return;
 
-      const msg = state.selectedChat?.messages?.find(
-        (m) => String(m._id) === String(messageId)
-      );
-      if (!msg) return;
+      if (!state.selectedChat) return;
+      if (String(state.selectedChat._id) !== String(chatId)) return;
 
-      // Ensure reactions is always an array
-      if (!Array.isArray(msg.reactions)) {
-        msg.reactions = [];
-      }
+      if (!Array.isArray(state.selectedChat.messages)) return;
 
-      const index = msg.reactions.findIndex(
-        (r) =>
-          r.emoji === emoji &&
-          String(r.user?._id || r.user) === String(userId)
+      const idx = state.selectedChat.messages.findIndex(
+        (m) => String(m._id) === String(message._id)
       );
 
-      if (index >= 0) {
-        // 🔁 Remove reaction (toggle off)
-        msg.reactions.splice(index, 1);
-      } else {
-        // ➕ Add reaction
-        msg.reactions.push({
-          emoji,
-          user: userId,
-        });
-      }
+      if (idx === -1) return;
+
+      // ✅ Backend is source of truth
+      state.selectedChat.messages[idx].reactions = message.reactions || [];
     },
 
     /* =====================================================
        PIN / UNPIN MESSAGE
     ===================================================== */
-    togglePinMessage: (s, a) => {
-      const { chatId, messageId } = a.payload || {};
-      if (!chatId || !messageId) return;
+    updatePinnedMessage: (state, action) => {
+      const { chatId, pinnedMessage } = action.payload || {};
 
-      if (!s.pinnedMessages[chatId]) {
-        s.pinnedMessages[chatId] = {};
+      // 1️⃣ Update currently opened chat
+      if (state.selectedChat && String(state.selectedChat._id) === String(chatId)) {
+        state.selectedChat.pinnedMessage = pinnedMessage || null;
       }
 
-      s.pinnedMessages[chatId][messageId] =
-        !s.pinnedMessages[chatId][messageId];
+      // 2️⃣ 🔥 ALSO update chat list (THIS WAS MISSING)
+      const chat = state.chats.find(c => String(c._id) === String(chatId));
+      if (chat) {
+        chat.pinnedMessage = pinnedMessage || null;
+      }
     },
 
     /* =====================================================
        DELETE (WHATSAPP STYLE)
     ===================================================== */
-    deleteMessageForMe: (s, a) => {
-      const { messageId } = a.payload || {};
-      const msg = s.selectedChat?.messages?.find(
+    deleteMessageForMe: (state, action) => {
+      const { messageId, userId } = action.payload;
+      const msg = state.selectedChat?.messages?.find(
         (m) => String(m._id) === String(messageId)
       );
-      if (msg) {
-        msg.deletedForMe = true;
+      if (!msg) return;
+
+      msg.deletedFor = msg.deletedFor || [];
+      if (!msg.deletedFor.includes(userId)) {
+        msg.deletedFor.push(userId);
       }
     },
 
-    deleteMessageForEveryone: (s, a) => {
-      const { messageId } = a.payload || {};
-      const msg = s.selectedChat?.messages?.find(
+    deleteMessageForEveryone: (state, action) => {
+      const { messageId } = action.payload;
+
+      const chat = state.selectedChat;
+      if (!chat?.messages) return;
+
+      const msg = chat.messages.find(
         (m) => String(m._id) === String(messageId)
       );
-      if (msg) {
-        msg.deletedForEveryone = true;
-        msg.ciphertext = null;
-        msg.iv = null;
-        msg.tag = null;
-      }
+
+      if (!msg) return;
+
+      msg.isDeletedForEveryone = true;
+      msg.deletedAt = new Date().toISOString();
     },
 
     /* =====================================================
@@ -437,7 +476,7 @@ export const {
   pushIncomingMessage,
   updateMessageReceipt,
   updateMessageReactions,
-  togglePinMessage,
+  updatePinnedMessage,
   deleteMessageForMe,
   deleteMessageForEveryone,
   updateEditedMessage,

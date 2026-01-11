@@ -12,11 +12,14 @@ module.exports = async (socket, next) => {
     if (!token) return next(new Error("Unauthorized: missing token"));
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (!decoded?.id) return next(new Error("Unauthorized: invalid token"));
+    const userId = decoded._id || decoded.id; // backward-safe
 
-    const user = await User.findById(decoded.id).select(
+    if (!userId) return next(new Error("Unauthorized: invalid token"));
+
+    const user = await User.findById(userId).select(
       "_id name avatar role"
     );
+
     if (!user) return next(new Error("Unauthorized: user not found"));
 
     socket.user = {

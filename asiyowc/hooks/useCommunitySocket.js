@@ -55,7 +55,7 @@ export default function useCommunitySocket() {
     ===================================================== */
     const onConnect = () => {
       // Join all chats (DM rooms)
-      socket.emit("chat:joinAll", {}, () => {});
+      socket.emit("chat:joinAll", {}, () => { });
 
       // ✅ Hydrate presence (your backend supports presence:hydrate via callback)
       socket.emit("presence:hydrate", {}, (resp) => {
@@ -123,6 +123,23 @@ export default function useCommunitySocket() {
       dispatch(updateMessageReactions({ chatId, message }));
     };
 
+    socket.on("message:reaction:update", onReactionUpdate);
+
+    /* =====================================================
+       PIN REALTIME
+       backend emits: message:pin:update { chatId, pinnedMessage }
+    ===================================================== */
+    const onPinUpdate = ({ chatId, pinnedMessage }) => {
+      dispatch(
+        updatePinnedMessage({
+          chatId,
+          pinnedMessage,
+        })
+      );
+    };
+
+    socket.on("message:pin:update", onPinUpdate);
+
     /* =====================================================
        DELETE REALTIME
        backend emits: message:deleted { chatId, messageId, mode }
@@ -168,8 +185,10 @@ export default function useCommunitySocket() {
         socket.off("group:message:new", onIncomingGroupMessage);
 
         socket.off("message:reaction:update", onReactionUpdate);
+        socket.off("message:pin:update", onPinUpdate);
+
         socket.off("message:deleted", onMessageDeleted);
-      } catch {}
+      } catch { }
 
       socketRef.current = null;
       bootedRef.current = false;

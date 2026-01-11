@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -23,7 +23,13 @@ import {
   fetchGroupConversation,
   fetchGroupMessages,
   sendGroupMessage,
+  updateMessageReactions,
+  updateMessageReceipt, // Make sure this is imported
+  updatePinnedMessage,
+  updateEditedMessage,
   pushIncomingMessage,
+  deleteMessageForMe,
+  deleteMessageForEveryone,
   leaveGroup,
 } from "../../store/slices/communitySlice";
 import ConfirmModal from "../../components/community/ConfirmModal";
@@ -34,6 +40,7 @@ import ShimmerLoader from "../../components/ui/ShimmerLoader";
 
 /* =====================================================
    GROUP CHAT INTERFACE (PROFESSIONAL - FIXED VERSION)
+   WITH READ RECEIPTS INTEGRATION
 ===================================================== */
 
 export default function GroupChatInterface({ chatId }) {
@@ -42,14 +49,17 @@ export default function GroupChatInterface({ chatId }) {
   const listRef = useRef(null);
   const socketRef = useRef(null);
   const typingStopTimerRef = useRef(null);
+  
+  // ✅ READ RECEIPT REFS
+  const readEmittedRef = useRef(new Set());
+  const readQueueRef = useRef(new Set());
+  const readFlushTimerRef = useRef(null);
 
   const { token, user } = useSelector((s) => s.auth);
   const { selectedChat, loadingDetail } = useSelector((s) => s.community);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [inputHeight, setInputHeight] = useState(0);
   const hasAutoScrolledRef = useRef(false);
-
-  console.log("TOKEN AND USER:", token, user);
 
   const getUserIdFromToken = (tkn) => {
     try {
@@ -74,6 +84,11 @@ export default function GroupChatInterface({ chatId }) {
   const [pinnedMessageIds, setPinnedMessageIds] = useState(() => new Set());
   const [reactionsByMessageId, setReactionsByMessageId] = useState({});
   const [hiddenMessageIds, setHiddenMessageIds] = useState(() => new Set());
+
+  /* ================= DELETE CONFIRMATION MODALS ================= */
+  const [confirmDeleteMeVisible, setConfirmDeleteMeVisible] = useState(false);
+  const [confirmDeleteEveryoneVisible, setConfirmDeleteEveryoneVisible] = useState(false);
+  const [deleteOptionsVisible, setDeleteOptionsVisible] = useState(false);
 
   const resolvedUserId = user?._id || getUserIdFromToken(token);
 
@@ -184,6 +199,106 @@ export default function GroupChatInterface({ chatId }) {
   };
 
   /* =====================================================
+     READ RECEIPT EMISSION (GROUP-SAFE)
+  ===================================================== */
+  const onViewableItemsChanged = useCallback(({ changed }) => {
+    const myId = getMyId();
+    if (!myId) return;
+    
+    changed.forEach(({ item, isViewable }) => {
+      if (!isViewable) return;
+
+      // ✅ Guard clause exactly as specified
+      if (
+        !item ||
+        item.type !== "message" ||
+        !item._id ||
+        item.isDeletedForEveryone ||
+        (Array.isArray(item.deletedFor) &&
+          item.deletedFor.map(String).includes(String(myId)))
+      ) {
+        return;
+      }
+
+      const isMine =
+        String(item.sender?._id || item.sender) === String(myId);
+      
+      // ✅ Do not emit read for my own messages
+      if (isMine) return;
+
+      const messageId = String(item._id);
+      
+      // ✅ Prevent duplicate emissions
+      if (readEmittedRef.current.has(messageId)) return;
+
+      // ✅ Queue for batch emission
+      readQueueRef.current.add(messageId);
+      readEmittedRef.current.add(messageId);
+    });
+
+    // Flush logic
+    if (readQueueRef.current.size > 0 && !readFlushTimerRef.current) {
+      readFlushTimerRef.current = setTimeout(() => {
+        if (readQueueRef.current.size > 0 && socketRef.current?.connected) {
+          socketRef.current.emit("message:read:batch", {
+            chatId: chatId,
+            messageIds: Array.from(readQueueRef.current),
+          });
+          readQueueRef.current.clear();
+        }
+        readFlushTimerRef.current = null;
+      }, 1000);
+    }
+  }, [chatId, socketRef.current, getMyId]);
+
+  /* =====================================================
+     READ RECEIPTS UI (GROUP-SAFE)
+  ===================================================== */
+  const getReceiptState = (message, isMine) => {
+    // ✅ Only show receipts for my own messages
+    if (!isMine) return { icon: null, color: null };
+
+    const readBy = Array.isArray(message?.readBy)
+      ? message.readBy
+      : [];
+
+    // ✅ Group chat logic: blue if read by anyone else
+    const readByOthers = readBy.some(
+      (r) => String(r.user || r) !== String(getMyId())
+    );
+
+    if (readByOthers) {
+      return { icon: "checkmark-done", color: "#2563EB" }; // 🔵 blue
+    }
+
+    return { icon: "checkmark-done", color: "#9CA3AF" }; // ⚪ gray
+  };
+
+  /* =====================================================
+     DELETE HANDLERS
+  ===================================================== */
+  const openDeleteOptions = () => {
+    closeContextMenu();
+    requestAnimationFrame(() => {
+      setDeleteOptionsVisible(true);
+    });
+  };
+
+  const requestDeleteForMe = () => {
+    setDeleteOptionsVisible(false);
+    requestAnimationFrame(() => {
+      setConfirmDeleteMeVisible(true);
+    });
+  };
+
+  const requestDeleteForEveryone = () => {
+    setDeleteOptionsVisible(false);
+    requestAnimationFrame(() => {
+      setConfirmDeleteEveryoneVisible(true);
+    });
+  };
+
+  /* =====================================================
      PIN / UNPIN
   ===================================================== */
   const togglePinMessage = (message) => {
@@ -255,27 +370,6 @@ export default function GroupChatInterface({ chatId }) {
       }))
       .filter((x) => x.count > 0)
       .slice(0, 4);
-  };
-
-  /* =====================================================
-     READ RECEIPTS
-  ===================================================== */
-  const getReceiptState = (message, isMine) => {
-    if (!isMine) return { icon: null, color: null };
-
-    const delivered =
-      !!message?.deliveredAt ||
-      message?.status === "delivered" ||
-      message?.status === "received";
-
-    const read =
-      !!message?.readAt ||
-      message?.status === "read" ||
-      (Array.isArray(message?.readBy) && message.readBy.length > 0);
-
-    if (read) return { icon: "checkmark-done", color: "#2563EB" };
-    if (delivered) return { icon: "checkmark-done", color: "#9CA3AF" };
-    return { icon: "checkmark", color: "#9CA3AF" };
   };
 
   /* =====================================================
@@ -370,7 +464,7 @@ export default function GroupChatInterface({ chatId }) {
   }, [chatId]);
 
   /* =====================================================
-     SOCKET (REALTIME + ONLINE + TYPING - FIXED)
+     SOCKET (REALTIME + ONLINE + TYPING + READ RECEIPTS)
   ===================================================== */
   useEffect(() => {
     if (!token || !groupId) return;
@@ -398,6 +492,25 @@ export default function GroupChatInterface({ chatId }) {
     };
 
     socket.on("group:message:new", onGroupMessage);
+
+    /* ================= READ RECEIPTS ================= */
+    const handleBatchRead = ({ chatId: id, messageIds, userId }) => {
+      // ✅ Only process for current chat
+      if (String(id) !== String(chatId)) return;
+
+      // ✅ Update each message with the read receipt
+      messageIds.forEach((messageId) => {
+        dispatch(
+          updateMessageReceipt({
+            messageId,
+            userId,
+            chatId,
+          })
+        );
+      });
+    };
+
+    socket.on("message:read:batch", handleBatchRead);
 
     /* ================= GROUP TYPING ================= */
     socket.on("group:typing:start", ({ userId }) => {
@@ -449,9 +562,20 @@ export default function GroupChatInterface({ chatId }) {
         emitTypingStop();
       } catch { }
 
+      // Clean up read receipt timers
+      if (readFlushTimerRef.current) {
+        clearTimeout(readFlushTimerRef.current);
+        readFlushTimerRef.current = null;
+      }
+      
+      // Clear the read emitted set
+      readEmittedRef.current.clear();
+      readQueueRef.current.clear();
+
       socket.emit("group:leave", { groupId });
 
       socket.off("group:message:new", onGroupMessage);
+      socket.off("message:read:batch", handleBatchRead);
       socket.off("group:typing:start");
       socket.off("group:typing:stop");
       socket.off("group:user:online");
@@ -460,7 +584,7 @@ export default function GroupChatInterface({ chatId }) {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [groupId, token, chatId, resolvedUserId]);
+  }, [groupId, token, chatId, resolvedUserId, dispatch]);
 
   /* =====================================================
      LEAVE GROUP HANDLING
@@ -581,36 +705,6 @@ export default function GroupChatInterface({ chatId }) {
     if (!contextMessage) return;
     await copyToClipboard(contextMessage?.ciphertext);
     closeContextMenu();
-  };
-
-  const doDeleteForMe = () => {
-    if (!contextMessage?._id) return;
-    const mid = String(contextMessage._id);
-    setHiddenMessageIds((prev) => {
-      const next = new Set(prev);
-      next.add(mid);
-      return next;
-    });
-    closeContextMenu();
-  };
-
-  const doDeleteForEveryone = () => {
-    if (!contextMessage?._id) return;
-    closeContextMenu();
-    
-    // Emit delete event
-    try {
-      socketRef.current?.emit("message:deleted", {
-        chatId,
-        messageId: contextMessage._id,
-      });
-    } catch { }
-    
-    Alert.alert(
-      "Deleted",
-      "Message deleted for everyone",
-      [{ text: "OK" }]
-    );
   };
 
   /* =====================================================
@@ -1027,6 +1121,11 @@ export default function GroupChatInterface({ chatId }) {
             });
           }
         }}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={{
+          itemVisiblePercentThreshold: 70,
+          waitForInteraction: false,
+        }}
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingTop: 12,
@@ -1035,6 +1134,146 @@ export default function GroupChatInterface({ chatId }) {
         overScrollMode="never"
         bounces={false}
       />
+
+      {/* ================= DELETE FOR ME MODAL ================= */}
+      <ConfirmModal
+        visible={confirmDeleteMeVisible}
+        title="Delete message?"
+        message="This message will be deleted only for you."
+        confirmText="Delete"
+        destructive
+        onCancel={() => {
+          setConfirmDeleteMeVisible(false);
+        }}
+        onConfirm={() => {
+          if (!contextMessage?._id) return;
+
+          const mid = String(contextMessage._id);
+          setHiddenMessageIds((prev) => {
+            const next = new Set(prev);
+            next.add(mid);
+            return next;
+          });
+
+          setConfirmDeleteMeVisible(false);
+          setContextMessage(null);
+        }}
+      />
+
+      {/* ================= DELETE FOR EVERYONE MODAL ================= */}
+      <ConfirmModal
+        visible={confirmDeleteEveryoneVisible}
+        title="Delete for everyone?"
+        message="This message will be deleted for everyone in the group."
+        confirmText="Delete"
+        destructive
+        onCancel={() => {
+          setConfirmDeleteEveryoneVisible(false);
+        }}
+        onConfirm={() => {
+          if (!contextMessage?._id) return;
+
+          // Emit delete event
+          try {
+            socketRef.current?.emit("message:deleted", {
+              chatId,
+              messageId: contextMessage._id,
+            });
+          } catch { }
+          
+          setConfirmDeleteEveryoneVisible(false);
+          setContextMessage(null);
+        }}
+      />
+
+      {/* ================= DELETE OPTIONS MODAL ================= */}
+      <Modal
+        transparent
+        visible={deleteOptionsVisible}
+        animationType="fade"
+        onRequestClose={() => setDeleteOptionsVisible(false)}
+      >
+        <Pressable
+          style={tw`flex-1 bg-black/30 justify-center items-center px-6`}
+          onPress={() => setDeleteOptionsVisible(false)}
+        >
+          <Pressable
+            onPress={() => { }}
+            style={tw`bg-white rounded-2xl w-full max-w-[340px] overflow-hidden border border-gray-200`}
+          >
+            {/* Header */}
+            <View style={tw`px-4 py-3 border-b border-gray-200`}>
+              <Text style={{ 
+                fontFamily: "Poppins-SemiBold", 
+                fontSize: 16, 
+                color: "#111827" 
+              }}>
+                Delete Message
+              </Text>
+              <Text style={{ 
+                fontFamily: "Poppins-Regular", 
+                fontSize: 13, 
+                color: "#6B7280",
+                marginTop: 4 
+              }}>
+                Choose how you want to delete this message
+              </Text>
+            </View>
+
+            {/* Delete for me option */}
+            <Pressable
+              style={tw`px-4 py-3 flex-row items-center border-b border-gray-100`}
+              onPress={requestDeleteForMe}
+            >
+              <Ionicons name="person-outline" size={18} color="#DC2626" />
+              <View style={tw`ml-3 flex-1`}>
+                <Text style={{ 
+                  fontFamily: "Poppins-SemiBold", 
+                  fontSize: 14,
+                  color: "#DC2626" 
+                }}>
+                  Delete for me
+                </Text>
+                <Text style={{ 
+                  fontFamily: "Poppins-Regular", 
+                  fontSize: 12,
+                  color: "#9CA3AF",
+                  marginTop: 2 
+                }}>
+                  Remove this message only from your chat
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            </Pressable>
+
+            {/* Delete for everyone option */}
+            <Pressable
+              style={tw`px-4 py-3 flex-row items-center`}
+              onPress={requestDeleteForEveryone}
+            >
+              <Ionicons name="people-outline" size={18} color="#DC2626" />
+              <View style={tw`ml-3 flex-1`}>
+                <Text style={{ 
+                  fontFamily: "Poppins-SemiBold", 
+                  fontSize: 14,
+                  color: "#DC2626" 
+                }}>
+                  Delete for everyone
+                </Text>
+                <Text style={{ 
+                  fontFamily: "Poppins-Regular", 
+                  fontSize: 12,
+                  color: "#9CA3AF",
+                  marginTop: 2 
+                }}>
+                  Remove this message for all group members
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* ================= LONG PRESS MENU ================= */}
       <Modal
@@ -1102,14 +1341,16 @@ export default function GroupChatInterface({ chatId }) {
 
             <View style={tw`h-[1px] bg-gray-200`} />
 
-            {/* Delete for me */}
+            {/* Single Delete option */}
             <Pressable
               style={tw`px-4 py-3 flex-row items-center`}
               onPress={() => {
-                Alert.alert("Delete", "Delete this message for you?", [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Delete", style: "destructive", onPress: doDeleteForMe },
-                ]);
+                // Only allow user to delete their own messages
+                const myId = getMyId();
+                const senderId = getSenderId(contextMessage);
+                if (contextMessage && senderId && String(senderId) === String(myId)) {
+                  openDeleteOptions();
+                }
               }}
             >
               <Ionicons name="trash-outline" size={18} color="#DC2626" />
@@ -1120,29 +1361,7 @@ export default function GroupChatInterface({ chatId }) {
                   color: "#DC2626",
                 }}
               >
-                Delete for me
-              </Text>
-            </Pressable>
-
-            {/* Delete for everyone */}
-            <Pressable
-              style={tw`px-4 py-3 flex-row items-center`}
-              onPress={() => {
-                Alert.alert("Delete for everyone", "Delete this message for everyone?", [
-                  { text: "Cancel", style: "cancel" },
-                  { text: "Delete", style: "destructive", onPress: doDeleteForEveryone },
-                ]);
-              }}
-            >
-              <Ionicons name="trash-bin-outline" size={18} color="#DC2626" />
-              <Text
-                style={{
-                  marginLeft: 12,
-                  fontFamily: "Poppins-SemiBold",
-                  color: "#DC2626",
-                }}
-              >
-                Delete for everyone
+                Delete
               </Text>
             </Pressable>
           </Pressable>

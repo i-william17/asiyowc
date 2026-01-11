@@ -96,7 +96,7 @@ const userSchema = new mongoose.Schema(
           uppercase: true,
           minlength: 2,
           maxlength: 2,
-          default: '',
+          default: undefined,
         },
         city: {
           type: String,

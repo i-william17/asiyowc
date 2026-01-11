@@ -11,13 +11,21 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Share,
+  Alert,
+  ScrollView,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
-import { Video } from 'expo-av';
+import { Video, Audio } from 'expo-av';
+import * as Clipboard from 'expo-clipboard';
 import * as Network from 'expo-network';
 import { decode as atob } from 'base-64';
 import { secureStore } from '../../services/storage';
+
+import tw from '../../utils/tw';
+import { server } from '../../server';
 
 import {
   toggleLikePost,
@@ -45,6 +53,7 @@ const getUserIdFromToken = (token) => {
 
 const PostCard = ({
   post,
+  feedActive,
   onLike,
   onComment,
   onEdit,
@@ -78,6 +87,76 @@ const PostCard = ({
     };
   }, []);
 
+  // ===== Share functionality =====
+  const [shareVisible, setShareVisible] = useState(false);
+  const [shareLink, setShareLink] = useState('');
+
+  // Generate shareable link when component mounts
+  useEffect(() => {
+    if (post?._id) {
+      // This would come from your backend in production
+      const baseUrl = server; // Replace with your actual app URL
+      setShareLink(`${baseUrl}/post/${post._id}`);
+    }
+  }, [post?._id]);
+
+  useEffect(() => {
+    if (!videoRef.current) return;
+
+    if (!feedActive) {
+      videoRef.current.pauseAsync();
+      videoRef.current.setPositionAsync(0);
+      setShouldPlay(false);
+    }
+  }, [feedActive]);
+
+  const handleSharePress = () => {
+    setShareVisible(true);
+  };
+
+  const copyToClipboard = async () => {
+    try {
+      await Clipboard.setStringAsync(shareLink);
+      showSnackbar('Link copied to clipboard!', 'success');
+      setShareVisible(false);
+    } catch (error) {
+      showSnackbar('Failed to copy link', 'error');
+    }
+  };
+
+  const shareToSocialMedia = async () => {
+    try {
+      const result = await Share.share({
+        message: `Check out this post: ${shareLink}`,
+        title: 'Share Post',
+        url: shareLink, // iOS only
+      });
+
+      if (result.action === Share.sharedAction) {
+        showSnackbar('Shared successfully!', 'success');
+      } else if (result.action === Share.dismissedAction) {
+        // User dismissed the share sheet
+      }
+    } catch (error) {
+      showSnackbar('Failed to share', 'error');
+    }
+    setShareVisible(false);
+  };
+
+  const shareToChats = () => {
+    // This would open your app's chat selection screen
+    // For now, just show a message
+    showSnackbar('Chat sharing will be available soon!', 'info');
+    setShareVisible(false);
+  };
+
+  const shareToGroups = () => {
+    // This would open your app's group selection screen
+    showSnackbar('Group sharing will be available soon!', 'info');
+    setShareVisible(false);
+  };
+
+  // ===== End Share functionality =====
 
   if (!post || !post._id) {
     console.warn('PostCard received invalid post:', post);
@@ -153,6 +232,34 @@ const PostCard = ({
       setIsWifi(state.isConnected && state.type === Network.NetworkStateType.WIFI);
     })();
   }, []);
+
+  // ===== Video Audio Fix =====
+  // useEffect(() => {
+  //   (async () => {
+  //     try {
+  //       await Audio.setAudioModeAsync({
+  //         allowsRecordingIOS: false,
+  //         staysActiveInBackground: false,
+  //         playsInSilentModeIOS: true, // 🔥 critical for iOS
+  //         interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
+  //         interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+  //         shouldDuckAndroid: false,
+  //         playThroughEarpieceAndroid: false, // 🔥 speaker output
+  //       });
+  //     } catch (e) {
+  //       console.warn('Audio mode error:', e);
+  //     }
+  //   })();
+  // }, []);
+
+  const toggleMute = async () => {
+    const next = !isMuted;
+    setIsMuted(next);
+
+    if (videoRef.current) {
+      await videoRef.current.setIsMutedAsync(next);
+    }
+  };
 
   useEffect(() => {
     if (post.type === 'video' && isWifi && isVisible) {
@@ -231,7 +338,6 @@ const PostCard = ({
 
     if (typeof onComment === 'function') onComment(post._id);
   };
-
 
   const closeComments = () => {
     setCommentsVisible(false);
@@ -384,7 +490,6 @@ const PostCard = ({
 
     return String(myId) === String(authorId);
   };
-
 
   /* =====================================================
      REPORT (Redux slice)
@@ -542,7 +647,7 @@ const PostCard = ({
             source={{ uri: post.content.imageUrl }}
             style={{
               width: '100%',
-              height: 230,
+              aspectRatio: 16 / 9,
               borderRadius: 16,
               marginTop: 14,
               backgroundColor: '#f3f4f6',
@@ -558,21 +663,35 @@ const PostCard = ({
               source={{ uri: post.content.videoUrl }}
               style={{
                 width: '100%',
-                height: 250,
+                aspectRatio: 16 / 9,
                 borderRadius: 16,
                 backgroundColor: '#000',
               }}
               resizeMode="cover"
               isMuted={isMuted}
-              shouldPlay={shouldPlay}
-              useNativeControls={false}
+              shouldPlay={feedActive && shouldPlay}
+              volume={1.0}
+              useNativeControls={false} // Enable native controls for better audio control
+              usePoster={false}
+              posterSource={{ uri: post.content.thumbnailUrl }}
+              posterStyle={{ width: '100%', height: '100%' }}
+              isLooping
+              onLoad={async () => {
+                await videoRef.current?.setIsLoopingAsync(true);
+              }}
             />
 
             {!shouldPlay && (
               <TouchableOpacity
-                onPress={() => {
-                  setShouldPlay(true);
-                  showSnackbar('Playing video', 'info');
+                onPress={async () => {
+                  try {
+                    if (videoRef.current) {
+                      await videoRef.current.playAsync();
+                      setShouldPlay(true);
+                    }
+                  } catch (e) {
+                    console.warn('Play error:', e);
+                  }
                 }}
                 style={{
                   position: 'absolute',
@@ -590,10 +709,7 @@ const PostCard = ({
             )}
 
             <TouchableOpacity
-              onPress={() => {
-                setIsMuted(!isMuted);
-                showSnackbar(isMuted ? 'Sound on' : 'Muted', 'info');
-              }}
+              onPress={toggleMute}
               style={{
                 position: 'absolute',
                 right: 12,
@@ -621,53 +737,381 @@ const PostCard = ({
           borderTopWidth: 1,
           borderTopColor: '#e5e7eb',
           paddingTop: 12,
+          justifyContent: 'space-between',
         }}
       >
-        <TouchableOpacity
-          onPress={handleLikePress}
-          disabled={likePending}
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity
+            onPress={handleLikePress}
+            disabled={likePending}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              marginRight: 30,
+              opacity: likePending ? 0.6 : 1,
+            }}
+          >
+            <Ionicons
+              name={liked ? 'heart' : 'heart-outline'}
+              size={22}
+              color={liked ? '#dc2626' : '#374151'}
+            />
+            <Text
+              style={{
+                marginLeft: 6,
+                fontFamily: 'Poppins-Medium',
+                fontSize: 14,
+                color: '#374151',
+              }}
+            >
+              {likeCount}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={openComments}
+            style={{ flexDirection: 'row', alignItems: 'center', marginRight: 30 }}
+          >
+            <Ionicons name="chatbubble-outline" size={21} color="#374151" />
+            <Text
+              style={{
+                marginLeft: 6,
+                fontFamily: 'Poppins-Medium',
+                fontSize: 14,
+                color: '#374151',
+              }}
+            >
+              {commentCount}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Share Button */}
+          <TouchableOpacity
+            onPress={handleSharePress}
+            style={{ flexDirection: 'row', alignItems: 'center' }}
+          >
+            <Ionicons name="share-social-outline" size={21} color="#374151" />
+            <Text
+              style={{
+                marginLeft: 6,
+                fontFamily: 'Poppins-Medium',
+                fontSize: 14,
+                color: '#374151',
+              }}
+            >
+              Share
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* ================= SHARE MODAL ================= */}
+      <Modal transparent visible={shareVisible} animationType="fade">
+        <Pressable
+          onPress={() => setShareVisible(false)}
           style={{
-            flexDirection: 'row',
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.35)',
+            justifyContent: 'center',
             alignItems: 'center',
-            marginRight: 30,
-            opacity: likePending ? 0.6 : 1,
+            padding: 20,
           }}
         >
-
-          <Ionicons
-            name={liked ? 'heart' : 'heart-outline'}
-            size={22}
-            color={liked ? '#dc2626' : '#374151'}
-          />
-          <Text
-            style={{
-              marginLeft: 6,
-              fontFamily: 'Poppins-Medium',
-              fontSize: 14,
-              color: '#374151',
-            }}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+            style={{ width: '100%', maxWidth: 500 }}
           >
-            {likeCount}
-          </Text>
-        </TouchableOpacity>
+            <Pressable onPress={() => { }}>
+              <View
+                style={{
+                  backgroundColor: '#ffffff',
+                  borderRadius: 24,
+                  overflow: 'hidden',
+                  width: '100%',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 10 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 30,
+                  elevation: 20,
+                }}
+              >
+                {/* Header */}
+                <View
+                  style={{
+                    paddingHorizontal: 24,
+                    paddingVertical: 22,
+                    borderBottomWidth: 1,
+                    borderBottomColor: '#F3F4F6',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 20,
+                        backgroundColor: '#F0F9FF',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        marginRight: 16,
+                      }}
+                    >
+                      <Ionicons name="share-social" size={20} color="#0369A1" />
+                    </View>
+                    <View>
+                      <Text
+                        style={{
+                          fontFamily: 'Poppins-SemiBold',
+                          fontSize: 20,
+                          color: '#111827',
+                        }}
+                      >
+                        Share Post
+                      </Text>
+                      <Text
+                        style={{
+                          fontFamily: 'Poppins-Regular',
+                          fontSize: 13,
+                          color: '#6B7280',
+                          marginTop: 2,
+                        }}
+                      >
+                        Share this post with others
+                      </Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => setShareVisible(false)}
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      backgroundColor: '#F9FAFB',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Ionicons name="close" size={20} color="#374151" />
+                  </TouchableOpacity>
+                </View>
 
-        <TouchableOpacity
-          onPress={openComments}
-          style={{ flexDirection: 'row', alignItems: 'center' }}
-        >
-          <Ionicons name="chatbubble-outline" size={21} color="#374151" />
-          <Text
-            style={{
-              marginLeft: 6,
-              fontFamily: 'Poppins-Medium',
-              fontSize: 14,
-              color: '#374151',
-            }}
-          >
-            {commentCount}
-          </Text>
-        </TouchableOpacity>
-      </View>
+                {/* Share Options */}
+                <View style={{ padding: 24 }}>
+                  {/* Link Preview */}
+                  <View
+                    style={{
+                      backgroundColor: '#F9FAFB',
+                      borderRadius: 16,
+                      padding: 16,
+                      marginBottom: 24,
+                      borderWidth: 1,
+                      borderColor: '#E5E7EB',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: 'Poppins-Medium',
+                        fontSize: 14,
+                        color: '#6B7280',
+                        marginBottom: 8,
+                      }}
+                    >
+                      Post Link
+                    </Text>
+                    <Text
+                      style={{
+                        fontFamily: 'Poppins-Regular',
+                        fontSize: 14,
+                        color: '#111827',
+                        backgroundColor: '#FFFFFF',
+                        padding: 12,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: '#E5E7EB',
+                        overflow: 'hidden',
+                      }}
+                      numberOfLines={2}
+                    >
+                      {shareLink}
+                    </Text>
+                  </View>
+
+                  {/* Share Options Grid */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                    {/* Copy Link */}
+                    <TouchableOpacity
+                      onPress={copyToClipboard}
+                      style={{
+                        flex: 1,
+                        minWidth: 140,
+                        backgroundColor: '#F0F9FF',
+                        borderRadius: 16,
+                        padding: 20,
+                        alignItems: 'center',
+                        borderWidth: 1,
+                        borderColor: '#E0F2FE',
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 50,
+                          height: 50,
+                          borderRadius: 25,
+                          backgroundColor: '#FFFFFF',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          marginBottom: 12,
+                          borderWidth: 1,
+                          borderColor: '#E0F2FE',
+                        }}
+                      >
+                        <Ionicons name="copy-outline" size={24} color="#0369A1" />
+                      </View>
+                      <Text
+                        style={{
+                          fontFamily: 'Poppins-SemiBold',
+                          fontSize: 14,
+                          color: '#0369A1',
+                          textAlign: 'center',
+                        }}
+                      >
+                        Copy Link
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Share to Social Media */}
+                    <TouchableOpacity
+                      onPress={shareToSocialMedia}
+                      style={{
+                        flex: 1,
+                        minWidth: 140,
+                        backgroundColor: '#FEF3C7',
+                        borderRadius: 16,
+                        padding: 20,
+                        alignItems: 'center',
+                        borderWidth: 1,
+                        borderColor: '#FDE68A',
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 50,
+                          height: 50,
+                          borderRadius: 25,
+                          backgroundColor: '#FFFFFF',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          marginBottom: 12,
+                          borderWidth: 1,
+                          borderColor: '#FDE68A',
+                        }}
+                      >
+                        <Ionicons name="logo-instagram" size={24} color="#D97706" />
+                      </View>
+                      <Text
+                        style={{
+                          fontFamily: 'Poppins-SemiBold',
+                          fontSize: 14,
+                          color: '#D97706',
+                          textAlign: 'center',
+                        }}
+                      >
+                        Share to Social
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Share to Chats */}
+                    <TouchableOpacity
+                      onPress={shareToChats}
+                      style={{
+                        flex: 1,
+                        minWidth: 140,
+                        backgroundColor: '#ECFDF5',
+                        borderRadius: 16,
+                        padding: 20,
+                        alignItems: 'center',
+                        borderWidth: 1,
+                        borderColor: '#A7F3D0',
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 50,
+                          height: 50,
+                          borderRadius: 25,
+                          backgroundColor: '#FFFFFF',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          marginBottom: 12,
+                          borderWidth: 1,
+                          borderColor: '#A7F3D0',
+                        }}
+                      >
+                        <Ionicons name="chatbubbles-outline" size={24} color="#059669" />
+                      </View>
+                      <Text
+                        style={{
+                          fontFamily: 'Poppins-SemiBold',
+                          fontSize: 14,
+                          color: '#059669',
+                          textAlign: 'center',
+                        }}
+                      >
+                        Share to Chats
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Share to Groups */}
+                    <TouchableOpacity
+                      onPress={shareToGroups}
+                      style={{
+                        flex: 1,
+                        minWidth: 140,
+                        backgroundColor: '#F5F3FF',
+                        borderRadius: 16,
+                        padding: 20,
+                        alignItems: 'center',
+                        borderWidth: 1,
+                        borderColor: '#DDD6FE',
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 50,
+                          height: 50,
+                          borderRadius: 25,
+                          backgroundColor: '#FFFFFF',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          marginBottom: 12,
+                          borderWidth: 1,
+                          borderColor: '#DDD6FE',
+                        }}
+                      >
+                        <Ionicons name="people-outline" size={24} color="#6A1B9A" />
+                      </View>
+                      <Text
+                        style={{
+                          fontFamily: 'Poppins-SemiBold',
+                          fontSize: 14,
+                          color: '#6A1B9A',
+                          textAlign: 'center',
+                        }}
+                      >
+                        Share to Groups
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </Pressable>
+          </KeyboardAvoidingView>
+        </Pressable>
+      </Modal>
 
       {/* ================= MENU MODAL ================= */}
       <Modal transparent visible={menuVisible} animationType="fade">
@@ -710,6 +1154,15 @@ const PostCard = ({
               />
             )}
 
+            <MenuItem
+              icon="share-social-outline"
+              label="Share Post"
+              onPress={() => {
+                setMenuVisible(false);
+                handleSharePress();
+              }}
+            />
+
             {!isOwner && (
               <MenuItem
                 icon="flag-outline"
@@ -738,178 +1191,183 @@ const PostCard = ({
       </Modal>
 
       {/* ================= COMMENTS MODAL ================= */}
-      <Modal visible={commentsVisible} animationType="fade" transparent>
-        <Pressable
-          onPress={closeComments}
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.5)',
-            justifyContent: 'center',
-            alignItems: 'center',
-            padding: 20,
-          }}
+      <Modal visible={commentsVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
-            style={{ width: '100%' }}
-          >
-            {/* Stop backdrop close */}
-            <Pressable onPress={() => { }}>
-              <View
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+            <Pressable
+              onPress={closeComments}
+              style={{
+                flex: 1,
+                justifyContent: 'center',
+                alignItems: 'center',
+                padding: 20,
+              }}
+            >
+              <Pressable
+                onPress={(e) => e.stopPropagation()}
                 style={{
-                  backgroundColor: '#FFFFFF',
-                  borderRadius: 24,
-                  overflow: 'hidden',
                   width: '100%',
                   maxWidth: 520,
-                  height: 620,
-                  shadowColor: '#000',
-                  shadowOffset: { width: 0, height: 10 },
-                  shadowOpacity: 0.15,
-                  shadowRadius: 30,
-                  elevation: 20,
+                  height: '80%',
+                  maxHeight: 700,
                 }}
               >
-                {/* ================= HEADER ================= */}
                 <View
                   style={{
-                    paddingHorizontal: 24,
-                    paddingVertical: 18,
-                    borderBottomWidth: 1,
-                    borderBottomColor: '#F3F4F6',
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
                     backgroundColor: '#FFFFFF',
+                    borderRadius: 24,
+                    overflow: 'hidden',
+                    width: '100%',
+                    height: '100%',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 10 },
+                    shadowOpacity: 0.15,
+                    shadowRadius: 30,
+                    elevation: 20,
                   }}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <View
-                      style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: 20,
-                        backgroundColor: '#F5F3FF',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                        marginRight: 14,
-                      }}
-                    >
-                      <Ionicons name="chatbubble-ellipses" size={20} color="#6A1B9A" />
-                    </View>
-
-                    <View>
-                      <Text
-                        style={{
-                          fontFamily: 'Poppins-SemiBold',
-                          fontSize: 18,
-                          color: '#111827',
-                        }}
-                      >
-                        Comments
-                      </Text>
-                      <Text
-                        style={{
-                          fontFamily: 'Poppins-Regular',
-                          fontSize: 13,
-                          color: '#6B7280',
-                          marginTop: 2,
-                        }}
-                      >
-                        {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', gap: 12 }}>
-                    <TouchableOpacity
-                      onPress={() => loadComments(false)}
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 18,
-                        backgroundColor: '#F9FAFB',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Ionicons name="refresh" size={18} color="#6A1B9A" />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      onPress={closeComments}
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: 18,
-                        backgroundColor: '#F9FAFB',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Ionicons name="close" size={20} color="#374151" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* ================= REPLY BANNER ================= */}
-                {replyTo && (
+                  {/* ================= HEADER ================= */}
                   <View
                     style={{
                       paddingHorizontal: 24,
-                      paddingVertical: 12,
-                      backgroundColor: '#F0F9FF',
+                      paddingVertical: 18,
                       borderBottomWidth: 1,
-                      borderBottomColor: '#E5E7EB',
+                      borderBottomColor: '#F3F4F6',
                       flexDirection: 'row',
-                      justifyContent: 'space-between',
                       alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: '#FFFFFF',
                     }}
                   >
-                    <View style={{ flex: 1, marginRight: 12 }}>
-                      <Text
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View
                         style={{
-                          fontFamily: 'Poppins-Medium',
-                          fontSize: 12,
-                          color: '#0369A1',
-                          marginBottom: 4,
+                          width: 40,
+                          height: 40,
+                          borderRadius: 20,
+                          backgroundColor: '#F5F3FF',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          marginRight: 14,
                         }}
                       >
-                        REPLYING TO
-                      </Text>
-                      <Text
-                        style={{
-                          fontFamily: 'Poppins-Regular',
-                          fontSize: 13,
-                          color: '#0C4A6E',
-                        }}
-                        numberOfLines={1}
-                      >
-                        "{replyTo.text}"
-                      </Text>
+                        <Ionicons name="chatbubble-ellipses" size={20} color="#6A1B9A" />
+                      </View>
+
+                      <View>
+                        <Text
+                          style={{
+                            fontFamily: 'Poppins-SemiBold',
+                            fontSize: 18,
+                            color: '#111827',
+                          }}
+                        >
+                          Comments
+                        </Text>
+                        <Text
+                          style={{
+                            fontFamily: 'Poppins-Regular',
+                            fontSize: 13,
+                            color: '#6B7280',
+                            marginTop: 2,
+                          }}
+                        >
+                          {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
+                        </Text>
+                      </View>
                     </View>
 
-                    <TouchableOpacity
-                      onPress={() => setReplyTo(null)}
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <TouchableOpacity
+                        onPress={() => loadComments(false)}
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 18,
+                          backgroundColor: '#F9FAFB',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Ionicons name="refresh" size={18} color="#6A1B9A" />
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={closeComments}
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 18,
+                          backgroundColor: '#F9FAFB',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Ionicons name="close" size={20} color="#374151" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* ================= REPLY BANNER ================= */}
+                  {replyTo && (
+                    <View
                       style={{
-                        width: 32,
-                        height: 32,
-                        borderRadius: 16,
-                        backgroundColor: 'rgba(3,105,161,0.1)',
-                        justifyContent: 'center',
+                        paddingHorizontal: 24,
+                        paddingVertical: 12,
+                        backgroundColor: '#F0F9FF',
+                        borderBottomWidth: 1,
+                        borderBottomColor: '#E5E7EB',
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
                         alignItems: 'center',
                       }}
                     >
-                      <Ionicons name="close" size={18} color="#0369A1" />
-                    </TouchableOpacity>
-                  </View>
-                )}
+                      <View style={{ flex: 1, marginRight: 12 }}>
+                        <Text
+                          style={{
+                            fontFamily: 'Poppins-Medium',
+                            fontSize: 12,
+                            color: '#0369A1',
+                            marginBottom: 4,
+                          }}
+                        >
+                          REPLYING TO
+                        </Text>
+                        <Text
+                          style={{
+                            fontFamily: 'Poppins-Regular',
+                            fontSize: 13,
+                            color: '#0C4A6E',
+                          }}
+                          numberOfLines={1}
+                        >
+                          "{replyTo.text}"
+                        </Text>
+                      </View>
 
-                {/* ================= SCROLLABLE CONTENT AREA ================= */}
-                <View style={{ flex: 1, minHeight: 0 }}>
-                  {/* COMMENTS LIST */}
+                      <TouchableOpacity
+                        onPress={() => setReplyTo(null)}
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 16,
+                          backgroundColor: 'rgba(3,105,161,0.1)',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Ionicons name="close" size={18} color="#0369A1" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {/* ================= SCROLLABLE CONTENT AREA ================= */}
                   <View style={{ flex: 1, minHeight: 0 }}>
+                    {/* COMMENTS LIST */}
                     {commentsLoading ? (
                       <View
                         style={{
@@ -939,7 +1397,7 @@ const PostCard = ({
                         showsVerticalScrollIndicator={true}
                         keyboardShouldPersistTaps="handled"
                         nestedScrollEnabled={true}
-                        style={{ flex: 1, minHeight: 0 }}
+                        style={{ flex: 1 }}
                         contentContainerStyle={{
                           flexGrow: 1,
                           paddingVertical: 12,
@@ -1002,101 +1460,105 @@ const PostCard = ({
                             </Text>
                           </View>
                         }
-                        // Add ItemSeparatorComponent for better scrolling
                         ItemSeparatorComponent={() => <View style={{ height: 0 }} />}
+                        onLayout={(e) => {
+                          // Ensure proper layout measurement
+                          const { height } = e.nativeEvent.layout;
+                        }}
                       />
                     )}
                   </View>
-                </View>
 
-                {/* ================= COMPOSER (FIXED AT BOTTOM) ================= */}
-                <View
-                  style={{
-                    borderTopWidth: 1,
-                    borderTopColor: '#F3F4F6',
-                    paddingHorizontal: 24,
-                    paddingVertical: 16,
-                    backgroundColor: '#FFFFFF',
-                  }}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 12 }}>
-                    <View
-                      style={{
-                        flex: 1,
-                        borderWidth: 1.5,
-                        borderColor: commentText.trim() ? '#6A1B9A' : '#E5E7EB',
-                        borderRadius: 20,
-                        paddingHorizontal: 16,
-                        paddingVertical: 12,
-                        backgroundColor: '#F9FAFB',
-                        minHeight: 52,
-                        maxHeight: 100,
-                      }}
-                    >
-                      <TextInput
-                        placeholder={replyTo ? 'Write a reply…' : 'Write a comment…'}
-                        placeholderTextColor="#9CA3AF"
-                        value={commentText}
-                        onChangeText={setCommentText}
-                        multiline
+                  {/* ================= COMPOSER (FIXED AT BOTTOM) ================= */}
+                  <View
+                    style={{
+                      borderTopWidth: 1,
+                      borderTopColor: '#F3F4F6',
+                      paddingHorizontal: 24,
+                      paddingVertical: 16,
+                      backgroundColor: '#FFFFFF',
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 12 }}>
+                      <View
                         style={{
-                          fontFamily: 'Poppins-Regular',
-                          fontSize: 15,
-                          color: '#111827',
-                          padding: 0,
+                          flex: 1,
+                          borderWidth: 1.5,
+                          borderColor: commentText.trim() ? '#6A1B9A' : '#E5E7EB',
+                          borderRadius: 20,
+                          paddingHorizontal: 16,
+                          paddingVertical: 12,
+                          backgroundColor: '#F9FAFB',
+                          minHeight: 52,
+                          maxHeight: 100,
                         }}
-                      />
-                    </View>
-
-                    <TouchableOpacity
-                      onPress={submitComment}
-                      disabled={commentPosting || !commentText.trim()}
-                      style={{
-                        width: 52,
-                        height: 52,
-                        borderRadius: 26,
-                        backgroundColor:
-                          commentPosting || !commentText.trim()
-                            ? '#E5E7EB'
-                            : '#6A1B9A',
-                        justifyContent: 'center',
-                        alignItems: 'center',
-                      }}
-                    >
-                      {commentPosting ? (
-                        <ActivityIndicator size="small" color="#FFFFFF" />
-                      ) : (
-                        <Ionicons
-                          name="send"
-                          size={22}
-                          color={commentText.trim() ? '#FFFFFF' : '#9CA3AF'}
+                      >
+                        <TextInput
+                          placeholder={replyTo ? 'Write a reply…' : 'Write a comment…'}
+                          placeholderTextColor="#9CA3AF"
+                          value={commentText}
+                          onChangeText={setCommentText}
+                          multiline
+                          style={{
+                            fontFamily: 'Poppins-Regular',
+                            fontSize: 15,
+                            color: '#111827',
+                            padding: 0,
+                            maxHeight: 80,
+                          }}
                         />
-                      )}
-                    </TouchableOpacity>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={submitComment}
+                        disabled={commentPosting || !commentText.trim()}
+                        style={{
+                          width: 52,
+                          height: 52,
+                          borderRadius: 26,
+                          backgroundColor:
+                            commentPosting || !commentText.trim()
+                              ? '#E5E7EB'
+                              : '#6A1B9A',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                        }}
+                      >
+                        {commentPosting ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <Ionicons
+                            name="send"
+                            size={22}
+                            color={commentText.trim() ? '#FFFFFF' : '#9CA3AF'}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 </View>
-              </View>
+              </Pressable>
             </Pressable>
-          </KeyboardAvoidingView>
-        </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ================= REPORT MODAL ================= */}
       <Modal visible={reportVisible} animationType="slide" transparent>
-        <Pressable
-          onPress={closeReport}
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            justifyContent: 'center',
-            alignItems: 'center',
-            padding: 20,
-          }}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
+          style={{ flex: 1 }}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
-            style={{ width: '100%' }}
+          <Pressable
+            onPress={closeReport}
+            style={{
+              flex: 1,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              justifyContent: 'center',
+              alignItems: 'center',
+              padding: 20,
+            }}
           >
             {/* Stop backdrop close */}
             <Pressable onPress={() => { }}>
@@ -1355,8 +1817,8 @@ const PostCard = ({
                 </View>
               </View>
             </Pressable>
-          </KeyboardAvoidingView>
-        </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ================= SNACKBAR ================= */}
@@ -1393,6 +1855,7 @@ const PostCard = ({
     </View>
   );
 };
+
 /* ================= COMMENT ROW ================= */
 const CommentRow = ({
   item,
@@ -1408,7 +1871,6 @@ const CommentRow = ({
   useEffect(() => {
     setOwner(isOwnerCheck(item.author));
   }, [item.author, isOwnerCheck]);
-
 
   const author = item.author || {};
   const profile = author.profile || {};

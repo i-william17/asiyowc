@@ -266,8 +266,21 @@ const userSlice = createSlice({
 
       .addCase(updateProfile.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
-        state.message = 'Profile updated successfully';
+
+        const updatedUser = action.payload.data.user;
+
+        state.user = {
+          ...state.user,
+          ...updatedUser,
+          profile: {
+            ...state.user.profile,
+            ...updatedUser.profile,
+          },
+          safety: {
+            ...state.user.safety,
+            ...updatedUser.safety,
+          },
+        };
       })
 
       .addCase(updateAvatar.fulfilled, (state, action) => {

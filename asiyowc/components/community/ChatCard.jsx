@@ -13,7 +13,7 @@ import tw from "../../utils/tw";
  * - title            string (already resolved name)
  * - avatar           string | null
  * - lastMessage      string
- * - unreadCount      number (optional)
+ * - unreadCount      number
  * - onPress(id)
  */
 
@@ -25,6 +25,8 @@ export default function ChatCard({
   unreadCount = 0,
   onPress,
 }) {
+  const displayCount = unreadCount > 99 ? "99+" : unreadCount;
+
   return (
     <TouchableOpacity
       activeOpacity={0.85}
@@ -61,25 +63,34 @@ export default function ChatCard({
             {title}
           </Text>
 
-          {/* UNREAD BADGE */}
+          {/* ================= UNREAD BADGE ================= */}
           {unreadCount > 0 && (
             <View
-              style={tw`ml-2 min-w-[20px] h-5 px-2 rounded-full bg-purple-600 items-center justify-center`}
+              style={{
+                minWidth: 22,
+                height: 22,
+                paddingHorizontal: 6,
+                borderRadius: 11,
+                backgroundColor: "#2563EB", // blue (matches read ticks)
+                alignItems: "center",
+                justifyContent: "center",
+                marginLeft: 8,
+              }}
             >
               <Text
                 style={{
-                  fontFamily: "Poppins-Medium",
+                  fontFamily: "Poppins-SemiBold",
                   fontSize: 11,
                   color: "#FFFFFF",
                 }}
               >
-                {unreadCount}
+                {displayCount}
               </Text>
             </View>
           )}
         </View>
 
-        {/* LAST MESSAGE */}
+        {/* ================= LAST MESSAGE ================= */}
         <Text
           numberOfLines={1}
           style={{

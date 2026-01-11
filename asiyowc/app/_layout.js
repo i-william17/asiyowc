@@ -17,6 +17,8 @@ import { useFonts } from "../hooks/useFonts";
 import { restoreToken, fetchAuthenticatedUser } from "../store/slices/authSlice";
 import useCommunitySocket from "../hooks/useCommunitySocket";
 
+import { Audio } from "expo-av";
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 /* ============================================================
@@ -29,29 +31,45 @@ function AppShell() {
 
   const { token, appLoaded } = useSelector((state) => state.auth);
   const { fontsLoaded } = useFonts();
+
   useCommunitySocket();
 
-  /* Restore token ONCE */
+  /* ================= GLOBAL AUDIO MODE (SET ONCE) ================= */
+  useEffect(() => {
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX,
+      interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
+    }).catch((e) => {
+      console.warn("Global audio mode error:", e);
+    });
+  }, []);
+
+  /* ================= RESTORE TOKEN ================= */
   useEffect(() => {
     dispatch(restoreToken()).finally(() => {
       SplashScreen.hideAsync().catch(() => {});
     });
   }, []);
 
-  /* Fetch user when token exists */
+  /* ================= FETCH AUTHENTICATED USER ================= */
   useEffect(() => {
     if (appLoaded && token) {
       dispatch(fetchAuthenticatedUser());
-      
     }
   }, [appLoaded, token]);
 
-  /* 🔒 AUTH GUARD */
+  /* ================= AUTH GUARD (OPTIONAL) ================= */
   useEffect(() => {
     if (!appLoaded) return;
 
     const inAuth = segments[0] === "(auth)";
 
+    // Uncomment if you want strict auth routing
     // if (!token && !inAuth) {
     //   router.replace("/(auth)/login");
     // }
@@ -72,6 +90,9 @@ function AppShell() {
   );
 }
 
+/* ============================================================
+   ROOT LAYOUT
+============================================================ */
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

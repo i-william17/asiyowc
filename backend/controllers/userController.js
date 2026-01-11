@@ -87,91 +87,123 @@ exports.getProfile = async (req, res) => {
    UPDATE PROFILE (SAFE FIELDS ONLY)
 ===================================================== */
 exports.updateProfile = async (req, res) => {
-
-  const updates = {};
-
-  const {
-    fullName,
-    email,
-    bio,
-    role,
-    interests,
-    location,
-    safety
-  } = req.body;
-
-  /* =====================================================
-     BASIC PROFILE
-  ===================================================== */
-  if (typeof fullName === "string") {
-    updates["profile.fullName"] = fullName.trim();
-  }
-
-  if (typeof bio === "string") {
-    updates["profile.bio"] = bio.trim();
-  }
-
-  if (typeof role === "string") {
-    updates["profile.role"] = role.toLowerCase().trim();
-  }
-
-  if (Array.isArray(interests)) {
-    updates["interests"] = interests
-      .map(i => i.toLowerCase().trim())
-      .filter(Boolean);
-  }
-
-  /* =====================================================
-     LOCATION
-  ===================================================== */
-  if (location && typeof location === "object") {
-    updates["profile.location.country"] =
-      typeof location.country === "string" ? location.country.trim() : "";
-
-    updates["profile.location.countryCode"] =
-      typeof location.countryCode === "string" ? location.countryCode.trim() : "";
-
-    updates["profile.location.city"] =
-      typeof location.city === "string" ? location.city.trim() : "";
-  }
-
-  /* =====================================================
-     ⭐ EMERGENCY CONTACTS — FROM FRONTEND
-     william – your payload is:
-     safety: { emergencyContacts: [...] }
-  ===================================================== */
-
-  if (Array.isArray(safety?.emergencyContacts)) {
-
-    const normalized = safety.emergencyContacts.map(c => ({
-      name: typeof c?.name === "string" ? c.name.trim() : "",
-      phone: typeof c?.phone === "string" ? c.phone.trim() : "",
-      relationship:
-        typeof c?.relationship === "string" && c.relationship.length > 0
-          ? c.relationship.trim()
-          : "Other",
-    }));
-
-    // ⭐ overwrite the safety array in one atomic set
-    updates["safety.emergencyContacts"] = normalized;
-  }
-
-  /* =====================================================
-     EMAIL UNIQUE
-  ===================================================== */
-  if (typeof email === "string") {
-    updates["email"] = email.toLowerCase().trim();
-  }
-
   try {
-
     const userId = req.user.id;
+    const updates = {};
 
-    const exists = await User.findById(userId);
-    if (!exists) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found"
+    const {
+      fullName,
+      email,
+      bio,
+      role,
+      interests,
+      location,
+      safety,
+      profile // 👈 allow nested payloads
+    } = req.body;
+
+    console.log('👤 REQUEST BODY:', req.body);
+
+    /* =====================================================
+       BASIC PROFILE
+    ===================================================== */
+    if (typeof fullName === "string" && fullName.trim()) {
+      updates["profile.fullName"] = fullName.trim();
+    }
+
+    if (typeof bio === "string") {
+      updates["profile.bio"] = bio.trim();
+    }
+
+    if (typeof role === "string" && role.trim()) {
+      updates["profile.role"] = role.toLowerCase().trim();
+    }
+
+    /* =====================================================
+       INTERESTS (CANONICAL PATH)
+       accepts:
+       - interests: [...]
+       - profile.interests: [...]
+    ===================================================== */
+    const resolvedInterests =
+      Array.isArray(interests)
+        ? interests
+        : Array.isArray(profile?.interests)
+        ? profile.interests
+        : null;
+
+    if (resolvedInterests) {
+      updates["interests"] = resolvedInterests
+        .map(i => i.toLowerCase().trim())
+        .filter(Boolean);
+    }
+
+    /* =====================================================
+       LOCATION (SAFE — NEVER WRITE EMPTY VALUES)
+    ===================================================== */
+    const resolvedLocation =
+      location && typeof location === "object"
+        ? location
+        : profile?.location;
+
+    if (resolvedLocation) {
+      if (typeof resolvedLocation.country === "string" && resolvedLocation.country.trim()) {
+        updates["profile.location.country"] = resolvedLocation.country.trim();
+      }
+
+      if (
+        typeof resolvedLocation.countryCode === "string" &&
+        resolvedLocation.countryCode.trim().length >= 2
+      ) {
+        updates["profile.location.countryCode"] =
+          resolvedLocation.countryCode.trim();
+      }
+
+      if (typeof resolvedLocation.city === "string" && resolvedLocation.city.trim()) {
+        updates["profile.location.city"] = resolvedLocation.city.trim();
+      }
+    }
+
+    /* =====================================================
+       EMERGENCY CONTACTS (CANONICAL PATH)
+       accepts:
+       - safety.emergencyContacts
+       - profile.safety.emergencyContacts
+    ===================================================== */
+    const resolvedEmergencyContacts =
+      Array.isArray(safety?.emergencyContacts)
+        ? safety.emergencyContacts
+        : Array.isArray(profile?.safety?.emergencyContacts)
+        ? profile.safety.emergencyContacts
+        : null;
+
+    if (resolvedEmergencyContacts) {
+      updates["safety.emergencyContacts"] =
+        resolvedEmergencyContacts.map(c => ({
+          name: typeof c?.name === "string" ? c.name.trim() : "",
+          phone: typeof c?.phone === "string" ? c.phone.trim() : "",
+          relationship:
+            typeof c?.relationship === "string" && c.relationship.trim()
+              ? c.relationship.trim()
+              : "Other",
+        }));
+    }
+
+    /* =====================================================
+       EMAIL (UNIQUE)
+    ===================================================== */
+    if (typeof email === "string" && email.trim()) {
+      updates["email"] = email.toLowerCase().trim();
+    }
+
+    /* =====================================================
+       APPLY UPDATE
+    ===================================================== */
+    if (Object.keys(updates).length === 0) {
+      return res.json({
+        success: true,
+        message: "No changes detected",
+        data: {}
       });
     }
 
@@ -181,6 +213,13 @@ exports.updateProfile = async (req, res) => {
       { new: true, runValidators: true }
     ).select("-password -twoFactorAuth.secret");
 
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
     return res.json({
       success: true,
       message: "Profile updated successfully",
@@ -188,8 +227,7 @@ exports.updateProfile = async (req, res) => {
     });
 
   } catch (error) {
-
-    console.error("❌ updateProfile mongo error:", error.message);
+    console.error("❌ updateProfile error:", error.message);
 
     return res.status(500).json({
       success: false,
@@ -212,25 +250,32 @@ exports.uploadAvatar = async (req, res) => {
 
     const user = await User.findById(req.user.id);
 
-    // ⭐ DELETE OLD – BUT DO NOT STOP FLOW
     if (user?.profile?.avatar?.publicId) {
       await deleteFromCloudinary(user.profile.avatar.publicId);
     }
 
-    // ⭐ REAL CLOUDINARY UPLOAD
     const result = await cloudinary.uploader.upload(req.file.path, {
       folder: "asiyo-app",
       resource_type: "image",
     });
 
-    // ⭐ USE CLOUDINARY URL NOT LOCAL
     const avatar = {
       url: result.secure_url,
       publicId: result.public_id,
     };
 
-    user.profile.avatar = avatar;
-    await user.save();
+    // 🔒 ATOMIC UPDATE — NO FULL VALIDATION
+    await User.findByIdAndUpdate(
+      req.user.id,
+      {
+        $set: {
+          "profile.avatar": avatar,
+        },
+      },
+      {
+        runValidators: false,
+      }
+    );
 
     return res.json({
       success: true,
@@ -239,7 +284,6 @@ exports.uploadAvatar = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ uploadAvatar error:", error.message);
-
     return res.status(500).json({
       success: false,
       message: "Avatar upload failed",
@@ -247,7 +291,6 @@ exports.uploadAvatar = async (req, res) => {
     });
   }
 };
-
 
 /* =====================================================
    DELETE AVATAR
@@ -297,33 +340,36 @@ exports.uploadCoverPhoto = async (req, res) => {
 
     const user = await User.findById(req.user.id);
 
-    // ⭐ clean OLD cover but do not block
     if (user?.profile?.coverPhoto?.publicId) {
       try {
         await deleteFromCloudinary(user.profile.coverPhoto.publicId);
-      } catch (cleanupErr) {
-        console.log(
-          "[Cloudinary] Old cover cleanup failed – continuing save"
-        );
+      } catch {
+        console.log("[Cloudinary] Old cover cleanup failed");
       }
     }
 
-    // ⭐ CLOUDINARY UPLOAD
-    const result = await cloudinary.uploader.upload(
-      req.file.path,
-      {
-        folder: "asiyo-app",
-        resource_type: "image",
-      }
-    );
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: "asiyo-app",
+      resource_type: "image",
+    });
 
     const coverPhoto = {
-      url: result.secure_url,      // ✅ REAL CLOUD URL
-      publicId: result.public_id,  // ✅ PUBLIC ID
+      url: result.secure_url,
+      publicId: result.public_id,
     };
 
-    user.profile.coverPhoto = coverPhoto;
-    await user.save();
+    // 🔒 ATOMIC UPDATE — NO FULL VALIDATION
+    await User.findByIdAndUpdate(
+      req.user.id,
+      {
+        $set: {
+          "profile.coverPhoto": coverPhoto,
+        },
+      },
+      {
+        runValidators: false,
+      }
+    );
 
     return res.json({
       success: true,
@@ -332,7 +378,6 @@ exports.uploadCoverPhoto = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ uploadCoverPhoto error:", error.message);
-
     return res.status(500).json({
       success: false,
       message: "Cover photo upload failed",

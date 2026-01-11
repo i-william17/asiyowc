@@ -8,8 +8,21 @@ const Chat = require('../models/Chat');
 
 const normalizeId = (v) => {
   if (!v) return null;
-  if (typeof v === 'string') return v;
-  if (typeof v === 'object') return v._id || v.id || null;
+
+  // String
+  if (typeof v === "string") return v;
+
+  // Mongoose ObjectId
+  if (v instanceof mongoose.Types.ObjectId) {
+    return v.toString();
+  }
+
+  // Populated object
+  if (typeof v === "object") {
+    if (v._id) return v._id.toString();
+    if (v.id) return v.id.toString();
+  }
+
   return null;
 };
 
@@ -151,11 +164,11 @@ module.exports = (io, socket) => {
 
       const message = {
         _id: new mongoose.Types.ObjectId(),
-        sender: userId,
+        sender: new mongoose.Types.ObjectId(userId),
         ciphertext: payload.ciphertext,
         type: payload.type || 'text',
         replyTo: payload.replyTo || null,
-        reactions: {},
+        reactions: [],
         readBy: [],
         createdAt: new Date(),
       };
@@ -178,36 +191,59 @@ module.exports = (io, socket) => {
   /* =====================================================
      MESSAGE REACTION (PERSISTED)
   ===================================================== */
-  socket.on('message:reaction', async ({ chatId, messageId, emoji }) => {
+  socket.on("message:reaction", async ({ chatId, messageId, emoji }) => {
     try {
       const cid = normalizeId(chatId);
       const mid = normalizeId(messageId);
-      if (!isValidId(cid) || !isValidId(mid) || !emoji) return;
 
-      const chat = await Chat.findOne({ _id: cid, 'messages._id': mid });
+      if (!isValidId(cid) || !isValidId(mid)) return;
+
+      const chat = await Chat.findOne({
+        _id: cid,
+        type: "dm",
+        participants: userId,
+        "messages._id": mid,
+        isRemoved: false,
+      }).populate(
+        "messages.reactions.user",
+        "profile.fullName profile.avatar"
+      );
+
       if (!chat) return;
 
       const msg = chat.messages.id(mid);
       if (!msg) return;
 
-      msg.reactions = msg.reactions || {};
-      const users = new Set((msg.reactions[emoji] || []).map(String));
+      // ✅ ALWAYS REMOVE USER'S EXISTING REACTION FIRST
+      msg.reactions = msg.reactions.filter(
+        (r) => String(r.user?._id || r.user) !== String(userId)
+      );
 
-      if (users.has(String(userId))) users.delete(String(userId));
-      else users.add(String(userId));
-
-      if (users.size === 0) delete msg.reactions[emoji];
-      else msg.reactions[emoji] = Array.from(users);
+      // ✅ ONLY ADD IF EMOJI EXISTS
+      if (emoji) {
+        msg.reactions.push({
+          user: userId,
+          emoji,
+          createdAt: new Date(),
+        });
+      }
 
       await chat.save();
 
-      io.to(`chat:${cid}`).emit('message:reaction', {
+      const populatedChat = await Chat.findOne(
+        { _id: cid, "messages._id": mid },
+        { "messages.$": 1 }
+      ).populate("messages.reactions.user", "profile.fullName profile.avatar");
+
+      const populatedMsg = populatedChat.messages[0];
+
+      io.to(`chat:${cid}`).emit("message:reaction:update", {
         chatId: cid,
-        messageId: mid,
-        reactions: msg.reactions,
+        message: populatedMsg.toObject(),
       });
-    } catch (e) {
-      console.error('message:reaction error', e);
+
+    } catch (err) {
+      console.error("[DM reaction socket] ❌", err);
     }
   });
 
@@ -243,34 +279,130 @@ module.exports = (io, socket) => {
   });
 
   /* =====================================================
-     MESSAGE DELETE FOR EVERYONE (PERSISTED)
+   PIN / UNPIN MESSAGE (PERSISTED + REALTIME)
+===================================================== */
+  socket.on("message:pin", async ({ chatId, messageId }) => {
+    try {
+      const cid = normalizeId(chatId);
+      const mid = normalizeId(messageId);
+
+      if (!isValidId(cid)) return;
+
+      const chat = await Chat.findOne({
+        _id: cid,
+        participants: userId,
+        isRemoved: false,
+      });
+
+      if (!chat) return;
+
+      // 🔁 TOGGLE PIN
+      if (chat.pinnedMessage && String(chat.pinnedMessage) === String(mid)) {
+        chat.pinnedMessage = null; // UNPIN
+      } else {
+        chat.pinnedMessage = mid; // PIN (only one allowed)
+      }
+
+      await chat.save();
+
+      // 🔥 REALTIME UPDATE
+      io.to(`chat:${cid}`).emit("message:pin:update", {
+        chatId: cid,
+        pinnedMessage: chat.pinnedMessage,
+      });
+    } catch (err) {
+      console.error("[PIN MESSAGE ERROR]", err);
+    }
+  });
+
+  /* =====================================================
+     MESSAGE DELETE
   ===================================================== */
-  socket.on('message:delete', async ({ chatId, messageId }) => {
+  // DELETE FOR ME
+  socket.on("message:delete:me", async ({ chatId, messageId }) => {
     try {
       const cid = normalizeId(chatId);
       const mid = normalizeId(messageId);
       if (!isValidId(cid) || !isValidId(mid)) return;
 
-      const chat = await Chat.findOne({ _id: cid, 'messages._id': mid });
+      const chat = await Chat.findOne({
+        _id: cid,
+        participants: userId,
+        "messages._id": mid,
+      });
+
       if (!chat) return;
 
       const msg = chat.messages.id(mid);
+
+      console.log("msg", msg);
+
       if (!msg) return;
 
-      if (String(msg.sender) !== String(userId)) return;
+      msg.deletedFor = msg.deletedFor || [];
 
-      msg.isDeleted = true;
-      msg.ciphertext = '';
-      msg.deletedAt = new Date();
+      if (!msg.deletedFor.includes(String(userId))) {
+        msg.deletedFor.push(userId);
+        await chat.save();
+      }
 
-      await chat.save();
+      // 🔁 ONLY ACK TO USER (no broadcast)
+      socket.emit("message:delete:me:update", {
+        chatId: cid,
+        messageId: mid,
+        userId,
+      });
+    } catch (e) {
+      console.error("delete for me error", e);
+    }
+  });
 
-      io.to(`chat:${cid}`).emit('message:deleted', {
+  // DELETE FOR EVERYONE (FIXED & GUARANTEED PERSISTENCE)
+  socket.on("message:delete:everyone", async ({ chatId, messageId }, cb) => {
+    try {
+      const cid = normalizeId(chatId);
+      const mid = normalizeId(messageId);
+
+      if (!isValidId(cid) || !isValidId(mid)) {
+        return cb?.({ success: false, message: "Invalid ids" });
+      }
+
+      // 1️⃣ Ensure user is participant AND message exists
+      const chat = await Chat.findOne(
+        { _id: cid, participants: userId, "messages._id": mid },
+        { "messages.$": 1 }
+      );
+
+      if (!chat || !chat.messages?.length) {
+        return cb?.({ success: false, message: "Message not found" });
+      }
+
+      // 2️⃣ Atomic update (NO ciphertext touched)
+      const res = await Chat.updateOne(
+        { _id: cid, "messages._id": mid },
+        {
+          $set: {
+            "messages.$.isDeletedForEveryone": true,
+            "messages.$.deletedAt": new Date(),
+          },
+        },
+        { runValidators: false }
+      );
+
+      if (!res.modifiedCount) {
+        return cb?.({ success: false, message: "Update failed" });
+      }
+
+      // 3️⃣ Broadcast
+      io.to(`chat:${cid}`).emit("message:delete:everyone:update", {
         chatId: cid,
         messageId: mid,
       });
-    } catch (e) {
-      console.error('message:delete error', e);
+
+      cb?.({ success: true });
+    } catch (err) {
+      console.error("❌ delete for everyone error", err);
+      cb?.({ success: false, message: err.message });
     }
   });
 
@@ -304,4 +436,44 @@ module.exports = (io, socket) => {
       console.error('message:edit error', e);
     }
   });
+
+  /* =====================================================
+     MESSAGE READ (BATCH)
+  ===================================================== */
+socket.on("message:read:batch", async ({ chatId, messageIds }) => {
+  try {
+    if (!chatId || !Array.isArray(messageIds) || messageIds.length === 0) return;
+
+    const userId = socket.user?.id;
+    if (!userId) return;
+
+    await Chat.updateOne(
+      { _id: chatId },
+      {
+        $addToSet: {
+          "messages.$[msg].readBy": {
+            user: userId,
+            readAt: new Date(),
+          },
+        },
+      },
+      {
+        arrayFilters: [{ "msg._id": { $in: messageIds } }],
+        runValidators: false, // ✅ prevents ciphertext failures
+      }
+    );
+
+    // 🔁 realtime update
+    socket.to(`chat:${chatId}`).emit("message:read:batch", {
+      chatId,
+      messageIds,
+      userId,
+    });
+  } catch (err) {
+    console.error("❌ message:read:batch error", err);
+  }
+});
+
+
 };
+

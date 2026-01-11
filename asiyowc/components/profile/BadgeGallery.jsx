@@ -1,44 +1,66 @@
 import React from "react";
 import { View, Text, Image, ScrollView } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import tw from "../../utils/tw";
 import { BADGE_IMAGES } from "../../utils/badges";
 
 /* =====================================================
-   Badge + type alignment
-   Schema sticks to strings only
+   Professional Badge Gallery
+   - Explicit fontFamily usage
+   - No emojis
+   - Icon-based UI
 ===================================================== */
 
 export default function BadgeGallery({ badges = [] }) {
-
-  /* =============== EMPTY STATE =============== */
+  /* ================= EMPTY STATE ================= */
   if (!Array.isArray(badges) || badges.length === 0) {
     return (
-      <View style={tw`mx-3 my-4 bg-[#F9FAFB] rounded-2xl p-6 border border-gray-100`}>
-        
+      <View
+        style={tw`mx-4 my-5 bg-white rounded-2xl p-6 border border-gray-100 shadow-sm`}
+      >
         <View style={tw`items-center`}>
-          <View style={tw`w-18 h-18 bg-white rounded-full items-center justify-center shadow-sm mb-3 border border-gray-100`}>
-            <Text style={tw`text-gray-300 text-2xl font-['Poppins-SemiBold']`}>
-              🏅
-            </Text>
+          <View
+            style={tw`w-14 h-14 rounded-full bg-gray-50 border border-gray-200 items-center justify-center mb-3`}
+          >
+            <Ionicons name="ribbon-outline" size={26} color="#9CA3AF" />
           </View>
 
-          <Text style={tw`text-gray-500 text-base font-['Poppins-SemiBold'] mb-1`}>
-            Badges Gallery
+          <Text
+            style={{
+              fontFamily: "Poppins-SemiBold",
+              fontSize: 16,
+              color: "#1F2937",
+              marginBottom: 4,
+            }}
+          >
+            Badges
           </Text>
 
-          <Text style={tw`text-gray-400 text-sm font-['Poppins-Regular'] text-center`}>
-            Achievements and completed milestones will appear here once programs are finished and verified.
+          <Text
+            style={{
+              fontFamily: "Poppins-Regular",
+              fontSize: 13,
+              color: "#6B7280",
+              textAlign: "center",
+              lineHeight: 18,
+            }}
+          >
+            Earned badges and verified achievements will appear here once
+            programs are completed.
           </Text>
         </View>
       </View>
     );
   }
 
-  /* =============== BADGES LIST =============== */
+  /* ================= BADGE LIST ================= */
   return (
     <View style={tw`py-3`}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={tw`px-3`}>
-        
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={tw`px-4`}
+      >
         {badges.map((badgeKey, i) => {
           const key = badgeKey.toLowerCase().trim();
           const img = BADGE_IMAGES[key];
@@ -53,49 +75,64 @@ export default function BadgeGallery({ badges = [] }) {
                 bg-white
                 rounded-2xl
                 border border-gray-100
-                p-4
+                shadow-sm
+                px-3
+                py-4
                 items-center
-                shadow-md
+                justify-between
               `}
             >
-              {/* ===== Badge Image / Placeholder ===== */}
-              {img ? (
-                <View style={tw`flex-1 items-center justify-center w-full`}>
+              {/* ===== Badge Visual ===== */}
+              <View style={tw`mt-1`}>
+                {img ? (
                   <Image
                     source={img}
                     resizeMode="contain"
-                    style={tw`w-20 h-20`}
+                    style={tw`w-16 h-16`}
                   />
-                </View>
-              ) : (
-                <View style={tw`flex-1 items-center justify-center w-full`}>
-                  <View style={tw`w-20 h-20 bg-gray-50 rounded-full items-center justify-center border border-gray-100`}>
-                    <Text style={tw`text-gray-300 text-xl font-['Poppins-Bold']`}>
-                      •••
-                    </Text>
+                ) : (
+                  <View
+                    style={tw`w-16 h-16 rounded-full bg-gray-50 border border-gray-200 items-center justify-center`}
+                  >
+                    <Ionicons
+                      name="shield-checkmark-outline"
+                      size={22}
+                      color="#9CA3AF"
+                    />
                   </View>
-                </View>
-              )}
+                )}
+              </View>
 
-              {/* ===== Labels ===== */}
-              <View style={tw`w-full items-center mt-2`}>
-                
+              {/* ===== Badge Text ===== */}
+              <View style={tw`items-center mt-3`}>
                 <Text
                   numberOfLines={2}
-                  style={tw`text-gray-900 text-sm font-['Poppins-SemiBold'] text-center leading-tight`}
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 13,
+                    color: "#111827",
+                    textAlign: "center",
+                    lineHeight: 16,
+                  }}
                 >
                   {badgeKey}
                 </Text>
 
-                <Text style={tw`text-gray-400 text-[11px] font-['Poppins-Regular'] mt-1 tracking-wide`}>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 11,
+                    color: "#9CA3AF",
+                    marginTop: 4,
+                    letterSpacing: 0.5,
+                  }}
+                >
                   {key}
                 </Text>
-
               </View>
             </View>
           );
         })}
-
       </ScrollView>
     </View>
   );

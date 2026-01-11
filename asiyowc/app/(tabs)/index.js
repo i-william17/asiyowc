@@ -18,7 +18,7 @@ import {
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 
 import { fetchFeed, deletePost } from '../../store/slices/postSlice';
 import PostCard from '../../components/feed/PostCard';
@@ -91,7 +91,7 @@ const SwipeIndicator = ({ progress, isVisible }) => {
 ========================================================== */
 const FlatListLoader = ({ loading, hasMore, isRefreshing }) => {
   if (!loading || isRefreshing) return null;
-  
+
   return (
     <View style={styles.loaderContainer}>
       <ActivityIndicator size="small" color="#6A1B9A" />
@@ -102,7 +102,7 @@ const FlatListLoader = ({ loading, hasMore, isRefreshing }) => {
 
 const FeedScreen = () => {
   const dispatch = useDispatch();
-  
+
   // ⚠️ Your slice (from earlier) uses: loadingFeed not loading.
   // If your store really has `loading`, keep it.
   // I'll safely support both:
@@ -122,6 +122,21 @@ const FeedScreen = () => {
   const [editingPost, setEditingPost] = useState(null);
   const [deletingPostId, setDeletingPostId] = useState(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [visiblePostIds, setVisiblePostIds] = useState(new Set());
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 60, // 🔥 must be mostly visible
+  }).current;
+
+  const onViewableItemsChanged = useRef(({ viewableItems }) => {
+    const visibleIds = new Set(
+      viewableItems
+        .filter(v => v.isViewable)
+        .map(v => v.item?._id)
+    );
+
+    setVisiblePostIds(visibleIds);
+  }).current;
   
   // ✅ Delete confirmation modal state
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
@@ -137,6 +152,20 @@ const FeedScreen = () => {
   const flatListRef = useRef(null);
   const swipeStartX = useRef(0);
   const lastSwipeTime = useRef(0);
+
+  const [feedActive, setFeedActive] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Screen is focused
+      setFeedActive(true);
+
+      return () => {
+        // Screen is blurred (navigating away)
+        setFeedActive(false);
+      };
+    }, [])
+  );
 
   /* ==========================================================
      PAN RESPONDER FOR SWIPE GESTURE
@@ -159,7 +188,7 @@ const FeedScreen = () => {
       onPanResponderMove: (evt, gestureState) => {
         const swipeDistance = gestureState.dx;
         const normalizedProgress = Math.min(Math.max(swipeDistance / 150, 0), 1);
-        
+
         if (swipeDistance > 0) {
           swipeProgress.setValue(normalizedProgress);
         }
@@ -168,13 +197,13 @@ const FeedScreen = () => {
         const swipeDistance = gestureState.dx;
         const swipeVelocity = gestureState.vx;
         const swipeDuration = Date.now() - lastSwipeTime.current;
-        
+
         // Conditions to trigger reels screen:
         // 1. Swipe distance > 80px OR
         // 2. Fast swipe (> 0.5 velocity) OR
         // 3. Long swipe (> 150px) with normal speed
         if (
-          swipeDistance > 80 || 
+          swipeDistance > 80 ||
           (swipeVelocity > 0.5 && swipeDistance > 40) ||
           (swipeDistance > 150 && swipeDuration < 500)
         ) {
@@ -307,9 +336,12 @@ const FeedScreen = () => {
   }, [postToDelete, deleteAnim, dispatch]);
 
   const renderPost = ({ item }) => {
+    const isVisible = visiblePostIds.has(item._id);
+
     if (!deleteAnim[item._id]) {
       deleteAnim[item._id] = new Animated.Value(1);
     }
+
 
     return (
       <Animated.View
@@ -320,6 +352,8 @@ const FeedScreen = () => {
       >
         <PostCard
           post={item}
+          feedActive={feedActive}
+          isVisible={isVisible}
           deleting={deletingPostId === item._id}
           onComment={() => console.log('COMMENT', item._id)}
           onEdit={handleEditPost}
@@ -334,7 +368,7 @@ const FeedScreen = () => {
     <SafeAreaView style={{ flex: 1, backgroundColor: '#f8fafc' }}>
       {/* ================= SWIPE INDICATOR ================= */}
       <SwipeIndicator progress={swipeProgress} isVisible={showSwipeIndicator} />
-      
+
       {/* ================= DELETE CONFIRM MODAL ================= */}
       <Modal visible={deleteConfirmVisible} transparent animationType="fade">
         <Pressable
@@ -470,7 +504,7 @@ const FeedScreen = () => {
       </Modal>
 
       {/* ================= MAIN CONTENT WITH SWIPE HANDLER ================= */}
-      <View 
+      <View
         style={{ flex: 1 }}
         {...panResponder.panHandlers}
       >
@@ -524,13 +558,15 @@ const FeedScreen = () => {
           data={safeFeed}
           keyExtractor={(item) => item._id}
           renderItem={renderPost}
+          viewabilityConfig={viewabilityConfig}
+          onViewableItemsChanged={onViewableItemsChanged}
           alwaysBounceVertical
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 80 }}
           refreshControl={
-            <RefreshControl 
-              refreshing={refreshing} 
-              onRefresh={onRefresh} 
-              tintColor="#6A1B9A" 
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#6A1B9A"
               colors={['#6A1B9A']}
             />
           }
@@ -577,9 +613,9 @@ const FeedScreen = () => {
           }
           // ✅ Custom loader for loading more
           ListFooterComponent={
-            <FlatListLoader 
-              loading={loadingMore} 
-              hasMore={page < (pagination?.pages || 1)} 
+            <FlatListLoader
+              loading={loadingMore}
+              hasMore={page < (pagination?.pages || 1)}
               isRefreshing={refreshing}
             />
           }

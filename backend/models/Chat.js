@@ -14,7 +14,11 @@ const reactionSchema = new mongoose.Schema(
     },
     emoji: {
       type: String,
-      required: true // ❤️ 😂 👍 etc
+      required: true
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
     }
   },
   { _id: false }
