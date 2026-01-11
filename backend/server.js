@@ -37,6 +37,10 @@ const { responseFormatter } = require('./middleware/responseFormatter.js');
 dotenv.config();
 
 const app = express();
+
+//render
+app.set("trust proxy", 1);
+
 const server = http.createServer(app);
 
 // 🔹 Existing Socket.IO instance (kept)
