@@ -53,45 +53,22 @@ exports.register = async (req, res) => {
     await user.save();
 
     // 5️⃣ Send verification email
-    // try {
-    //   await sendEmail({
-    //     to: email,
-    //     subject: 'Verify Your Email - Asiyo Global Women Connect',
-    //     html: `
-    //       <h2>Email Verification</h2>
-    //       <p>Your Asiyo verification code is:</p>
-    //       <h1 style="font-size: 32px; letter-spacing: 4px;">${emailCode}</h1>
-    //       <p>This code expires in 10 minutes.</p>
-    //     `,
-    //   });
-
-    //   console.log("📧 Verification email sent successfully");
-    // } catch (emailErr) {
-    //   console.error("❌ Email sending FAILED:", emailErr.message);
-    // }
-
     try {
-      sendEmail({
+      await sendEmail({
         to: email,
         subject: 'Verify Your Email - Asiyo Global Women Connect',
         html: `
-      <h2>Email Verification</h2>
-      <p>Your Asiyo verification code is:</p>
-      <h1 style="font-size: 32px; letter-spacing: 4px;">${emailCode}</h1>
-      <p>This code expires in 10 minutes.</p>
-    `,
-      })
-        .then(() => {
-          console.log("📧 Verification email dispatched");
-        })
-        .catch((emailErr) => {
-          console.error("❌ Email dispatch failed:", emailErr.message);
-        });
-    } catch (unexpectedErr) {
-      // This only catches synchronous errors (very rare)
-      console.error("❌ Unexpected email error:", unexpectedErr.message);
-    }
+          <h2>Email Verification</h2>
+          <p>Your Asiyo verification code is:</p>
+          <h1 style="font-size: 32px; letter-spacing: 4px;">${emailCode}</h1>
+          <p>This code expires in 10 minutes.</p>
+        `,
+      });
 
+      console.log("📧 Verification email sent successfully");
+    } catch (emailErr) {
+      console.error("❌ Email sending FAILED:", emailErr.message);
+    }
 
     // 6️⃣ Send response
     return res.status(201).json({
@@ -370,48 +347,6 @@ exports.verify2FA = async (req, res) => {
 /* ==========================================================
    FORGOT PASSWORD (EMAIL ONLY — Twilio Removed)
 ========================================================== */
-// exports.forgotPassword = async (req, res) => {
-//   try {
-//     const { email } = req.body;
-
-//     const user = await User.findOne({ email });
-
-//     if (!user) {
-//       return res.status(404).json({
-//         success: false,
-//         message: 'User not found',
-//       });
-//     }
-
-//     const resetToken = user.generatePhoneVerificationCode();
-//     await user.save();
-
-//     // REPLACEMENT — ALWAYS SEND EMAIL, NEVER SMS
-//     await sendEmail({
-//       to: user.email,
-//       subject: 'Password Reset - Asiyo Global Women Connect',
-//       html: `
-//         <h2>Password Reset Code</h2>
-//         <p>Your reset code is:</p>
-//         <h1 style="font-size: 32px; letter-spacing: 4px;">${resetToken}</h1>
-//         <p>This code expires in 10 minutes.</p>
-//       `,
-//     });
-
-//     return res.json({
-//       success: true,
-//       message: 'Password reset code sent successfully',
-//     });
-
-//   } catch (error) {
-//     console.error('❌ forgotPassword error:', error);
-//     return res.status(500).json({
-//       success: false,
-//       message: error.message,
-//     });
-//   }
-// };
-
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -425,33 +360,21 @@ exports.forgotPassword = async (req, res) => {
       });
     }
 
-    // 1️⃣ Generate reset token
     const resetToken = user.generatePhoneVerificationCode();
     await user.save();
 
-    // 2️⃣ Send email NON-BLOCKING (🔥 critical fix)
-    try {
-      sendEmail({
-        to: user.email,
-        subject: 'Password Reset - Asiyo Global Women Connect',
-        html: `
-          <h2>Password Reset Code</h2>
-          <p>Your reset code is:</p>
-          <h1 style="font-size: 32px; letter-spacing: 4px;">${resetToken}</h1>
-          <p>This code expires in 10 minutes.</p>
-        `,
-      })
-        .then(() => {
-          console.log("📧 Password reset email dispatched");
-        })
-        .catch((emailErr) => {
-          console.error("❌ Password reset email failed:", emailErr.message);
-        });
-    } catch (unexpectedErr) {
-      console.error("❌ Unexpected email error:", unexpectedErr.message);
-    }
+    // REPLACEMENT — ALWAYS SEND EMAIL, NEVER SMS
+    await sendEmail({
+      to: user.email,
+      subject: 'Password Reset - Asiyo Global Women Connect',
+      html: `
+        <h2>Password Reset Code</h2>
+        <p>Your reset code is:</p>
+        <h1 style="font-size: 32px; letter-spacing: 4px;">${resetToken}</h1>
+        <p>This code expires in 10 minutes.</p>
+      `,
+    });
 
-    // 3️⃣ Respond immediately (do NOT wait for email)
     return res.json({
       success: true,
       message: 'Password reset code sent successfully',

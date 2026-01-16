@@ -111,7 +111,6 @@ const messageSchema = new mongoose.Schema(
 /* =====================================================
    CHAT SCHEMA
 ===================================================== */
-
 const chatSchema = new mongoose.Schema(
   {
     type: {
@@ -127,6 +126,13 @@ const chatSchema = new mongoose.Schema(
         required: true
       }
     ],
+
+    // 🔑 DM-only uniqueness key
+    dmKey: {
+      type: String,
+      index: true,
+      sparse: true
+    },
 
     messages: [messageSchema],
 
@@ -148,6 +154,7 @@ const chatSchema = new mongoose.Schema(
     toObject: { virtuals: true }
   }
 );
+
 
 /* =====================================================
    🔒 HARDENING (KEEP)
@@ -207,7 +214,7 @@ chatSchema.virtual('messagesCount').get(function () {
 ===================================================== */
 
 chatSchema.index(
-  { participants: 1, type: 1 },
+  { dmKey: 1 },
   {
     unique: true,
     partialFilterExpression: { type: 'dm' }

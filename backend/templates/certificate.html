@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Certificate of Completion</title>
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+
+  <style>
+    /* ===============================
+       FORCE SINGLE LANDSCAPE PAGE
+    =============================== */
+    @page {
+      size: A4 landscape;
+      margin: 0;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: "Poppins", sans-serif;
+      background: #f3f4f6;
+    }
+
+    /* ===============================
+       OUTER BORDER (FULL PAGE)
+    =============================== */
+    .outer-border {
+      width: 100%;
+      height: 100vh;
+      padding: 12px;
+      background: linear-gradient(135deg, #4c1d95, #6d28d9, #4c1d95);
+      box-sizing: border-box;
+    }
+
+    /* ===============================
+       CERTIFICATE CARD
+    =============================== */
+    .certificate {
+      width: 100%;
+      height: 100%;
+      background: #ffffff;
+      border-radius: 24px;
+      padding: 36px 56px;
+      box-sizing: border-box;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    /* ===============================
+       TOP SECTION
+    =============================== */
+    .top {
+      flex-shrink: 0;
+    }
+
+    .title {
+      font-size: 32px;
+      font-weight: 700;
+      color: #4c1d95;
+    }
+
+    .gold-line {
+      width: 45%;
+      height: 4px;
+      background: #d4af37;
+      margin: 12px auto 18px;
+      border-radius: 10px;
+    }
+
+    .subtitle {
+      font-size: 15px;
+      color: #6b7280;
+    }
+
+    .participant-name {
+      font-size: 30px;
+      font-weight: 700;
+      color: #111827;
+      margin: 10px 0;
+    }
+
+    .completion-text {
+      font-size: 15px;
+      color: #6b7280;
+    }
+
+    .program-title {
+      font-size: 22px;
+      font-weight: 600;
+      color: #4c1d95;
+      margin-top: 10px;
+    }
+
+    /* ===============================
+       MIDDLE SECTION
+    =============================== */
+    .middle {
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .issue-info {
+      margin-top: 20px;
+      font-size: 14px;
+      color: #374151;
+    }
+
+    .issue-info span {
+      font-weight: 600;
+      color: #4c1d95;
+    }
+
+    .certificate-id {
+      margin-top: 6px;
+      color: #6b7280;
+    }
+
+    .verified {
+      margin-top: 6px;
+      color: #16a34a;
+      font-weight: 600;
+    }
+
+    /* ===============================
+       QR
+    =============================== */
+    .qr-section {
+      margin-top: 18px;
+    }
+
+    .qr-label {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 4px;
+    }
+
+    .qr-code img {
+      width: 110px;
+      height: 110px;
+    }
+
+    /* ===============================
+       FOOTER (SIGNATURE + SEAL)
+    =============================== */
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 20px;
+      flex-shrink: 0;
+    }
+
+    .signature,
+    .seal {
+      width: 45%;
+      text-align: center;
+    }
+
+    .signature img {
+      width: 140px;
+    }
+
+    .seal img {
+      width: 80px;
+    }
+
+    .footer-text {
+      font-size: 13px;
+      color: #6b7280;
+      margin-top: -4px;
+    }
+
+    .gold-divider {
+      height: 4px;
+      background: #d4af37;
+      border-radius: 10px;
+      margin-top: 16px;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="outer-border">
+    <div class="certificate">
+
+      <div class="top">
+        <div class="title">Certificate of Completion</div>
+        <div class="gold-line"></div>
+
+        <div class="subtitle">This is to certify that</div>
+
+        <div class="participant-name">{{participantName}}</div>
+
+        <div class="completion-text">
+          has successfully completed the program
+        </div>
+
+        <div class="program-title">{{programTitle}}</div>
+      </div>
+
+      <div class="middle">
+        <div class="issue-info">
+          Issued on: <span>{{issuedAt}}</span>
+          <div class="certificate-id">
+            Certificate ID: {{certificateId}}
+          </div>
+          <div class="verified">✔ Verified Certificate</div>
+        </div>
+
+        <div class="qr-section">
+          <div class="qr-label">Scan to verify certificate</div>
+          <div class="qr-code">
+            <img src="{{qrCodeImage}}" alt="QR Code" />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="footer">
+          <div class="signature">
+            <img src="{{signatureImage}}" alt="Signature" />
+            <div class="footer-text">CEO, Asiyo Foundation</div>
+          </div>
+
+          <div class="seal">
+            <img src="{{sealImage}}" alt="Seal" />
+            <div class="footer-text">Asiyo Women Connect</div>
+          </div>
+        </div>
+
+        <div class="gold-divider"></div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

@@ -34,7 +34,8 @@
       "expo-font",
       "react-native-compressor",
       "react-native-video",
-      "expo-video"
+      "expo-video",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "router": {},

@@ -507,8 +507,8 @@ export default function ChatInterface({ chatId }) {
       // FIX #3: Remove batch read listener
       socket.off("message:read:batch", handleBatchRead); // ← ADDED
 
-      socket.disconnect();
-      socketRef.current = null;
+      // socket.disconnect();
+      // socketRef.current = null;
       readQueueRef.current.clear();
       readFlushTimerRef.current && clearTimeout(readFlushTimerRef.current);
       readFlushTimerRef.current = null;

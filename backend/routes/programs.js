@@ -24,7 +24,8 @@ const {
   searchAdvancedHandler,
   recommendationsHandler,
   deleteReview,
-  deleteComment
+  deleteComment,
+  downloadCertificate,
 } = require('../controllers/programController');
 
 // Middleware
@@ -114,7 +115,11 @@ router.delete("/:id/comments/:commentId", deleteComment);
 router.get('/:id/stats', getProgramStats);
 router.get('/:id/participants', getProgramParticipants);
 router.get('/:id/certificate', generateCertificate);
-
+router.post(
+  "/:id/certificate/download",
+  auth,
+  downloadCertificate
+);
 
 /* ============================================================
    SINGLE PROGRAM LOOKUP (MUST BE LAST)

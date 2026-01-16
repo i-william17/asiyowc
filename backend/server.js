@@ -11,6 +11,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 require('express-async-errors');
 const dotenv = require('dotenv');
+const path = require('path');
 
 // Routes
 const authRoutes = require('./routes/auth.js');
@@ -39,7 +40,7 @@ dotenv.config();
 const app = express();
 
 //render
-app.set("trust proxy", 1);
+// app.set("trust proxy", 1);
 
 const server = http.createServer(app);
 
@@ -66,6 +67,11 @@ initSocket(io);
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
+
+app.use(
+  "/assets",
+  express.static(path.join(__dirname, "assets"))
+);
 
 // CORS configuration
 app.use(cors({

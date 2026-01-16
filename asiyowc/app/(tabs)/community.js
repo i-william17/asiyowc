@@ -306,6 +306,8 @@ export default function CommunityScreen() {
           key={v._id}
           id={v._id}
           title={v.title}
+          hostName={v.host?.profile?.fullName || "Host"}
+          listenersCount={v.listenersCount ?? 0}
           isLive={v.isLive}
           onPress={(id) => router.push(`/community/voice/${id}`)}
         />

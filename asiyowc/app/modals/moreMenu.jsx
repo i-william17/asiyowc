@@ -1,3 +1,4 @@
+// app/modals/moreMenu.jsx
 import React from "react";
 import { View, Text, TouchableOpacity, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,43 +13,43 @@ export default function MoreMenu() {
       title: "Events & Conferences",
       subtitle: "Discover upcoming events and summits",
       icon: "calendar",
-      route: "/events",
+      route: "/more/events",
     },
     {
       title: "Mentorship",
       subtitle: "Connect with experienced mentors",
       icon: "people",
-      route: "/mentorship",
+      route: "/more/mentorship",
     },
     {
       title: "Wellness & Travel",
       subtitle: "Retreats, wellbeing, and travel experiences",
       icon: "leaf",
-      route: "/wellness",
+      route: "/more/wellness",
     },
     {
       title: "Marketplace",
       subtitle: "Products, services, and partnerships",
       icon: "cart",
-      route: "/marketplace",
+      route: "/more/marketplace",
     },
     {
       title: "Global Impact Tracker",
       subtitle: "Track community and social impact",
       icon: "earth",
-      route: "/impact",
+      route: "/more/impact",
     },
     {
       title: "Digital Legacy Archive",
       subtitle: "Preserve stories, work, and achievements",
       icon: "archive",
-      route: "/legacy",
+      route: "/more/legacy",
     },
     {
       title: "Safety & Support Hub",
       subtitle: "Resources for protection and assistance",
       icon: "shield-checkmark",
-      route: "/support-hub",
+      route: "/more/safetyhub",
     },
   ];
 

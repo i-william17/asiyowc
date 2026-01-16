@@ -440,39 +440,39 @@ module.exports = (io, socket) => {
   /* =====================================================
      MESSAGE READ (BATCH)
   ===================================================== */
-socket.on("message:read:batch", async ({ chatId, messageIds }) => {
-  try {
-    if (!chatId || !Array.isArray(messageIds) || messageIds.length === 0) return;
+  socket.on("message:read:batch", async ({ chatId, messageIds }) => {
+    try {
+      if (!chatId || !Array.isArray(messageIds) || messageIds.length === 0) return;
 
-    const userId = socket.user?.id;
-    if (!userId) return;
+      const userId = socket.user?.id;
+      if (!userId) return;
 
-    await Chat.updateOne(
-      { _id: chatId },
-      {
-        $addToSet: {
-          "messages.$[msg].readBy": {
-            user: userId,
-            readAt: new Date(),
+      await Chat.updateOne(
+        { _id: chatId },
+        {
+          $addToSet: {
+            "messages.$[msg].readBy": {
+              user: userId,
+              readAt: new Date(),
+            },
           },
         },
-      },
-      {
-        arrayFilters: [{ "msg._id": { $in: messageIds } }],
-        runValidators: false, // ✅ prevents ciphertext failures
-      }
-    );
+        {
+          arrayFilters: [{ "msg._id": { $in: messageIds } }],
+          runValidators: false, // ✅ prevents ciphertext failures
+        }
+      );
 
-    // 🔁 realtime update
-    socket.to(`chat:${chatId}`).emit("message:read:batch", {
-      chatId,
-      messageIds,
-      userId,
-    });
-  } catch (err) {
-    console.error("❌ message:read:batch error", err);
-  }
-});
+      // 🔁 realtime update
+      socket.to(`chat:${chatId}`).emit("message:read:batch", {
+        chatId,
+        messageIds,
+        userId,
+      });
+    } catch (err) {
+      console.error("❌ message:read:batch error", err);
+    }
+  });
 
 
 };

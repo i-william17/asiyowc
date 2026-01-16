@@ -10,15 +10,15 @@ export const fetchAuthenticatedUser = createAsyncThunk(
   async (_, { getState, rejectWithValue }) => {
     try {
       const { token } = getState().auth;
-      console.log("Token:", token);
-
-      if (!token) {
-        return rejectWithValue("No token in state");
-      }
+      console.log("🟡 /me token:", token);
 
       const response = await authService.getMe(token);
-      return response.data.data;
+
+      console.log("🟢 /me response:", response.data);
+
+      return response.data;
     } catch (error) {
+      console.error("🔴 /me error:", error.response?.data || error.message);
       return rejectWithValue(error.response?.data || error.message);
     }
   }

@@ -23,7 +23,7 @@ const json = async (res) => {
   let data = {};
   try {
     data = await res.json();
-  } catch (_) {}
+  } catch (_) { }
 
   if (!res.ok) {
     throw new Error(
@@ -369,6 +369,15 @@ export const communityService = {
     if (!id) throw new Error("Invalid voice id");
 
     return fetch(`${server}/community/voice/${id}`, {
+      headers: headers(token),
+    }).then(json);
+  },
+
+  getVoiceInstance: (instanceId, token) => {
+    const id = normalizeId(instanceId);
+    if (!id) throw new Error("Invalid voice instance id");
+
+    return fetch(`${server}/community/voice/instance/${id}`, {
       headers: headers(token),
     }).then(json);
   },

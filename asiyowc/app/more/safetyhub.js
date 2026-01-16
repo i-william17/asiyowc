@@ -19,11 +19,12 @@ import {
   ChevronRight,
 } from "lucide-react-native";
 import { Ionicons } from "@expo/vector-icons";
+import tw from "../../utils/tw";
 
 import { getUserLocation, getLocationDetails } from "../../utils/location";
 import { getEmergencyServices } from "../../utils/emergencyServices";
 
-export function SafetyHubScreen() {
+export default function SafetyHubScreen() {
   /* ================= INLINE SNACKBAR ================= */
   const [snackbar, setSnackbar] = useState({
     visible: false,
@@ -131,89 +132,87 @@ export function SafetyHubScreen() {
 
   return (
     <>
-      <ScrollView className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-amber-50">
+      <ScrollView style={tw`min-h-screen bg-gradient-to-br from-purple-50 via-white to-amber-50`}>
         {/* HEADER */}
-        <View className="bg-white border-b border-purple-100 px-4 py-4">
-          <View className="flex-row items-center gap-3 mb-2">
+        <View style={tw`bg-white border-b border-purple-100 px-4 py-4`}>
+          <View style={tw`flex-row items-center gap-3 mb-2`}>
             <Shield size={24} color="#7c3aed" />
-            <Text className="text-purple-900 text-2xl font-poppins-semibold">
+            <Text style={tw`text-purple-900 text-2xl font-poppins-semibold`}>
               Safety & Support Hub
             </Text>
           </View>
-          <Text className="text-sm text-gray-600 font-poppins-regular">
+          <Text style={tw`text-sm text-gray-600 font-poppins-regular`}>
             You are not alone. We're here to help.
           </Text>
         </View>
 
-        <View className="px-4 pb-6">
+        <View style={tw`px-4 pb-6`}>
           {/* SOS */}
-          <View className="mt-4 p-6 rounded-2xl bg-red-600 items-center">
+          <View style={tw`mt-4 p-6 rounded-2xl bg-red-600 items-center`}>
             <AlertCircle size={48} color="#fff" />
-            <Text className="text-white text-2xl mt-3 font-poppins-semibold">
+            <Text style={tw`text-white text-2xl mt-3 font-poppins-semibold`}>
               Emergency SOS
             </Text>
-            <Text className="text-white/90 mt-2 mb-4 font-poppins-regular">
+            <Text style={tw`text-white/90 mt-2 mb-4 font-poppins-regular`}>
               Press for immediate assistance
             </Text>
 
             <TouchableOpacity
               onPress={handleSOS}
-              className="w-full h-16 bg-white rounded-full items-center justify-center flex-row"
+              style={tw`w-full h-16 bg-white rounded-full items-center justify-center flex-row`}
             >
               <Phone size={24} color="#dc2626" />
-              <Text className="text-red-600 text-lg ml-2 font-poppins-medium">
+              <Text style={tw`text-red-600 text-lg ml-2 font-poppins-medium`}>
                 CALL FOR HELP
               </Text>
             </TouchableOpacity>
           </View>
 
           {/* PRIVACY NOTICE */}
-          <View className="mt-4 p-4 rounded-xl bg-purple-50 border border-purple-200 flex-row gap-2">
+          <View style={tw`mt-4 p-4 rounded-xl bg-purple-50 border border-purple-200 flex-row gap-2`}>
             <Lock size={16} color="#7c3aed" />
-            <Text className="text-sm text-gray-700 font-poppins-regular flex-1">
+            <Text style={tw`text-sm text-gray-700 font-poppins-regular flex-1`}>
               All conversations are confidential and encrypted. Your safety and
               privacy are our priority.
             </Text>
           </View>
 
           {/* RESOURCES */}
-          <Text className="text-purple-900 text-xl mt-6 mb-4 font-poppins-semibold">
+          <Text style={tw`text-purple-900 text-xl mt-6 mb-4 font-poppins-semibold`}>
             Support Resources
           </Text>
 
           {resources.map((r) => (
             <View
               key={r.id}
-              className={`p-4 mb-3 rounded-xl bg-white ${
-                r.urgent ? "border-2 border-red-200" : "border border-gray-100"
-              }`}
+              style={tw`p-4 mb-3 rounded-xl bg-white ${r.urgent ? 'border-2 border-red-200' : 'border border-gray-100'}`}
             >
               <TouchableOpacity
                 onPress={() => handleResourcePress(r.title)}
-                className="flex-row items-center gap-3"
+                style={tw`flex-row items-center gap-3`}
               >
                 <View
-                  className={`w-12 h-12 rounded-full items-center justify-center ${r.color}`}
+                  style={tw`w-12 h-12 rounded-full items-center justify-center ${r.color}`}
                 >
                   <r.icon size={24} />
                 </View>
 
-                <View className="flex-1">
-                  <View className="flex-row items-center gap-2">
-                    <Text className="text-purple-900 font-poppins-medium">
+                <View style={tw`flex-1`}>
+                  <View style={tw`flex-row items-center gap-2`}>
+                    <Text style={tw`text-purple-900 font-poppins-medium`}>
                       {r.title}
                     </Text>
 
                     {r.urgent && (
-                      <View className="px-2 py-0.5 rounded-full bg-red-100">
-                        <Text className="text-xs text-red-700 font-poppins-medium">
+                      <View style={tw`px-2 py-0.5 rounded-full bg-red-100`}>
+                        <Text style={tw`text-xs text-red-700 font-poppins-medium`}>
                           24/7
                         </Text>
                       </View>
                     )}
                   </View>
 
-                  <Text className="text-sm text-gray-600 font-poppins-regular">
+                  <Text style={tw`text-sm text-gray-600 font-poppins-regular`}>
                     {r.description}
                   </Text>
                 </View>
@@ -224,22 +223,22 @@ export function SafetyHubScreen() {
           ))}
 
           {/* EMERGENCY CONTACTS */}
-          <Text className="text-purple-900 text-xl mt-6 mb-4 font-poppins-semibold">
+          <Text style={tw`text-purple-900 text-xl mt-6 mb-4 font-poppins-semibold`}>
             Emergency Contacts
           </Text>
 
           {emergencyContacts.map((c) => (
             <View
               key={c.id}
-              className="p-4 mb-2 bg-white rounded-xl border border-gray-100 flex-row justify-between items-center"
+              style={tw`p-4 mb-2 bg-white rounded-xl border border-gray-100 flex-row justify-between items-center`}
             >
-              <View className="flex-row items-center gap-3">
-                <Text className="text-2xl">{c.country}</Text>
+              <View style={tw`flex-row items-center gap-3`}>
+                <Text style={tw`text-2xl`}>{c.country}</Text>
                 <View>
-                  <Text className="text-purple-900 font-poppins-medium">
+                  <Text style={tw`text-purple-900 font-poppins-medium`}>
                     {c.name}
                   </Text>
-                  <Text className="text-sm text-gray-600 font-poppins-regular">
+                  <Text style={tw`text-sm text-gray-600 font-poppins-regular`}>
                     {c.number}
                   </Text>
                 </View>
@@ -247,10 +246,10 @@ export function SafetyHubScreen() {
 
               <TouchableOpacity
                 onPress={() => handleCall(c.number)}
-                className="bg-green-600 px-4 py-2 rounded-full flex-row items-center"
+                style={tw`bg-green-600 px-4 py-2 rounded-full flex-row items-center`}
               >
                 <Phone size={16} color="#fff" />
-                <Text className="text-white ml-1 font-poppins-medium">
+                <Text style={tw`text-white ml-1 font-poppins-medium`}>
                   Call
                 </Text>
               </TouchableOpacity>
@@ -258,13 +257,13 @@ export function SafetyHubScreen() {
           ))}
 
           {/* REPORT */}
-          <View className="mt-6 p-4 rounded-xl bg-gray-50 flex-row gap-3">
+          <View style={tw`mt-6 p-4 rounded-xl bg-gray-50 flex-row gap-3`}>
             <Flag size={20} color="#6b7280" />
-            <View className="flex-1">
-              <Text className="text-purple-900 font-poppins-medium mb-2">
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-purple-900 font-poppins-medium mb-2`}>
                 Report Inappropriate Content
               </Text>
-              <Text className="text-sm text-gray-600 mb-3 font-poppins-regular">
+              <Text style={tw`text-sm text-gray-600 mb-3 font-poppins-regular`}>
                 Help us keep this community safe.
               </Text>
 
@@ -273,9 +272,9 @@ export function SafetyHubScreen() {
                   Alert.alert("Report", "Report submitted");
                   showSnackbar("Report submitted", "success");
                 }}
-                className="border border-purple-300 px-4 py-2 rounded-full self-start"
+                style={tw`border border-purple-300 px-4 py-2 rounded-full self-start`}
               >
-                <Text className="text-purple-700 font-poppins-medium">
+                <Text style={tw`text-purple-700 font-poppins-medium`}>
                   Report an Issue
                 </Text>
               </TouchableOpacity>
@@ -283,14 +282,14 @@ export function SafetyHubScreen() {
           </View>
 
           {/* MENTAL HEALTH */}
-          <View className="mt-4 p-6 rounded-2xl bg-purple-600">
-            <View className="flex-row items-center gap-3 mb-4">
+          <View style={tw`mt-4 p-6 rounded-2xl bg-purple-600`}>
+            <View style={tw`flex-row items-center gap-3 mb-4`}>
               <Headphones size={32} color="#fff" />
               <View>
-                <Text className="text-lg text-white font-poppins-semibold">
+                <Text style={tw`text-lg text-white font-poppins-semibold`}>
                   Mental Health Support
                 </Text>
-                <Text className="text-sm text-white/90 font-poppins-regular">
+                <Text style={tw`text-sm text-white/90 font-poppins-regular`}>
                   Professional counseling available
                 </Text>
               </View>
@@ -301,21 +300,21 @@ export function SafetyHubScreen() {
                 Alert.alert("Counselor", "Connecting you to a counselor");
                 showSnackbar("Connecting to counselor", "info");
               }}
-              className="bg-white py-3 rounded-full items-center"
+              style={tw`bg-white py-3 rounded-full items-center`}
             >
-              <Text className="text-purple-600 font-poppins-medium">
+              <Text style={tw`text-purple-600 font-poppins-medium`}>
                 Connect with a Counselor
               </Text>
             </TouchableOpacity>
           </View>
 
           {/* FOOTER */}
-          <View className="mt-6 p-4 bg-purple-50 rounded-xl">
-            <Text className="text-sm text-gray-700 text-center font-poppins-regular">
-              <Text className="text-purple-900 font-poppins-semibold">
+          <View style={tw`mt-6 p-4 bg-purple-50 rounded-xl`}>
+            <Text style={tw`text-sm text-gray-700 text-center font-poppins-regular`}>
+              <Text style={tw`text-purple-900 font-poppins-semibold`}>
                 Remember:
               </Text>{" "}
-              Your wellbeing matters. The Asiyo sisterhood is here for you.
+              Your wellbeing matters. Reaching out for help is a sign of strength, not weakness. The Asiyo sisterhood is here for you.
             </Text>
           </View>
         </View>
@@ -324,7 +323,7 @@ export function SafetyHubScreen() {
       {/* SNACKBAR */}
       {snackbar.visible && (
         <View
-          className={`absolute bottom-6 left-4 right-4 px-4 py-3 rounded-xl ${
+          style={tw`absolute bottom-6 left-4 right-4 px-4 py-3 rounded-xl ${
             snackbar.type === "success"
               ? "bg-green-600"
               : snackbar.type === "error"
@@ -332,7 +331,7 @@ export function SafetyHubScreen() {
               : "bg-purple-600"
           }`}
         >
-          <Text className="text-white text-center font-poppins-medium">
+          <Text style={tw`text-white text-center font-poppins-medium`}>
             {snackbar.message}
           </Text>
         </View>

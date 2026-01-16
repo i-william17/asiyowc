@@ -673,9 +673,10 @@ exports.sendGroupMessage = async (req, res) => {
 
     const message = chat.messages.at(-1);
 
-    /* ✅ REALTIME (SAME AS DM) */
-    req.io.to(`chat:${chatId}`).emit('message:new', {
+    // ✅ REALTIME — GROUP CHAT
+    req.io.to(`chat:${chatId}`).emit("group:message:new", {
       chatId,
+      groupId,
       message
     });
 
@@ -1116,59 +1117,81 @@ exports.deleteHub = async (req, res) => {
 // 1. Create chat (DM or group)
 exports.createChat = async (req, res) => {
   try {
-    const { type = 'dm', participants = [] } = req.body;
-    const userId = req.user.id;
+    const user = ensureAuthUser(req, res);
+    if (!user) return;
 
+    const { type = 'dm', participants = [] } = req.body;
+    const userId = String(user.id);
+
+    // ----------------------------------------
+    // 1️⃣ Normalize participants
+    // ----------------------------------------
     const cleanParticipants = [
       userId,
       ...participants.map(normalizeId)
-    ].filter((v, i, arr) => v && arr.indexOf(v) === i);
+    ]
+      .map(String)
+      .filter(Boolean);
 
-    if (type === 'dm' && cleanParticipants.length !== 2) {
-      return res.status(400).json({
-        success: false,
-        message: 'Direct messages require exactly 2 participants'
-      });
-    }
+    // Deduplicate
+    const uniqueParticipants = [...new Set(cleanParticipants)];
 
+    // ----------------------------------------
+    // 2️⃣ DM CHAT LOGIC (PRODUCTION SAFE)
+    // ----------------------------------------
     if (type === 'dm') {
-      const existing = await Chat.findOne({
-        type: 'dm',
-        participants: {
-          $all: cleanParticipants,
-          $size: cleanParticipants.length
-        },
-        isRemoved: false
-      });
-
-      if (existing) {
-        return res.json({
-          success: true,
-          data: existing,
-          existing: true
-        });
+      if (uniqueParticipants.length !== 2) {
+        return bad(res, 'Direct messages require exactly 2 participants');
       }
+
+      const dmKey = [...uniqueParticipants].sort().join('_');
+
+      const chat = await Chat.findOneAndUpdate(
+        { type: 'dm', dmKey },
+        {
+          $setOnInsert: {
+            type: 'dm',
+            participants: uniqueParticipants,
+            dmKey,
+            messages: []
+          }
+        },
+        {
+          new: true,
+          upsert: true
+        }
+      );
+
+      return created(res, chat);
     }
 
-    const chat = await Chat.create({
-      type,
-      participants: cleanParticipants,
-      messages: []
-    });
 
-    res.status(201).json({
-      success: true,
-      data: chat
-    });
+    // ----------------------------------------
+    // 3️⃣ GROUP CHAT LOGIC
+    // ----------------------------------------
+    if (type === 'group') {
+      if (uniqueParticipants.length < 2) {
+        return bad(res, 'Group chat requires at least 2 participants');
+      }
+
+      const chat = await Chat.create({
+        type: 'group',
+        participants: uniqueParticipants,
+        messages: []
+      });
+
+      return created(res, chat);
+    }
+
+    // ----------------------------------------
+    // 4️⃣ INVALID TYPE
+    // ----------------------------------------
+    return bad(res, 'Invalid chat type');
   } catch (error) {
-    console.error('CREATE CHAT ERROR:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error creating chat'
-    });
+    console.error('[createChat] ❌ ERROR:', error);
+    return serverError(res, error);
   }
 };
-
 
 // 2. Get chats
 exports.getChats = async (req, res) => {
@@ -1574,32 +1597,60 @@ exports.getVoices = async (req, res) => {
 
     const { page, limit, skip } = parsePage(req);
 
-    // Optional filters: ?group=, ?hub=, ?live=true
     const query = { isRemoved: false };
 
     if (req.query.group) {
-      if (!isValidObjectId(req.query.group)) return bad(res, 'Invalid group filter');
+      if (!isValidObjectId(req.query.group))
+        return bad(res, "Invalid group filter");
       query.group = req.query.group;
     }
 
     if (req.query.hub) {
-      if (!isValidObjectId(req.query.hub)) return bad(res, 'Invalid hub filter');
+      if (!isValidObjectId(req.query.hub))
+        return bad(res, "Invalid hub filter");
       query.hub = req.query.hub;
     }
 
     const [voices, total] = await Promise.all([
-      Voice.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
-      Voice.countDocuments(query)
+      Voice.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+
+        // ✅ HOST
+        .populate({
+          path: "host",
+          select: "profile.fullName profile.avatar",
+        })
+
+        // ✅ SPEAKERS
+        .populate({
+          path: "instances.speakers",
+          select: "profile.fullName profile.avatar",
+        })
+
+        // ✅ LISTENERS
+        .populate({
+          path: "instances.participants",
+          select: "profile.fullName profile.avatar",
+        }),
+
+      Voice.countDocuments(query),
     ]);
 
     let data = voices.map((v) => v.toObject());
 
-    if (String(req.query.live || 'false') === 'true') {
+    if (String(req.query.live || "false") === "true") {
       data = data.filter((v) => v.isLive === true);
     }
 
     return ok(res, data, null, {
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     return serverError(res, error);
@@ -1612,32 +1663,181 @@ exports.getVoiceById = async (req, res) => {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
-    const { voiceId } = req.params;
-    if (!ensureObjectIdParam(res, voiceId, 'voiceId')) return;
+    // ✅ PARAM FIX (matches route)
+    const { id: voiceId } = req.params;
 
-    const voice = await Voice.findOne({ _id: voiceId, isRemoved: false })
-      .populate('host', 'name avatar')
-      .populate('group', 'name avatar privacy')
-      .populate('hub', 'name avatar type region');
+    if (!ensureObjectIdParam(res, voiceId, "id")) return;
 
-    if (!voice) return notFound(res, 'Voice not found');
+    const voice = await Voice.findOne({
+      _id: voiceId,
+      isRemoved: false,
+    })
 
-    // If voice tied to group/hub, enforce access for private contexts
+      // ✅ HOST
+      .populate({
+        path: "host",
+        select: "profile.fullName profile.avatar",
+      })
+
+      // ✅ SPEAKERS
+      .populate({
+        path: "instances.speakers",
+        select: "profile.fullName profile.avatar",
+      })
+
+      // ✅ LISTENERS
+      .populate({
+        path: "instances.participants",
+        select: "profile.fullName profile.avatar",
+      })
+
+      // optional context
+      .populate("group", "name avatar privacy")
+      .populate("hub", "name avatar type region");
+
+    if (!voice) return notFound(res, "Voice not found");
+
+    /* ================= ACCESS CONTROL ================= */
+
     if (voice.group) {
-      const g = await Group.findOne({ _id: voice.group._id, isRemoved: false });
+      const g = await Group.findOne({
+        _id: voice.group._id,
+        isRemoved: false,
+      });
+
       const vis = await ensureGroupVisibility(g, user.id);
-      if (!vis.ok) return forbidden(res, 'No access to this voice room');
+      if (!vis.ok)
+        return forbidden(res, "No access to this voice room");
     }
 
     if (voice.hub) {
-      const h = await Hub.findOne({ _id: voice.hub._id, isRemoved: false });
-      const isMember = (h.members || []).some((m) => String(m) === String(user.id));
-      if (!isMember && !hasRole(user, ['admin'])) return forbidden(res, 'No access to this voice room');
+      const h = await Hub.findOne({
+        _id: voice.hub._id,
+        isRemoved: false,
+      });
+
+      const isMember = (h.members || []).some(
+        (m) => String(m) === String(user.id)
+      );
+
+      if (!isMember && !hasRole(user, ["admin"])) {
+        return forbidden(res, "No access to this voice room");
+      }
     }
 
     return ok(res, voice);
   } catch (error) {
     return serverError(res, error);
+  }
+};
+
+// GET voice instance by instanceId (AUTHORITATIVE)
+exports.getVoiceInstanceById = async (req, res) => {
+  try {
+    const user = req.user;
+    const { instanceId } = req.params;
+
+    /* ===========================
+       1️⃣ VALIDATE instanceId
+    =========================== */
+    if (!mongoose.Types.ObjectId.isValid(instanceId)) {
+      return bad(res, "Invalid instanceId");
+    }
+
+    const instanceObjectId = new mongoose.Types.ObjectId(instanceId);
+
+    /* ===========================
+       2️⃣ FIND VOICE + POPULATE
+    =========================== */
+    const voice = await Voice.findOne({
+      "instances.instanceId": instanceObjectId,
+      isRemoved: false
+    })
+      // 🎤 HOST
+      .populate({
+        path: "host",
+        select: "profile.fullName profile.avatar"
+      })
+
+      // 🎙️ SPEAKERS
+      .populate({
+        path: "instances.speakers",
+        select: "profile.fullName profile.avatar"
+      })
+
+      // 👂 LISTENERS
+      .populate({
+        path: "instances.participants",
+        select: "profile.fullName profile.avatar"
+      })
+
+      // OPTIONAL CONTEXT
+      .populate("group", "name avatar privacy")
+      .populate("hub", "name avatar type region");
+
+    if (!voice) {
+      return notFound(res, "Voice instance not found");
+    }
+
+    /* ===========================
+       3️⃣ EXTRACT INSTANCE
+    =========================== */
+    const instance = voice.instances.find(
+      (i) => String(i.instanceId) === String(instanceObjectId)
+    );
+
+    if (!instance) {
+      return notFound(res, "Instance not found");
+    }
+
+    if (instance.status !== "live") {
+      return bad(res, "This voice instance is not live");
+    }
+
+    /* ===========================
+       4️⃣ ROLE RESOLUTION
+    =========================== */
+    let role = "listener";
+
+    if (
+      voice.host &&
+      String(voice.host._id) === String(user.id)
+    ) {
+      role = "host";
+    } else if (
+      Array.isArray(instance.speakers) &&
+      instance.speakers.some(
+        (s) => String(s?._id) === String(user.id)
+      )
+    ) {
+      role = "speaker";
+    }
+
+    /* ===========================
+       5️⃣ NORMALIZED ROOM OBJECT
+    =========================== */
+    const room = {
+      _id: voice._id,
+      title: voice.title,
+      host: voice.host || null,   // 🔒 always explicit
+      group: voice.group || null,
+      hub: voice.hub || null
+    };
+
+    console.log("Response:", room, instance, role);
+    /* ===========================
+       6️⃣ FINAL RESPONSE
+    =========================== */
+    return ok(res, {
+      room,
+      instance,
+      role,
+      chatEnabled: instance.chatEnabled ?? true,
+      lockedStage: false
+    });
+  } catch (e) {
+    console.error("❌ getVoiceInstanceById error:", e);
+    return serverError(res, e);
   }
 };
 
@@ -1779,27 +1979,66 @@ exports.updateVoiceInstanceStatus = async (req, res) => {
 // Join voice (adds user to current live instance participants)
 exports.joinVoice = async (req, res) => {
   try {
-    const user = ensureAuthUser(req, res);
-    if (!user) return;
+    const user = req.user;
+    const { instanceId } = req.params;
 
-    const { voiceId } = req.params;
-    if (!ensureObjectIdParam(res, voiceId, 'voiceId')) return;
+    console.log("🎧 joinVoice instanceId:", instanceId);
 
-    const voice = await Voice.findOne({ _id: voiceId, isRemoved: false });
-    if (!voice) return notFound(res, 'Voice not found');
+    if (!mongoose.Types.ObjectId.isValid(instanceId)) {
+      return bad(res, "Invalid instance id");
+    }
 
-    const instance = (voice.instances || []).find((i) => i.status === 'live');
-    if (!instance) return bad(res, 'No live instance available');
+    const instanceObjectId = new mongoose.Types.ObjectId(instanceId);
 
-    const already = (instance.participants || []).some((p) => String(p) === String(user.id));
-    if (already) return ok(res, instance, 'Already joined');
+    const voice = await Voice.findOne({
+      "instances.instanceId": instanceObjectId,
+      isRemoved: false,
+    });
 
-    instance.participants.push(user.id);
-    await voice.save();
+    if (!voice) return notFound(res, "Voice room not found");
 
-    return ok(res, instance, 'Joined voice');
-  } catch (error) {
-    return serverError(res, error);
+    const instance = voice.instances.find(
+      (i) => String(i.instanceId) === String(instanceObjectId)
+    );
+
+    if (!instance) return notFound(res, "Instance not found");
+
+    if (instance.status !== "live") {
+      return bad(res, "This voice instance is not live");
+    }
+
+    /* =====================================================
+       ✅ PREVENT DUPLICATES (SPEAKERS + PARTICIPANTS)
+    ===================================================== */
+    const alreadyJoined =
+      (instance.participants || []).some(
+        (p) => String(p) === String(user.id)
+      ) ||
+      (instance.speakers || []).some(
+        (s) => String(s) === String(user.id)
+      );
+
+    if (!alreadyJoined) {
+      instance.participants.push(user.id);
+      await voice.save();
+    }
+
+    console.log("✅ User joined instance:", {
+      userId: user.id,
+      instanceId,
+    });
+
+    return ok(
+      res,
+      {
+        roomId: voice._id,
+        instanceId: instance.instanceId,
+      },
+      "Joined voice instance"
+    );
+  } catch (e) {
+    console.error("❌ joinVoice error:", e);
+    return serverError(res, e);
   }
 };
 

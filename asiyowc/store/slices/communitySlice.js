@@ -118,6 +118,44 @@ export const fetchChatDetail = createAsyncThunk(
   }
 );
 
+export const fetchVoiceDetail = createAsyncThunk(
+  "community/fetchVoiceDetail",
+  async (voiceId, { getState, rejectWithValue }) => {
+    try {
+      return await communityService.getVoiceById(
+        voiceId,
+        getState().auth.token
+      );
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to load voice room");
+    }
+  }
+);
+
+export const fetchVoiceInstance = createAsyncThunk(
+  "community/fetchVoiceInstance",
+  async (instanceId, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+
+      const res = await communityService.getVoiceInstance(
+        instanceId,
+        token
+      );
+
+      // 🔑 NORMALIZE PAYLOAD
+      return {
+        room: res.data.voice,
+        instance: res.data.instance,
+      };
+    } catch (err) {
+      return rejectWithValue(
+        err.message || "Failed to load voice instance"
+      );
+    }
+  }
+);
+
 /* ===========================
    JOIN / LEAVE GROUP
 =========================== */
@@ -225,23 +263,36 @@ const communitySlice = createSlice({
   name: "community",
 
   initialState: {
+    // existing
     groups: [],
     hubs: [],
     chats: [],
     voices: [],
-
     selectedGroup: null,
     selectedHub: null,
     selectedChat: null,
-
+    selectedVoice: null,
     joinedGroups: {},
-
     loadingList: false,
     loadingDetail: false,
     sendingMessage: false,
     error: null,
-
     pinnedMessages: {},
+
+    /* =====================
+       VOICE (🔥 REQUIRED)
+    ===================== */
+    room: null,
+    instance: null,
+    role: null,
+
+    chatEnabled: true,
+    lockedStage: false,
+
+    messages: [],
+    speakingUsers: {},
+    voiceRequests: [],
+    lastHeartbeat: null,
   },
 
   reducers: {
@@ -327,22 +378,37 @@ const communitySlice = createSlice({
        REACTIONS (REALTIME SAFE)
     ===================================================== */
     updateMessageReactions: (state, action) => {
-      const { chatId, message } = action.payload || {};
-      if (!chatId || !message?._id) return;
+      const {
+        chatId,
+        message,        // ✅ DM payload
+        messageId,      // ✅ Group payload
+        reactions,      // ✅ Group payload
+      } = action.payload || {};
 
+      if (!chatId) return;
       if (!state.selectedChat) return;
       if (String(state.selectedChat._id) !== String(chatId)) return;
-
       if (!Array.isArray(state.selectedChat.messages)) return;
 
+      /* =====================================================
+         🔁 RESOLVE MESSAGE ID (DM OR GROUP)
+      ===================================================== */
+      const resolvedMessageId =
+        message?._id || messageId;
+
+      if (!resolvedMessageId) return;
+
       const idx = state.selectedChat.messages.findIndex(
-        (m) => String(m._id) === String(message._id)
+        (m) => String(m._id) === String(resolvedMessageId)
       );
 
       if (idx === -1) return;
 
-      // ✅ Backend is source of truth
-      state.selectedChat.messages[idx].reactions = message.reactions || [];
+      /* =====================================================
+         ✅ APPLY SOURCE OF TRUTH (BACKEND)
+      ===================================================== */
+      state.selectedChat.messages[idx].reactions =
+        message?.reactions || reactions || [];
     },
 
     /* =====================================================
@@ -351,15 +417,29 @@ const communitySlice = createSlice({
     updatePinnedMessage: (state, action) => {
       const { chatId, pinnedMessage } = action.payload || {};
 
+      // ✅ NORMALIZE: always store ID or null
+      const pinnedId =
+        typeof pinnedMessage === "object"
+          ? String(pinnedMessage._id)
+          : pinnedMessage
+            ? String(pinnedMessage)
+            : null;
+
       // 1️⃣ Update currently opened chat
-      if (state.selectedChat && String(state.selectedChat._id) === String(chatId)) {
-        state.selectedChat.pinnedMessage = pinnedMessage || null;
+      if (
+        state.selectedChat &&
+        String(state.selectedChat._id) === String(chatId)
+      ) {
+        state.selectedChat.pinnedMessage = pinnedId;
       }
 
-      // 2️⃣ 🔥 ALSO update chat list (THIS WAS MISSING)
-      const chat = state.chats.find(c => String(c._id) === String(chatId));
+      // 2️⃣ ALSO update chat list
+      const chat = state.chats.find(
+        (c) => String(c._id) === String(chatId)
+      );
+
       if (chat) {
-        chat.pinnedMessage = pinnedMessage || null;
+        chat.pinnedMessage = pinnedId;
       }
     },
 
@@ -407,6 +487,145 @@ const communitySlice = createSlice({
         Object.assign(msg, message);
       }
     },
+
+    /* =====================================================
+ VOICE ROOM – SESSION LIFECYCLE
+===================================================== */
+    voiceJoined: (state, action) => {
+      const { room, instance, role, chatEnabled, lockedStage } = action.payload;
+
+      state.room = room;
+      state.instance = instance;
+      state.role = role;
+
+      state.chatEnabled = chatEnabled ?? true;
+      state.lockedStage = lockedStage ?? false;
+
+      state.messages = [];
+      state.speakingUsers = {};
+      state.voiceRequests = [];
+    },
+
+    voiceLeft: (state) => {
+      state.room = null;
+      state.instance = null;
+      state.role = null;
+
+      state.chatEnabled = true;
+      state.lockedStage = false;
+
+      state.messages = [];
+      state.speakingUsers = {};
+      state.voiceRequests = [];
+    },
+
+    voiceUserJoined: (state, action) => {
+      if (!state.instance) return;
+
+      state.instance.participants ??= [];
+
+      const exists = state.instance.participants.some(
+        (p) => String(p._id) === String(action.payload.userId)
+      );
+
+      if (!exists) {
+        state.instance.participants.push({
+          _id: action.payload.userId,
+          role: action.payload.role || "listener",
+          isMuted: false,
+          isSpeaking: false,
+        });
+      }
+    },
+
+    voiceUserLeft: (state, action) => {
+      if (!state.instance) return;
+
+      state.instance.participants = state.instance.participants.filter(
+        (p) => String(p._id) !== String(action.payload.userId)
+      );
+    },
+
+
+    voiceSpeakerRequested: (state, action) => {
+      const { userId } = action.payload;
+      if (!state.voiceRequests.includes(userId)) {
+        state.voiceRequests.push(userId);
+      }
+    },
+
+    voiceSpeakerApproved: (state, action) => {
+      const { userId } = action.payload;
+      if (state.voiceParticipants[userId]) {
+        state.voiceParticipants[userId].role = "speaker";
+      }
+      state.voiceRequests = state.voiceRequests.filter((id) => id !== userId);
+    },
+
+    voiceSpeakerDemoted: (state, action) => {
+      const { userId } = action.payload;
+      if (state.voiceParticipants[userId]) {
+        state.voiceParticipants[userId].role = "listener";
+        state.voiceParticipants[userId].isSpeaking = false;
+      }
+    },
+
+    voiceStageLocked: (state) => {
+      state.voiceStageLocked = true;
+    },
+
+    voiceStageUnlocked: (state) => {
+      state.voiceStageLocked = false;
+    },
+
+    voiceUserMuted: (state, action) => {
+      const user = state.instance?.participants?.find(
+        (p) => String(p._id) === String(action.payload.userId)
+      );
+      if (user) user.isMuted = true;
+    },
+
+    voiceUserUnmuted: (state, action) => {
+      const user = state.instance?.participants?.find(
+        (p) => String(p._id) === String(action.payload.userId)
+      );
+      if (user) user.isMuted = false;
+    },
+
+    voiceUserSpeaking: (state, action) => {
+      state.speakingUsers[action.payload.userId] =
+        action.payload.isSpeaking;
+    },
+
+    voiceHeartbeat: (state) => {
+      state.lastHeartbeat = Date.now();
+    },
+
+    voiceChatMessageReceived: (state, action) => {
+      if (!state.voiceChatEnabled) return;
+      state.voiceChatMessages.push(action.payload);
+    },
+
+    voiceChatDisabled: (state) => {
+      state.chatEnabled = false;
+    },
+
+    voiceChatEnabled: (state) => {
+      state.chatEnabled = true;
+    },
+
+    voiceChatUserMuted: (state, action) => {
+      // Optional UI flag if you want to mark muted users
+    },
+
+    voiceChatUserUnmuted: (state, action) => {
+      // Optional UI flag
+    },
+
+    clearVoiceErrors: (state) => {
+      state.voiceErrors = null;
+    },
+
   },
 
   extraReducers: (builder) => {
@@ -467,7 +686,60 @@ const communitySlice = createSlice({
 
       .addCase(sendGroupMessage.fulfilled, (s, a) => {
         s.selectedChat?.messages?.push(a.payload.data);
+      })
+
+      .addCase(fetchVoiceInstance.fulfilled, (state, action) => {
+        state.loadingDetail = false;
+
+        state.room = action.payload.room;
+        state.instance = action.payload.instance;
+
+        // reset volatile session state
+        state.speakingUsers = {};
+        state.voiceRequests = [];
+      })
+
+      .addCase(fetchVoiceInstance.pending, (state) => {
+        state.loadingDetail = true;
+        state.error = null;
+      })
+
+      .addCase(fetchVoiceInstance.rejected, (state, action) => {
+        state.loadingDetail = false;
+        state.error = action.payload;
+      })
+
+      .addCase(fetchVoices.pending, (s) => {
+        s.loadingList = true;
+      })
+
+      .addCase(fetchVoices.fulfilled, (s, a) => {
+        s.loadingList = false;
+        s.voices = a.payload?.data || [];
+      })
+
+      .addCase(fetchVoices.rejected, (s, a) => {
+        s.loadingList = false;
+        s.voices = [];
+        s.error = a.payload || "Failed to load voice rooms";
+      })
+
+      .addCase(fetchVoiceDetail.pending, (s) => {
+        s.loadingDetail = true;
+        s.error = null;
+      })
+
+      .addCase(fetchVoiceDetail.fulfilled, (s, a) => {
+        s.loadingDetail = false;
+        s.selectedVoice = a.payload?.data || null;
+      })
+
+      .addCase(fetchVoiceDetail.rejected, (s, a) => {
+        s.loadingDetail = false;
+        s.selectedVoice = null;
+        s.error = a.payload || "Failed to load voice room";
       });
+
   },
 });
 
@@ -480,6 +752,27 @@ export const {
   deleteMessageForMe,
   deleteMessageForEveryone,
   updateEditedMessage,
+
+  /* VOICE */
+  voiceJoined,
+  voiceLeft,
+  voiceUserJoined,
+  voiceUserLeft,
+  voiceSpeakerRequested,
+  voiceSpeakerApproved,
+  voiceSpeakerDemoted,
+  voiceStageLocked,
+  voiceStageUnlocked,
+  voiceUserMuted,
+  voiceUserUnmuted,
+  voiceUserSpeaking,
+  voiceChatMessageReceived,
+  voiceChatDisabled,
+  voiceChatEnabled,
+  clearVoiceErrors,
+  voiceChatUserMuted,
+  voiceChatUserUnmuted,
+  voiceHeartbeat,
 } = communitySlice.actions;
 
 export default communitySlice.reducer;

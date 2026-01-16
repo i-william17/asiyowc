@@ -8,16 +8,23 @@ import {
   Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSelector } from "react-redux";
 import { programService } from "../../../services/program";
 import { LinearGradient } from "expo-linear-gradient";
 import ShimmerLoader from "../../../components/ui/ShimmerLoader";
 import { Ionicons } from "@expo/vector-icons";
 import ConfettiCannon from "react-native-confetti-cannon";
 import tw from "../../../utils/tw";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
+import { Platform } from "react-native";
+import axios from "axios";
+import { server } from "../../../server";
 
 const CertificateScreen = () => {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const token = useSelector((state) => state.auth.token);
 
   const [program, setProgram] = useState(null);
   const [userProgress, setUserProgress] = useState(null);
@@ -119,11 +126,94 @@ const CertificateScreen = () => {
   // DOWNLOAD HANDLER
   // ===========================================
   const handleDownload = async () => {
-    if (!certificate.downloadUrl) return;
     try {
-      await Linking.openURL(certificate.downloadUrl);
-    } catch (e) {
-      console.log("❌ DOWNLOAD ERROR:", e);
+      console.log("📤 DOWNLOAD CLICKED");
+
+      if (!token) {
+        throw new Error("User not authenticated");
+      }
+
+      // ===========================
+      // 1️⃣ BUILD VERIFICATION URL
+      // ===========================
+      const verificationUrl = `${server}/verify-certificate/${certificateId}`;
+
+      console.log("🔗 VERIFICATION URL:", verificationUrl);
+
+      // ===========================
+      // 2️⃣ API URL
+      // ===========================
+      const url = `${server}/programs/${id}/certificate/download`;
+      console.log("🌍 REQUEST URL:", url);
+
+      // ===========================
+      // 3️⃣ REQUEST PDF FROM BACKEND
+      // ===========================
+      const response = await axios.post(
+        url,
+        { verificationUrl }, // ✅ ONLY THIS IS SENT
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          responseType: Platform.OS === "web" ? "blob" : "arraybuffer",
+          timeout: 60000,
+        }
+      );
+
+      console.log("✅ BACKEND RESPONSE:", response.status);
+
+      // ===========================
+      // 4️⃣ WEB DOWNLOAD
+      // ===========================
+      if (Platform.OS === "web") {
+        const blob = new Blob([response.data], {
+          type: "application/pdf",
+        });
+
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = blobUrl;
+        link.download = `certificate-${certificateId}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+
+        link.remove();
+        window.URL.revokeObjectURL(blobUrl);
+
+        console.log("🌐 WEB PDF DOWNLOAD TRIGGERED");
+        return;
+      }
+
+      // ===========================
+      // 5️⃣ MOBILE SAVE & SHARE
+      // ===========================
+      const fileUri =
+        FileSystem.documentDirectory + `certificate-${certificateId}.pdf`;
+
+      const base64 = Buffer
+        .from(response.data, "binary")
+        .toString("base64");
+
+      await FileSystem.writeAsStringAsync(fileUri, base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      console.log("📱 PDF SAVED:", fileUri);
+
+      await Sharing.shareAsync(fileUri);
+
+      console.log("📤 SHARE SHEET OPENED");
+    } catch (err) {
+      console.error("❌ CERTIFICATE DOWNLOAD FAILED");
+
+      if (axios.isAxiosError(err)) {
+        console.error("STATUS:", err.response?.status);
+        console.error("DATA:", err.response?.data);
+      } else {
+        console.error(err);
+      }
     }
   };
 

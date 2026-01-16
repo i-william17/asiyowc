@@ -1,4 +1,8 @@
 const mongoose = require("mongoose");
+const puppeteer = require("puppeteer");
+const fs = require("fs");
+const path = require("path");
+const QRCode = require("qrcode");
 const Program = require("../models/Program");
 const User = require("../models/User");
 const Notification = require("../models/Notification");
@@ -1185,6 +1189,160 @@ exports.getCertificate = async (req, res) => {
   }
 };
 
+exports.downloadCertificate = async (req, res) => {
+  try {
+    const programId = req.params.id;
+    const userId = req.user.id;
+    const { verificationUrl } = req.body;
+
+    console.log("📌 DOWNLOAD CERTIFICATE REQUEST");
+
+    /* =====================================================
+       1️⃣ SERVER-SIDE VALIDATION (SOURCE OF TRUTH)
+    ===================================================== */
+    const program = await Program.findById(programId).populate(
+      "participants.user",
+      "profile.fullName"
+    );
+
+    if (!program) {
+      return res.status(404).json({
+        success: false,
+        message: "Program not found",
+      });
+    }
+
+    const participant = program.participants.find(
+      (p) => p.user._id.toString() === userId
+    );
+
+    if (!participant || participant.progress !== 100) {
+      return res.status(403).json({
+        success: false,
+        message: "Certificate not available",
+      });
+    }
+
+    if (!participant.certificate?.id) {
+      return res.status(400).json({
+        success: false,
+        message: "Certificate record missing",
+      });
+    }
+
+    const certificateId = participant.certificate.id;
+
+    /* =====================================================
+       2️⃣ VALIDATE FRONTEND VERIFICATION URL (SECURITY)
+    ===================================================== */
+    let finalVerificationUrl;
+
+    if (
+      verificationUrl &&
+      typeof verificationUrl === "string" &&
+      verificationUrl.includes(certificateId)
+    ) {
+      finalVerificationUrl = verificationUrl;
+    } else {
+      finalVerificationUrl = `${process.env.FRONTEND_URL}/verify-certificate/${certificateId}`;
+    }
+
+    /* =====================================================
+       3️⃣ LOAD STATIC CERTIFICATE ASSETS
+    ===================================================== */
+    const sealPath = path.join(
+      __dirname,
+      "../assets/certificates/seal.png"
+    );
+
+    const signaturePath = path.join(
+      __dirname,
+      "../assets/certificates/signature.png"
+    );
+
+    const sealBase64 = fs.readFileSync(sealPath, { encoding: "base64" });
+    const signatureBase64 = fs.readFileSync(signaturePath, {
+      encoding: "base64",
+    });
+
+    /* =====================================================
+       4️⃣ GENERATE QR CODE (BACKEND)
+    ===================================================== */
+    const qrCodeBase64 = await QRCode.toDataURL(finalVerificationUrl);
+
+    /* =====================================================
+       5️⃣ PREPARE TEMPLATE DATA
+    ===================================================== */
+    const certData = {
+      participantName: participant.user.profile.fullName,
+      programTitle: program.title,
+      issuedAt: participant.certificate.issuedAt.toDateString(),
+      certificateId,
+
+      sealImage: `data:image/png;base64,${sealBase64}`,
+      signatureImage: `data:image/png;base64,${signatureBase64}`,
+      qrCodeImage: qrCodeBase64,
+    };
+
+    /* =====================================================
+       6️⃣ LOAD & COMPILE HTML TEMPLATE
+    ===================================================== */
+    const templatePath = path.join(
+      __dirname,
+      "../templates/certificate.html"
+    );
+
+    let html = fs.readFileSync(templatePath, "utf8");
+
+    Object.entries(certData).forEach(([key, value]) => {
+      html = html.replace(new RegExp(`{{${key}}}`, "g"), value);
+    });
+
+    /* =====================================================
+       7️⃣ GENERATE PDF WITH PUPPETEER
+    ===================================================== */
+    const browser = await puppeteer.launch({
+      headless: "new",
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+
+    const pdf = await page.pdf({
+      format: "A4",
+      landscape: true,              // ✅ FORCE LANDSCAPE
+      printBackground: true,
+      margin: {
+        top: "0",
+        right: "0",
+        bottom: "0",
+        left: "0",
+      },
+      preferCSSPageSize: true,      // ✅ RESPECT @page CSS
+    });
+
+    await browser.close();
+
+    /* =====================================================
+       8️⃣ SEND PDF (RAW BINARY — SAFE)
+    ===================================================== */
+    res.writeHead(200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename=certificate-${certificateId}.pdf`,
+      "Content-Length": pdf.length,
+      "Cache-Control": "no-store",
+    });
+
+    return res.end(pdf);
+  } catch (error) {
+    console.error("❌ DOWNLOAD CERTIFICATE ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate certificate",
+    });
+  }
+};
 
 // @desc    Advanced search for programs
 // @route   GET /api/programs/search/advanced

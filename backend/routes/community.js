@@ -177,10 +177,15 @@ router.post(
 /* =====================================================
    VOICE ROUTES
 ===================================================== */
+router.get(
+  '/voice/instance/:instanceId',
+  communityController.getVoiceInstanceById
+);
 
 router.post('/voice', communityController.createVoice);
 router.get('/voice', communityController.getVoices);
 router.get('/voice/:id', communityController.getVoiceById);
+
 router.get('/voice/:id/info', communityController.getVoiceInfo);
 router.put('/voice/:id', communityController.updateVoice);
 
@@ -199,8 +204,11 @@ router.delete(
   communityController.deleteVoiceInstance
 );
 
-router.post('/voice/:id/join', communityController.joinVoice);
-router.post('/voice/:id/leave', communityController.leaveVoice);
+router.post(
+  "/voice/instance/:instanceId/join",
+  communityController.joinVoice
+);
+router.post('/voice/:InstanceId/leave', communityController.leaveVoice);
 
 /* =====================================================
    REPORTS & MODERATION

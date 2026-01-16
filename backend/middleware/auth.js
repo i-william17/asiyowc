@@ -29,48 +29,35 @@ const auth = async (req, res, next) => {
     // FIND USER
     const currentUser = await User.findById(decoded.id);
     if (!currentUser) {
-      return next(
-        new AppError('The user belonging to this token no longer exists', 401)
-      );
-    }
-
-    // 🔐 TOKEN VERSION CHECK (BACKWARD COMPATIBLE)
-    if (
-      decoded.tokenVersion !== undefined &&
-      currentUser.tokenVersion !== decoded.tokenVersion
-    ) {
-      return next(
-        new AppError('Token has been revoked. Please log in again.', 401)
-      );
+      return next(new AppError('The user belonging to this token no longer exists', 401));
     }
 
     // CHECK IF USER IS ACTIVE
     if (!currentUser.isActive) {
-      return next(
-        new AppError('Your account has been deactivated. Please contact support.', 403)
-      );
+      return next(new AppError('Your account has been deactivated. Please contact support.', 403));
     }
 
     // CHECK IF PASSWORD CHANGED AFTER TOKEN ISSUED
-    if (
-      currentUser.changedPasswordAfter &&
-      currentUser.changedPasswordAfter(decoded.iat)
-    ) {
-      return next(
-        new AppError('User recently changed password. Please log in again.', 401)
-      );
+    if (currentUser.changedPasswordAfter && currentUser.changedPasswordAfter(decoded.iat)) {
+      return next(new AppError('User recently changed password. Please log in again.', 401));
     }
-
+console.log("AUTH HIT:", req.method, req.originalUrl);
     /* ==========================================================
        ⭐ NORMALIZED USER OBJECT — ALWAYS CONSISTENT
+       All controllers now rely only on:
+       - req.user.id
+       - req.user.role
+       - req.user._id (alias)
     =========================================================== */
     req.user = {
       id: currentUser._id.toString(),
       _id: currentUser._id.toString(),
       role: currentUser.role,
       isActive: currentUser.isActive,
-      profile: currentUser.profile,
+      profile: currentUser.profile
     };
+
+    // console.log("🔐 AUTH → User attached:", req.user);
 
     next();
   } catch (error) {
@@ -78,6 +65,7 @@ const auth = async (req, res, next) => {
     return next(new AppError('Invalid or expired token', 401));
   }
 };
+
 
 /* ==========================================================
    OPTIONAL AUTH — ALLOW BOTH GUEST & LOGGED USERS
@@ -99,19 +87,18 @@ const optionalAuth = async (req, res, next) => {
 
     if (
       currentUser &&
-      currentUser.isActive &&
-      (!currentUser.changedPasswordAfter ||
-        !currentUser.changedPasswordAfter(decoded.iat)) &&
-      (decoded.tokenVersion === undefined ||
-        currentUser.tokenVersion === decoded.tokenVersion)
+      (!currentUser.changedPasswordAfter || !currentUser.changedPasswordAfter(decoded.iat)) &&
+      currentUser.isActive
     ) {
       req.user = {
         id: currentUser._id.toString(),
         _id: currentUser._id.toString(),
         role: currentUser.role,
         isActive: currentUser.isActive,
-        profile: currentUser.profile,
+        profile: currentUser.profile
       };
+
+      console.log("🔐 OPTIONAL AUTH → User attached:", req.user);
     }
 
     next();
@@ -119,6 +106,7 @@ const optionalAuth = async (req, res, next) => {
     next(); // allow guest
   }
 };
+
 
 /* ==========================================================
    ROLE-BASED ACCESS CONTROL

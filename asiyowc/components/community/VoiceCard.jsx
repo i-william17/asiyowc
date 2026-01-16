@@ -1,6 +1,6 @@
 import React from "react";
 import { View, Text, TouchableOpacity } from "react-native";
-import { Mic } from "lucide-react-native";
+import { Mic, Headphones } from "lucide-react-native";
 import tw from "../../utils/tw";
 
 export default function VoiceCard({
@@ -20,8 +20,9 @@ export default function VoiceCard({
         isLive ? tw`bg-purple-50` : tw`bg-white`,
       ]}
     >
+      {/* ================= HEADER ================= */}
       <View style={tw`flex-row items-center justify-between`}>
-        <View style={tw`flex-row items-center`}>
+        <View style={tw`flex-row items-center flex-1`}>
           <View
             style={[
               tw`w-10 h-10 rounded-xl items-center justify-center mr-4`,
@@ -31,20 +32,21 @@ export default function VoiceCard({
             <Mic size={18} color={isLive ? "#fff" : "#6B7280"} />
           </View>
 
-          <View>
+          <View style={tw`flex-1`}>
             <Text
+              numberOfLines={1}
               style={{
                 fontFamily: "Poppins-SemiBold",
                 fontSize: 16,
                 color: "#111827",
               }}
-              numberOfLines={1}
             >
               {title}
             </Text>
 
             {!!hostName && (
               <Text
+                numberOfLines={1}
                 style={{
                   fontFamily: "Poppins-Regular",
                   fontSize: 13,
@@ -59,12 +61,13 @@ export default function VoiceCard({
         </View>
 
         {isLive && (
-          <View style={tw`bg-red-500 px-3 py-1 rounded-full`}>
+          <View style={tw`bg-red-500 px-3 py-1 rounded-full ml-3`}>
             <Text
               style={{
                 fontFamily: "Poppins-Bold",
                 fontSize: 11,
                 color: "white",
+                letterSpacing: 0.6,
               }}
             >
               LIVE
@@ -73,16 +76,20 @@ export default function VoiceCard({
         )}
       </View>
 
-      <Text
-        style={{
-          fontFamily: "Poppins-Medium",
-          fontSize: 13,
-          color: "#7C3AED",
-          marginTop: 10,
-        }}
-      >
-        🎧 {listenersCount} listening
-      </Text>
+      {/* ================= FOOTER ================= */}
+      <View style={tw`flex-row items-center mt-3`}>
+        <Headphones size={14} color="#7C3AED" />
+        <Text
+          style={{
+            fontFamily: "Poppins-Medium",
+            fontSize: 13,
+            color: "#7C3AED",
+            marginLeft: 6,
+          }}
+        >
+          {listenersCount} listening
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 }
