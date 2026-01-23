@@ -17,83 +17,105 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import LoadingBlock from './LoadingBlock';
+import tw from "../../utils/tw";
 
 const { width, height } = Dimensions.get('window');
 
-// Sub-components
+// Create a custom Text component with Poppins font
+const PoppinsText = ({ style, children, ...props }) => (
+    <Text style={[{ fontFamily: 'Poppins-Regular' }, style]} {...props}>
+        {children}
+    </Text>
+);
+
+const PoppinsTextBold = ({ style, children, ...props }) => (
+    <Text style={[{ fontFamily: 'Poppins-Bold' }, style]} {...props}>
+        {children}
+    </Text>
+);
+
+const PoppinsTextSemibold = ({ style, children, ...props }) => (
+    <Text style={[{ fontFamily: 'Poppins-SemiBold' }, style]} {...props}>
+        {children}
+    </Text>
+);
+
+const PoppinsTextMedium = ({ style, children, ...props }) => (
+    <Text style={[{ fontFamily: 'Poppins-Medium' }, style]} {...props}>
+        {children}
+    </Text>
+);
+
+// Sub-components with Poppins font
 const SpeakerCard = ({ speaker, isHostView, currentUserId, onMute }) => {
     const [isHovered, setIsHovered] = useState(false);
 
     return (
-        <View style={[
-            styles.speakerCard,
-            speaker.isSpeaking && styles.speakerCardSpeaking,
-        ]}>
+        <View style={tw.style(
+            'bg-white/5 border border-white/10 rounded-3xl p-4 items-center relative',
+            speaker.isSpeaking && 'bg-emerald-500/10 border-emerald-500/30'
+        )}>
             {speaker.isSpeaking && (
-                <View style={styles.speakingPulse} />
+                <View style={tw`absolute top-0 left-0 right-0 bottom-0 rounded-3xl border-2 border-emerald-500/20`} />
             )}
 
-            <View style={styles.speakerAvatarContainer}>
+            <View style={tw`relative mb-3`}>
                 <Image
                     source={{ uri: speaker.avatar }}
-                    style={styles.speakerAvatar}
+                    style={tw`w-20 h-20 rounded-full border-2 border-white/30`}
                 />
 
-                {/* Speaking indicator */}
                 {speaker.isSpeaking && !speaker.isMuted && (
-                    <View style={styles.speakingIndicator}>
+                    <View style={tw`absolute bottom-0 right-0 w-6 h-6 rounded-full bg-emerald-500 border-2 border-white items-center justify-center`}>
                         <Ionicons name="pulse" size={10} color="#fff" />
                     </View>
                 )}
 
-                {/* Muted indicator */}
                 {speaker.isMuted && (
-                    <View style={styles.mutedIndicator}>
+                    <View style={tw`absolute bottom-0 right-0 w-6 h-6 rounded-full bg-red-500 border-2 border-white items-center justify-center`}>
                         <Ionicons name="mic-off" size={10} color="#fff" />
                     </View>
                 )}
 
-                {/* Host badge */}
                 {speaker.isHost && (
-                    <View style={styles.hostBadge}>
-                        <Ionicons name="crown" size={12} color="#fff" />
+                    <View style={tw`absolute -top-1 -left-1 w-8 h-8 rounded-full bg-amber-500 border-2 border-white items-center justify-center shadow-md shadow-black/30`}>
+                        <Ionicons name="mic-circle" size={20} color="#fff" />
                     </View>
                 )}
             </View>
 
-            <View style={styles.speakerInfo}>
-                <Text style={styles.speakerName} numberOfLines={1}>
+            <View style={tw`items-center w-full`}>
+                <PoppinsTextSemibold style={tw`text-sm text-white text-center mb-2`} numberOfLines={1}>
                     {speaker.name}
                     {speaker.userId === currentUserId && ' (You)'}
-                </Text>
+                </PoppinsTextSemibold>
 
-                <View style={styles.speakerStatus}>
+                <View style={tw`flex-row justify-center`}>
                     {speaker.isSpeaking ? (
-                        <View style={[styles.statusBadge, styles.speakingBadge]}>
+                        <View style={tw`flex-row items-center bg-emerald-500/20 px-2 py-1 rounded-3xl`}>
                             <Ionicons name="radio-button-on" size={10} color="#22c55e" />
-                            <Text style={styles.statusText}>Speaking</Text>
+                            <PoppinsText style={tw`text-xs ml-1 text-white`}>Speaking</PoppinsText>
                         </View>
                     ) : speaker.isMuted ? (
-                        <View style={[styles.statusBadge, styles.mutedBadge]}>
+                        <View style={tw`flex-row items-center bg-red-500/20 px-2 py-1 rounded-3xl`}>
                             <Ionicons name="mic-off" size={10} color="#ef4444" />
-                            <Text style={styles.statusText}>Muted</Text>
+                            <PoppinsText style={tw`text-xs ml-1 text-white`}>Muted</PoppinsText>
                         </View>
                     ) : (
-                        <View style={[styles.statusBadge, styles.activeBadge]}>
+                        <View style={tw`flex-row items-center bg-blue-500/20 px-2 py-1 rounded-3xl`}>
                             <Ionicons name="mic" size={10} color="#3b82f6" />
-                            <Text style={styles.statusText}>Active</Text>
+                            <PoppinsText style={tw`text-xs ml-1 text-white`}>Active</PoppinsText>
                         </View>
                     )}
                 </View>
             </View>
 
-            {/* Host actions */}
             {isHostView && speaker.userId !== currentUserId && (
                 <TouchableOpacity
-                    style={[
-                        styles.muteButton,
-                        speaker.isMuted ? styles.unmuteButton : styles.muteButtonRed
-                    ]}
+                    style={tw.style(
+                        'absolute top-2 right-2 w-8 h-8 rounded-full items-center justify-center shadow-md shadow-black/30',
+                        speaker.isMuted ? 'bg-emerald-500' : 'bg-red-500'
+                    )}
                     onPress={() => onMute(speaker.userId)}
                 >
                     <Ionicons
@@ -109,48 +131,46 @@ const SpeakerCard = ({ speaker, isHostView, currentUserId, onMute }) => {
 
 const ListenerCard = ({ listener, isHostView, currentUserId, onApprove, onRemove }) => {
     return (
-        <View style={styles.listenerCard}>
-            <View style={styles.listenerAvatarContainer}>
+        <View style={tw`flex-row items-center bg-white/5 rounded-2xl p-3 mb-2`}>
+            <View style={tw`relative`}>
                 <Image
                     source={{ uri: listener.avatar }}
-                    style={styles.listenerAvatar}
+                    style={tw`w-12 h-12 rounded-full border-2 border-white/20`}
                 />
 
-                {/* Requesting indicator */}
                 {listener.isRequestingSpeaker && (
-                    <View style={styles.requestingIndicator}>
+                    <View style={tw`absolute -top-1 -right-1 w-5 h-5 rounded-full bg-blue-500 border border-white items-center justify-center`}>
                         <Ionicons name="hand-left" size={8} color="#fff" />
                     </View>
                 )}
             </View>
 
-            <View style={styles.listenerInfo}>
-                <Text style={styles.listenerName} numberOfLines={1}>
+            <View style={tw`flex-1 ml-3`}>
+                <PoppinsTextSemibold style={tw`text-sm text-white mb-1`} numberOfLines={1}>
                     {listener.name}
                     {listener.userId === currentUserId && ' (You)'}
-                </Text>
+                </PoppinsTextSemibold>
 
-                <View style={styles.listenerStatus}>
+                <View style={tw`flex-row`}>
                     {listener.isRequestingSpeaker ? (
-                        <View style={[styles.statusBadge, styles.requestingBadge]}>
+                        <View style={tw`flex-row items-center bg-sky-500/20 px-2 py-1 rounded-3xl`}>
                             <Ionicons name="hand-left" size={10} color="#38bdf8" />
-                            <Text style={styles.statusText}>Requesting to speak</Text>
+                            <PoppinsText style={tw`text-xs ml-1 text-white`}>Requesting to speak</PoppinsText>
                         </View>
                     ) : (
-                        <View style={[styles.statusBadge, styles.listenerBadge]}>
+                        <View style={tw`flex-row items-center bg-gray-400/20 px-2 py-1 rounded-3xl`}>
                             <Ionicons name="person" size={10} color="#9ca3af" />
-                            <Text style={styles.statusText}>Listener</Text>
+                            <PoppinsText style={tw`text-xs ml-1 text-white`}>Listener</PoppinsText>
                         </View>
                     )}
                 </View>
             </View>
 
-            {/* Host actions */}
             {isHostView && (
-                <View style={styles.listenerActions}>
+                <View style={tw`flex-row gap-2`}>
                     {listener.isRequestingSpeaker && (
                         <TouchableOpacity
-                            style={styles.approveButton}
+                            style={tw`w-8 h-8 rounded-full bg-emerald-500 items-center justify-center shadow-md shadow-black/30`}
                             onPress={() => onApprove(listener.userId)}
                         >
                             <Ionicons name="checkmark-circle" size={20} color="#fff" />
@@ -158,7 +178,7 @@ const ListenerCard = ({ listener, isHostView, currentUserId, onApprove, onRemove
                     )}
 
                     <TouchableOpacity
-                        style={styles.removeButton}
+                        style={tw`w-8 h-8 rounded-full bg-red-500 items-center justify-center shadow-md shadow-black/30`}
                         onPress={() => onRemove(listener.userId)}
                     >
                         <Ionicons name="remove-circle" size={20} color="#fff" />
@@ -177,25 +197,27 @@ const ChatMessage = ({ message, currentUserId }) => {
     });
 
     return (
-        <View style={[
-            styles.chatMessageContainer,
-            isOwnMessage ? styles.chatMessageRight : styles.chatMessageLeft
-        ]}>
+        <View style={tw.style(
+            'mb-3',
+            isOwnMessage ? 'items-end' : 'items-start'
+        )}>
             {!isOwnMessage && (
-                <Text style={styles.chatMessageUser}>{message.userName}</Text>
+                <PoppinsTextSemibold style={tw`text-xs text-white/70 mb-1 ml-2`}>
+                    {message.userName}
+                </PoppinsTextSemibold>
             )}
-            <View style={[
-                styles.chatMessageBubble,
-                isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble
-            ]}>
-                <Text style={styles.chatMessageText}>{message.message}</Text>
-                <View style={[
-                    styles.chatMessageTime,
-                    isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime
-                ]}>
-                    <Text style={styles.chatTimeText}>{time}</Text>
+            <View style={tw.style(
+                'p-3 rounded-2xl max-w-[80%]',
+                isOwnMessage ? 'bg-indigo-600 rounded-br-sm' : 'bg-white/10 rounded-bl-sm'
+            )}>
+                <PoppinsText style={tw`text-sm text-white`}>{message.message}</PoppinsText>
+                <View style={tw.style(
+                    'flex-row items-center mt-1',
+                    isOwnMessage ? 'justify-end' : 'justify-start'
+                )}>
+                    <PoppinsText style={tw`text-xs text-white/60`}>{time}</PoppinsText>
                     {isOwnMessage && (
-                        <Ionicons name="checkmark" size={12} color="#a78bfa" style={{ marginLeft: 4 }} />
+                        <Ionicons name="checkmark" size={12} color="#a78bfa" style={tw`ml-1`} />
                     )}
                 </View>
             </View>
@@ -219,57 +241,8 @@ export default function VoiceRoomInterface(props) {
         onLeave,
     } = props;
 
-    console.group("🎙️ VoiceRoomInterface Render");
-    console.log("voiceId:", voiceId);
-    console.log("currentUser:", currentUser);
-    console.log("currentUser._id:", currentUser?._id);
-    console.log("voiceState:", voiceState);
-    console.log("voiceState.room:", voiceState?.room);
-    console.log("voiceState.instance:", voiceState?.instance);
-    console.log("participants:", voiceState?.instance?.participants);
-    console.log("speakers:", voiceState?.instance?.speakers);
-    console.log("messages:", voiceState?.messages);
-    console.groupEnd();
-
-    /* =====================================================
-       HARD GUARDS (MUST COME FIRST)
-    ===================================================== */
-
-    // if (!currentUser || !currentUser._id) {
-    //     return (
-    //         <SafeAreaView style={styles.container}>
-    //             <Text style={{ color: "#fff", textAlign: "center", marginTop: 40 }}>
-    //                 Loading user…
-    //             </Text>
-    //         </SafeAreaView>
-    //     );
-    // }
-
-    // if (!voiceState || !voiceState.room || !voiceState.instance) {
-    //     return (
-    //         <SafeAreaView style={styles.container}>
-    //             <Text style={{ color: "#fff", textAlign: "center", marginTop: 40 }}>
-    //                 Joining voice room…
-    //             </Text>
-    //         </SafeAreaView>
-    //     );
-    // }
-
-    /* =====================================================
-       SAFE DERIVATIONS (NOW IT IS SAFE)
-    ===================================================== */
-
     const room = voiceState?.room || {};
     const instance = voiceState?.instance || {};
-
-    // if (!instance) {
-    //     return (
-    //         <View style={styles.loading}>
-    //             <Text>Joining live room…</Text>
-    //         </View>
-    //     );
-    // }
-
     const myId = currentUser?._id || null;
 
     const normalizeUser = (u) => {
@@ -297,34 +270,47 @@ export default function VoiceRoomInterface(props) {
         };
     };
 
-    const speakers = Array.isArray(instance?.speakers)
+    // Get all participants
+    const allParticipants = Array.isArray(instance?.participants)
+        ? instance.participants
+            .map(normalizeUser)
+            .filter(Boolean)
+        : [];
+
+    // Get speakers
+    const rawSpeakers = Array.isArray(instance?.speakers)
         ? instance.speakers
             .map(normalizeUser)
             .filter(Boolean)
         : [];
 
-    const listeners = Array.isArray(instance?.participants)
-        ? instance.participants
-            .map(normalizeUser)
-            .filter(Boolean)
-        : [];
+    // Separate host from other speakers
+    const hostId = room?.host?._id;
+    const hostSpeaker = rawSpeakers.find(s => s._id === hostId);
+    const otherSpeakers = rawSpeakers.filter(s => s._id !== hostId);
+
+    // Sort speakers: host first, then other speakers
+    const sortedSpeakers = [];
+    if (hostSpeaker) sortedSpeakers.push(hostSpeaker);
+    sortedSpeakers.push(...otherSpeakers);
+
+    // Get listeners (participants who are not speakers)
+    const listeners = allParticipants.filter(p => 
+        !rawSpeakers.some(s => s._id === p._id)
+    );
 
     const messages = Array.isArray(voiceState?.messages)
         ? voiceState.messages
         : [];
 
     const isHost = room?.host?._id === myId;
-
-    const isSpeaker = speakers.some(u => u?._id === myId);
-
+    const isSpeaker = rawSpeakers.some(u => u?._id === myId);
     const isListener = listeners.some(u => u?._id === myId);
-
     const canSpeak = isHost || isSpeaker;
     const canModerate = isHost;
 
     const hostUser = room?.host ?? null;
     const hostAvatar = hostUser?.profile?.avatar?.url ?? null;
-    console.log("Host user derived:", hostUser);
 
     const [activePanel, setActivePanel] = useState(null); // 'listeners' or 'chat'
     const [isMicMuted, setIsMicMuted] = useState(false);
@@ -335,7 +321,6 @@ export default function VoiceRoomInterface(props) {
 
     const togglePanel = (panel) => {
         if (activePanel === panel) {
-            // Close panel
             Animated.timing(panelAnim, {
                 toValue: width,
                 duration: 300,
@@ -344,7 +329,6 @@ export default function VoiceRoomInterface(props) {
                 setActivePanel(null);
             });
         } else {
-            // Open panel
             setActivePanel(panel);
             Animated.timing(panelAnim, {
                 toValue: 0,
@@ -394,18 +378,18 @@ export default function VoiceRoomInterface(props) {
 
         return (
             <FlatList
-                data={speakers}
+                data={sortedSpeakers}
                 keyExtractor={(item) => item._id}
                 numColumns={numColumns}
-                contentContainerStyle={styles.speakersGrid}
+                contentContainerStyle={tw`p-4`}
                 renderItem={({ item }) => (
-                    <View style={styles.speakerCardWrapper}>
+                    <View style={tw`flex-1 min-w-[120px] max-w-[150px] m-2`}>
                         <SpeakerCard
                             speaker={{
                                 userId: item._id,
                                 name: item.name,
                                 avatar: item.avatar,
-                                isHost: item._id === room?.host?._id,
+                                isHost: item._id === hostId,
                                 isMuted: item.isMuted,
                                 isSpeaking: voiceState?.speakingUsers?.[item._id],
                             }}
@@ -421,17 +405,21 @@ export default function VoiceRoomInterface(props) {
                 )}
                 ListFooterComponent={
                     !canSpeak ? (
-                        <View style={styles.requestToSpeakContainer}>
-                            <View style={styles.listenerIconContainer}>
+                        <View style={tw`items-center p-6 mt-4 bg-blue-500/10 border-2 border-blue-500/20 border-dashed rounded-2xl mx-2`}>
+                            <View style={tw`w-20 h-20 rounded-full bg-sky-200/20 items-center justify-center mb-4`}>
                                 <Ionicons name="headset" size={40} color="#93c5fd" />
                             </View>
-                            <Text style={styles.listenerText}>You're listening</Text>
+                            <PoppinsTextSemibold style={tw`text-base text-white mb-4`}>
+                                You're listening
+                            </PoppinsTextSemibold>
                             <TouchableOpacity
-                                style={styles.requestButton}
+                                style={tw`flex-row items-center bg-blue-500 px-5 py-3 rounded-3xl gap-2`}
                                 onPress={handleRequestToSpeak}
                             >
                                 <Ionicons name="hand-left" size={20} color="#fff" />
-                                <Text style={styles.requestButtonText}>Request to Speak</Text>
+                                <PoppinsTextSemibold style={tw`text-sm text-white`}>
+                                    Request to Speak
+                                </PoppinsTextSemibold>
                             </TouchableOpacity>
                         </View>
                     ) : null
@@ -441,53 +429,54 @@ export default function VoiceRoomInterface(props) {
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={tw`flex-1 bg-indigo-950`}>
             <StatusBar barStyle="light-content" backgroundColor="#1e1b4b" />
 
             {/* Top Header */}
-            <View style={styles.header}>
-                <View style={styles.headerContent}>
+            <View style={tw`bg-black/50 border-b border-white/10 pt-[${Platform.OS === 'ios' ? 0 : StatusBar.currentHeight}px]`}>
+                <View style={tw`flex-row items-center justify-between px-4 py-3`}>
                     <TouchableOpacity
-                        style={styles.backButton}
+                        style={tw`w-10 h-10 rounded-full bg-white/10 items-center justify-center`}
                         onPress={handleLeaveRoom}
                     >
                         <Ionicons name="arrow-back" size={24} color="#fff" />
                     </TouchableOpacity>
 
-                    <View style={styles.roomInfo}>
-                        <View style={styles.hostContainer}>
+                    <View style={tw`flex-1 flex-row items-center mx-3`}>
+                        <View style={tw`relative`}>
                             <Image
                                 source={{ uri: hostAvatar }}
-                                style={styles.hostAvatar}
+                                style={tw`w-12 h-12 rounded-full border-2 border-purple-500/50`}
                             />
-                            <View style={styles.hostCrown}>
-                                <Ionicons name="crown" size={12} color="#fff" />
+                            <View style={tw`absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-amber-500 border-2 border-white items-center justify-center`}>
+                                <Ionicons name="mic-circle" size={12} color="#fff" />
                             </View>
                         </View>
 
-                        <View style={styles.roomDetails}>
-                            {/* FIX 1: Changed {name} to {room?.title} */}
-                            <Text style={styles.roomName} numberOfLines={1}>
+                        <View style={tw`ml-3 flex-1`}>
+                            <PoppinsTextBold style={tw`text-lg text-white`} numberOfLines={1}>
                                 {room?.title ?? "Live Voice Room"}
-                            </Text>
-                            <View style={styles.roomStatus}>
-                                <View style={styles.liveBadge}>
+                            </PoppinsTextBold>
+                            <View style={tw`flex-row items-center mt-1`}>
+                                <View style={tw`flex-row items-center bg-red-500/20 px-2 py-1 rounded-3xl mr-2`}>
                                     <Ionicons name="radio" size={10} color="#f87171" />
-                                    <Text style={styles.liveText}>LIVE</Text>
+                                    <PoppinsTextSemibold style={tw`text-xs text-red-300 ml-1`}>
+                                        LIVE
+                                    </PoppinsTextSemibold>
                                 </View>
-                                <Text style={styles.participantCount}>
-                                    {speakers.length} speaking • {listeners.length} listening
-                                </Text>
+                                <PoppinsText style={tw`text-xs text-white/60`}>
+                                    {sortedSpeakers.length} speaking • {listeners.length} listening
+                                </PoppinsText>
                             </View>
                         </View>
                     </View>
 
-                    <View style={styles.panelButtons}>
+                    <View style={tw`flex-row gap-2`}>
                         <TouchableOpacity
-                            style={[
-                                styles.panelButton,
-                                activePanel === 'listeners' && styles.panelButtonActive
-                            ]}
+                            style={tw.style(
+                                'w-12 h-12 rounded-full items-center justify-center',
+                                activePanel === 'listeners' ? 'bg-blue-500' : 'bg-white/10'
+                            )}
                             onPress={() => togglePanel('listeners')}
                         >
                             <Ionicons
@@ -495,20 +484,24 @@ export default function VoiceRoomInterface(props) {
                                 size={24}
                                 color={activePanel === 'listeners' ? '#fff' : '#d1d5db'}
                             />
-                            <Text style={[
-                                styles.panelButtonText,
-                                activePanel === 'listeners' && styles.panelButtonTextActive
-                            ]}>
+                            <PoppinsText 
+                                style={[
+                                    tw`text-xs mt-0.5`,
+                                    activePanel === 'listeners' 
+                                        ? { color: '#fff' } 
+                                        : { color: 'rgba(255, 255, 255, 0.8)' }
+                                ]}
+                            >
                                 {listeners.length}
-                            </Text>
+                            </PoppinsText>
                         </TouchableOpacity>
 
                         <TouchableOpacity
-                            style={[
-                                styles.panelButton,
-                                activePanel === 'chat' && styles.panelButtonActive,
-                                !chatEnabled && styles.panelButtonDisabled
-                            ]}
+                            style={tw.style(
+                                'w-12 h-12 rounded-full items-center justify-center',
+                                activePanel === 'chat' ? 'bg-blue-500' : 'bg-white/10',
+                                !chatEnabled && 'bg-white/5'
+                            )}
                             onPress={() => togglePanel('chat')}
                             disabled={!chatEnabled}
                         >
@@ -520,184 +513,259 @@ export default function VoiceRoomInterface(props) {
                                         !chatEnabled ? '#6b7280' : '#d1d5db'
                                 }
                             />
-                            <Text style={[
-                                styles.panelButtonText,
-                                activePanel === 'chat' && styles.panelButtonTextActive,
-                                !chatEnabled && styles.panelButtonTextDisabled
-                            ]}>
+                            <PoppinsText 
+                                style={[
+                                    tw`text-xs mt-0.5`,
+                                    activePanel === 'chat' 
+                                        ? { color: '#fff' } 
+                                        : !chatEnabled 
+                                            ? { color: 'rgba(255, 255, 255, 0.4)' } 
+                                            : { color: 'rgba(255, 255, 255, 0.8)' }
+                                ]}
+                            >
                                 {messages.length}
-                            </Text>
+                            </PoppinsText>
                         </TouchableOpacity>
                     </View>
                 </View>
             </View>
 
             {/* Main Content - Speakers Grid */}
-            <View style={styles.mainContent}>
+            <View style={tw`flex-1`}>
                 {renderSpeakersGrid()}
             </View>
 
-            {/* Side Panel */}
+            {/* Side Panel - FIXED OVERLAY STRUCTURE */}
             {activePanel && (
-                <Animated.View
+                <View
                     style={[
-                        styles.sidePanel,
-                        {
-                            transform: [{ translateX: panelAnim }]
-                        }
+                        StyleSheet.absoluteFill,
+                        { zIndex: 9999, elevation: 20 },
                     ]}
+                    pointerEvents="box-none"
                 >
-                    <View style={styles.panelContent}>
-                        {activePanel === 'listeners' && (
-                            <>
-                                <View style={styles.panelHeader}>
-                                    <View style={styles.panelTitleContainer}>
-                                        <Ionicons name="people" size={24} color="#fff" />
-                                        <Text style={styles.panelTitle}>
-                                            Listeners ({listeners.length})
-                                        </Text>
-                                    </View>
-                                    <TouchableOpacity
-                                        style={styles.closePanelButton}
-                                        onPress={() => togglePanel('listeners')}
-                                    >
-                                        <Ionicons name="close" size={24} color="#fff" />
-                                    </TouchableOpacity>
-                                </View>
-                                <Text style={styles.panelSubtitle}>
-                                    People currently listening in the room
-                                </Text>
+                    {/* Backdrop */}
+                    <TouchableOpacity
+                        activeOpacity={1}
+                        onPress={() => togglePanel(activePanel)}
+                        style={[
+                            StyleSheet.absoluteFill,
+                            {
+                                backgroundColor: "rgba(0,0,0,0.55)",
+                                zIndex: 9998,
+                            },
+                        ]}
+                    />
 
-                                <FlatList
-                                    data={listeners}
-                                    keyExtractor={(item) => item._id}
-                                    contentContainerStyle={styles.listenersList}
-                                    renderItem={({ item }) => (
-                                        <ListenerCard
-                                            listener={{
-                                                userId: item._id,
-                                                // FIX 2: Use normalized name and avatar
-                                                name: item.name,
-                                                avatar: item.avatar,
-                                                isRequestingSpeaker: item.requestedToSpeak,
-                                            }}
-                                            isHostView={isHost}
-                                            currentUserId={myId}
-                                            onApprove={() => onApproveSpeaker(item._id)}
-                                            onRemove={() => onDemoteSpeaker(item._id)}
-                                        />
-                                    )}
-                                />
-                            </>
-                        )}
-
-                        {activePanel === 'chat' && (
-                            <>
-                                <View style={styles.panelHeader}>
-                                    <View style={styles.panelTitleContainer}>
-                                        <Ionicons name="chatbubbles" size={24} color="#fff" />
-                                        <Text style={styles.panelTitle}>Voice Chat</Text>
-                                        {!chatEnabled && (
-                                            <View style={styles.chatDisabledBadge}>
-                                                <Text style={styles.chatDisabledText}>Disabled</Text>
-                                            </View>
-                                        )}
-                                    </View>
-                                    <View style={styles.chatHeaderActions}>
-                                        {canModerate && (
-                                            <TouchableOpacity
-                                                style={styles.chatToggleButton}
-                                                onPress={handleToggleChat}
-                                            >
-                                                <Ionicons
-                                                    name={chatEnabled ? "lock-closed" : "lock-open"}
-                                                    size={20}
-                                                    color="#fff"
-                                                />
-                                            </TouchableOpacity>
-                                        )}
+                    {/* Side Panel */}
+                    <Animated.View
+                        style={[
+                            tw`absolute top-0 right-0 bottom-0 bg-black/90 border-l border-white/10 shadow-2xl`,
+                            {
+                                width: Math.min(width * 0.9, 400),
+                                transform: [{ translateX: panelAnim }],
+                                zIndex: 10000,
+                                elevation: 25,
+                            },
+                        ]}
+                    >
+                        <View style={tw`flex-1 pt-[${Platform.OS === 'ios' ? 60 : StatusBar.currentHeight + 40}px]`}>
+                            {activePanel === 'listeners' && (
+                                <>
+                                    <View style={tw`flex-row items-center justify-between px-4 py-3 border-b border-white/10`}>
+                                        <View style={tw`flex-row items-center gap-3`}>
+                                            <Ionicons name="people" size={24} color="#fff" />
+                                            <PoppinsTextBold style={tw`text-xl text-white`}>
+                                                Listeners ({listeners.length})
+                                            </PoppinsTextBold>
+                                        </View>
                                         <TouchableOpacity
-                                            style={styles.closePanelButton}
-                                            onPress={() => togglePanel('chat')}
+                                            style={tw`w-8 h-8 rounded-full bg-white/10 items-center justify-center`}
+                                            onPress={() => togglePanel('listeners')}
                                         >
                                             <Ionicons name="close" size={24} color="#fff" />
                                         </TouchableOpacity>
                                     </View>
-                                </View>
-                                <Text style={styles.panelSubtitle}>
-                                    Messages disappear when room ends
-                                </Text>
-
-                                <FlatList
-                                    data={messages}
-                                    keyExtractor={(item) => item._id}
-                                    contentContainerStyle={styles.chatMessages}
-                                    inverted={false}
-                                    // FIX 3: Fixed variable name from 'id' to 'myId'
-                                    renderItem={({ item }) => (
-                                        <ChatMessage
-                                            message={item}
-                                            currentUserId={myId}
-                                        />
-                                    )}
-                                    ListEmptyComponent={
-                                        <View style={styles.emptyChat}>
-                                            <View style={styles.emptyChatIcon}>
-                                                <Ionicons name="chatbubble" size={40} color="#9ca3af" />
+                                    
+                                    {/* Speakers Section (Always at top) */}
+                                    {sortedSpeakers.length > 0 && (
+                                        <>
+                                            <View style={tw`px-4 pt-4 pb-2`}>
+                                                <PoppinsTextSemibold style={tw`text-sm text-white/80 mb-3`}>
+                                                    Speakers ({sortedSpeakers.length})
+                                                </PoppinsTextSemibold>
                                             </View>
-                                            <Text style={styles.emptyChatTitle}>No messages yet</Text>
-                                            <Text style={styles.emptyChatText}>
-                                                {chatEnabled
-                                                    ? "Be the first to send a message!"
-                                                    : "Chat is currently disabled by the host"
-                                                }
-                                            </Text>
-                                        </View>
-                                    }
-                                />
+                                            <ScrollView 
+                                                style={tw`max-h-64`} 
+                                                showsVerticalScrollIndicator={false}
+                                                nestedScrollEnabled={true}
+                                            >
+                                                {sortedSpeakers.map(speaker => (
+                                                    <ListenerCard
+                                                        key={speaker._id}
+                                                        listener={{
+                                                            userId: speaker._id,
+                                                            name: speaker.name,
+                                                            avatar: speaker.avatar,
+                                                            isRequestingSpeaker: false,
+                                                        }}
+                                                        isHostView={isHost}
+                                                        currentUserId={myId}
+                                                        onApprove={() => onApproveSpeaker(speaker._id)}
+                                                        onRemove={() => onDemoteSpeaker(speaker._id)}
+                                                    />
+                                                ))}
+                                            </ScrollView>
+                                            <View style={tw`px-4 pt-4 pb-2 border-t border-white/10`}>
+                                                <PoppinsTextSemibold style={tw`text-sm text-white/80 mb-3`}>
+                                                    Listeners ({listeners.length})
+                                                </PoppinsTextSemibold>
+                                            </View>
+                                        </>
+                                    )}
+                                    
+                                    <PoppinsText style={tw`text-xs text-white/60 px-4 py-2`}>
+                                        People currently in the room
+                                    </PoppinsText>
 
-                                {chatEnabled && (
-                                    <View style={styles.chatInputContainer}>
-                                        <TextInput
-                                            style={styles.chatInput}
-                                            value={chatInput}
-                                            onChangeText={setChatInput}
-                                            placeholder="Type a message..."
-                                            placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                                            maxLength={200}
-                                            multiline={false}
-                                        />
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.sendButton,
-                                                !chatInput.trim() && styles.sendButtonDisabled
-                                            ]}
-                                            onPress={handleSendMessage}
-                                            disabled={!chatInput.trim()}
-                                        >
-                                            <Ionicons name="arrow-forward" size={20} color="#fff" />
-                                            <Text style={styles.sendButtonText}>Send</Text>
-                                        </TouchableOpacity>
+                                    <FlatList
+                                        data={listeners}
+                                        keyExtractor={(item) => item._id}
+                                        contentContainerStyle={tw`p-4 pt-0`}
+                                        renderItem={({ item }) => (
+                                            <ListenerCard
+                                                listener={{
+                                                    userId: item._id,
+                                                    name: item.name,
+                                                    avatar: item.avatar,
+                                                    isRequestingSpeaker: item.requestedToSpeak,
+                                                }}
+                                                isHostView={isHost}
+                                                currentUserId={myId}
+                                                onApprove={() => onApproveSpeaker(item._id)}
+                                                onRemove={() => onDemoteSpeaker(item._id)}
+                                            />
+                                        )}
+                                        ListHeaderComponent={sortedSpeakers.length > 0 ? null : undefined}
+                                    />
+                                </>
+                            )}
+
+                            {activePanel === 'chat' && (
+                                <>
+                                    <View style={tw`flex-row items-center justify-between px-4 py-3 border-b border-white/10`}>
+                                        <View style={tw`flex-row items-center gap-3`}>
+                                            <Ionicons name="chatbubbles" size={24} color="#fff" />
+                                            <PoppinsTextBold style={tw`text-xl text-white`}>
+                                                Voice Chat
+                                            </PoppinsTextBold>
+                                            {!chatEnabled && (
+                                                <View style={tw`bg-red-500/20 px-2 py-1 rounded-3xl`}>
+                                                    <PoppinsText style={tw`text-xs text-red-300`}>
+                                                        Disabled
+                                                    </PoppinsText>
+                                                </View>
+                                            )}
+                                        </View>
+                                        <View style={tw`flex-row items-center gap-2`}>
+                                            {canModerate && (
+                                                <TouchableOpacity
+                                                    style={tw`w-8 h-8 rounded-full bg-white/10 items-center justify-center`}
+                                                    onPress={handleToggleChat}
+                                                >
+                                                    <Ionicons
+                                                        name={chatEnabled ? "lock-closed" : "lock-open"}
+                                                        size={20}
+                                                        color="#fff"
+                                                    />
+                                                </TouchableOpacity>
+                                            )}
+                                            <TouchableOpacity
+                                                style={tw`w-8 h-8 rounded-full bg-white/10 items-center justify-center`}
+                                                onPress={() => togglePanel('chat')}
+                                            >
+                                                <Ionicons name="close" size={24} color="#fff" />
+                                            </TouchableOpacity>
+                                        </View>
                                     </View>
-                                )}
-                            </>
-                        )}
-                    </View>
-                </Animated.View>
+                                    <PoppinsText style={tw`text-xs text-white/60 px-4 py-2`}>
+                                        Messages disappear when room ends
+                                    </PoppinsText>
+
+                                    <FlatList
+                                        data={messages}
+                                        keyExtractor={(item) => item._id}
+                                        contentContainerStyle={tw`p-4`}
+                                        inverted={false}
+                                        renderItem={({ item }) => (
+                                            <ChatMessage
+                                                message={item}
+                                                currentUserId={myId}
+                                            />
+                                        )}
+                                        ListEmptyComponent={
+                                            <View style={tw`items-center p-10`}>
+                                                <View style={tw`w-16 h-16 rounded-full bg-white/5 items-center justify-center mb-4`}>
+                                                    <Ionicons name="chatbubble" size={40} color="#9ca3af" />
+                                                </View>
+                                                <PoppinsTextSemibold style={tw`text-base text-white mb-2`}>
+                                                    No messages yet
+                                                </PoppinsTextSemibold>
+                                                <PoppinsText style={tw`text-xs text-white/60 text-center`}>
+                                                    {chatEnabled
+                                                        ? "Be the first to send a message!"
+                                                        : "Chat is currently disabled by the host"
+                                                    }
+                                                </PoppinsText>
+                                            </View>
+                                        }
+                                    />
+
+                                    {chatEnabled && (
+                                        <View style={tw`flex-row p-4 border-t border-white/10 gap-2`}>
+                                            <TextInput
+                                                style={[
+                                                    tw`flex-1 bg-white/10 border border-white/20 rounded-3xl px-4 py-3 text-white text-sm`,
+                                                    { fontFamily: 'Poppins-Regular' }
+                                                ]}
+                                                value={chatInput}
+                                                onChangeText={setChatInput}
+                                                placeholder="Type a message..."
+                                                placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                                                maxLength={200}
+                                                multiline={false}
+                                            />
+                                            <TouchableOpacity
+                                                style={tw.style(
+                                                    'flex-row items-center bg-violet-500 px-5 py-3 rounded-3xl gap-2',
+                                                    !chatInput.trim() && 'opacity-50'
+                                                )}
+                                                onPress={handleSendMessage}
+                                                disabled={!chatInput.trim()}
+                                            >
+                                                <Ionicons name="arrow-forward" size={20} color="#fff" />
+                                                <PoppinsTextSemibold style={tw`text-sm text-white`}>
+                                                    Send
+                                                </PoppinsTextSemibold>
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
+                                </>
+                            )}
+                        </View>
+                    </Animated.View>
+                </View>
             )}
 
             {/* Bottom Controls */}
-            <View style={styles.bottomControls}>
-                <View style={styles.controlsRow}>
-                    {/* Mic Control */}
+            <View style={tw`bg-black/50 border-t border-white/10 py-4`}>
+                <View style={tw`flex-row items-center justify-center gap-4 mb-3`}>
                     <TouchableOpacity
-                        style={[
-                            styles.controlButton,
-                            styles.micButton,
-                            isMicMuted ? styles.micButtonMuted : styles.micButtonActive
-                        ]}
+                        style={tw.style(
+                            'w-16 h-16 rounded-full items-center justify-center',
+                            isMicMuted ? 'bg-red-500' : 'bg-emerald-500'
+                        )}
                         onPress={() => onMuteSelf()}
-
                     >
                         <Ionicons
                             name={isMicMuted ? "mic-off" : "mic"}
@@ -706,13 +774,11 @@ export default function VoiceRoomInterface(props) {
                         />
                     </TouchableOpacity>
 
-                    {/* Output Control */}
                     <TouchableOpacity
-                        style={[
-                            styles.controlButton,
-                            styles.outputButton,
-                            isOutputMuted && styles.outputButtonMuted
-                        ]}
+                        style={tw.style(
+                            'w-14 h-14 rounded-full bg-white/10 items-center justify-center',
+                            isOutputMuted && 'bg-red-500/30'
+                        )}
                         onPress={() => setIsOutputMuted(!isOutputMuted)}
                     >
                         <Ionicons
@@ -722,694 +788,41 @@ export default function VoiceRoomInterface(props) {
                         />
                     </TouchableOpacity>
 
-                    {/* Request to Speak (for listeners) */}
                     {!canSpeak && (
                         <TouchableOpacity
-                            style={[styles.controlButton, styles.requestButton]}
+                            style={tw`w-14 h-14 rounded-full bg-blue-500 items-center justify-center`}
                             onPress={handleRequestToSpeak}
                         >
                             <Ionicons name="hand-left" size={24} color="#fff" />
                         </TouchableOpacity>
                     )}
 
-                    <View style={styles.controlDivider} />
+                    <View style={tw`w-px h-8 bg-white/20`} />
 
-                    {/* Leave Room */}
                     <TouchableOpacity
-                        style={[styles.controlButton, styles.leaveButton]}
+                        style={tw`flex-row items-center bg-red-500 px-5 py-3 rounded-3xl gap-2`}
                         onPress={handleLeaveRoom}
                     >
                         <Ionicons name="exit" size={20} color="#fff" />
-                        <Text style={styles.leaveButtonText}>Leave</Text>
+                        <PoppinsTextSemibold style={tw`text-sm text-white`}>
+                            Leave
+                        </PoppinsTextSemibold>
                     </TouchableOpacity>
                 </View>
 
-                {/* Status Bar */}
-                <View style={styles.statusBar}>
-                    <View style={[
-                        styles.statusIndicator,
-                        isMicMuted ? styles.statusIndicatorMuted : styles.statusIndicatorActive
-                    ]} />
-                    <Text style={styles.statusText}>
+                <View style={tw`flex-row items-center justify-center gap-2`}>
+                    <View style={tw.style(
+                        'w-3 h-3 rounded-full',
+                        isMicMuted ? 'bg-red-500' : 'bg-emerald-500'
+                    )} />
+                    <PoppinsText style={tw`text-xs text-white/80`}>
                         {isMicMuted ? 'Microphone muted' : 'Microphone active'}
                         {isOutputMuted && ' • Output muted'}
                         {isHost && ' • You are the host'}
-                    </Text>
+                    </PoppinsText>
                     <Ionicons name="wifi" size={16} color="#22c55e" />
                 </View>
             </View>
         </SafeAreaView>
     );
 };
-
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#1e1b4b',
-    },
-    header: {
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-        paddingTop: Platform.OS === 'ios' ? 0 : StatusBar.currentHeight,
-    },
-    headerContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-    },
-    backButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    roomInfo: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginHorizontal: 12,
-    },
-    hostContainer: {
-        position: 'relative',
-    },
-    hostAvatar: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        borderWidth: 2,
-        borderColor: 'rgba(168, 85, 247, 0.5)',
-    },
-    hostCrown: {
-        position: 'absolute',
-        bottom: -2,
-        right: -2,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        backgroundColor: '#f59e0b',
-        borderWidth: 2,
-        borderColor: '#fff',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    roomDetails: {
-        marginLeft: 12,
-        flex: 1,
-    },
-    roomName: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#fff',
-    },
-    roomStatus: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 4,
-    },
-    liveBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(239, 68, 68, 0.2)',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 12,
-        marginRight: 8,
-    },
-    liveText: {
-        fontSize: 12,
-        color: '#fca5a5',
-        fontWeight: '600',
-        marginLeft: 4,
-    },
-    participantCount: {
-        fontSize: 12,
-        color: 'rgba(255, 255, 255, 0.6)',
-    },
-    panelButtons: {
-        flexDirection: 'row',
-        gap: 8,
-    },
-    panelButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    panelButtonActive: {
-        backgroundColor: '#3b82f6',
-    },
-    panelButtonDisabled: {
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    },
-    panelButtonText: {
-        fontSize: 10,
-        color: 'rgba(255, 255, 255, 0.8)',
-        marginTop: 2,
-    },
-    panelButtonTextActive: {
-        color: '#fff',
-    },
-    panelButtonTextDisabled: {
-        color: 'rgba(255, 255, 255, 0.4)',
-    },
-    mainContent: {
-        flex: 1,
-    },
-    speakersGrid: {
-        padding: 16,
-    },
-    speakerCardWrapper: {
-        flex: 1,
-        minWidth: 120,
-        maxWidth: 150,
-        margin: 8,
-    },
-    speakerCard: {
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-        borderRadius: 16,
-        padding: 16,
-        alignItems: 'center',
-    },
-    speakerCardSpeaking: {
-        backgroundColor: 'rgba(34, 197, 94, 0.1)',
-        borderColor: 'rgba(34, 197, 94, 0.3)',
-    },
-    speakingPulse: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        borderRadius: 16,
-        borderWidth: 2,
-        borderColor: 'rgba(34, 197, 94, 0.2)',
-    },
-    speakerAvatarContainer: {
-        position: 'relative',
-        marginBottom: 12,
-    },
-    speakerAvatar: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        borderWidth: 3,
-        borderColor: 'rgba(255, 255, 255, 0.3)',
-    },
-    speakingIndicator: {
-        position: 'absolute',
-        bottom: 0,
-        right: 0,
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        backgroundColor: '#10b981',
-        borderWidth: 2,
-        borderColor: '#fff',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    mutedIndicator: {
-        position: 'absolute',
-        bottom: 0,
-        right: 0,
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        backgroundColor: '#ef4444',
-        borderWidth: 2,
-        borderColor: '#fff',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    hostBadge: {
-        position: 'absolute',
-        top: -4,
-        left: -4,
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: '#f59e0b',
-        borderWidth: 2,
-        borderColor: '#fff',
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 4,
-    },
-    speakerInfo: {
-        alignItems: 'center',
-        width: '100%',
-    },
-    speakerName: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#fff',
-        textAlign: 'center',
-        marginBottom: 8,
-    },
-    speakerStatus: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-    },
-    statusBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 12,
-    },
-    speakingBadge: {
-        backgroundColor: 'rgba(34, 197, 94, 0.2)',
-    },
-    mutedBadge: {
-        backgroundColor: 'rgba(239, 68, 68, 0.2)',
-    },
-    activeBadge: {
-        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-    },
-    requestingBadge: {
-        backgroundColor: 'rgba(56, 189, 248, 0.2)',
-    },
-    listenerBadge: {
-        backgroundColor: 'rgba(156, 163, 175, 0.2)',
-    },
-    statusText: {
-        fontSize: 10,
-        marginLeft: 4,
-    },
-    muteButton: {
-        position: 'absolute',
-        top: 8,
-        right: 8,
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 4,
-    },
-    unmuteButton: {
-        backgroundColor: '#10b981',
-    },
-    muteButtonRed: {
-        backgroundColor: '#ef4444',
-    },
-    requestToSpeakContainer: {
-        alignItems: 'center',
-        padding: 24,
-        marginTop: 16,
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        borderWidth: 2,
-        borderColor: 'rgba(59, 130, 246, 0.2)',
-        borderStyle: 'dashed',
-        borderRadius: 16,
-        marginHorizontal: 8,
-    },
-    listenerIconContainer: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: 'rgba(147, 197, 253, 0.2)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    listenerText: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#fff',
-        marginBottom: 16,
-    },
-    requestButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#3b82f6',
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        borderRadius: 24,
-        gap: 8,
-    },
-    requestButtonText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#fff',
-    },
-    sidePanel: {
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: Math.min(width * 0.9, 400),
-        backgroundColor: 'rgba(0, 0, 0, 0.9)',
-        borderLeftWidth: 1,
-        borderLeftColor: 'rgba(255, 255, 255, 0.1)',
-        shadowColor: '#000',
-        shadowOffset: { width: -4, height: 0 },
-        shadowOpacity: 0.5,
-        shadowRadius: 12,
-        elevation: 24,
-    },
-    panelContent: {
-        flex: 1,
-        paddingTop: Platform.OS === 'ios' ? 60 : StatusBar.currentHeight + 40,
-    },
-    panelHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    panelTitleContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-    },
-    panelTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#fff',
-    },
-    panelSubtitle: {
-        fontSize: 12,
-        color: 'rgba(255, 255, 255, 0.6)',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-    },
-    chatDisabledBadge: {
-        backgroundColor: 'rgba(239, 68, 68, 0.2)',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 12,
-    },
-    chatDisabledText: {
-        fontSize: 12,
-        color: '#fca5a5',
-    },
-    chatHeaderActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    chatToggleButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    closePanelButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    listenersList: {
-        padding: 16,
-    },
-    listenerCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 8,
-    },
-    listenerAvatarContainer: {
-        position: 'relative',
-    },
-    listenerAvatar: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        borderWidth: 2,
-        borderColor: 'rgba(255, 255, 255, 0.2)',
-    },
-    requestingIndicator: {
-        position: 'absolute',
-        top: -2,
-        right: -2,
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        backgroundColor: '#3b82f6',
-        borderWidth: 1,
-        borderColor: '#fff',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    listenerInfo: {
-        flex: 1,
-        marginLeft: 12,
-    },
-    listenerName: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#fff',
-        marginBottom: 4,
-    },
-    listenerStatus: {
-        flexDirection: 'row',
-    },
-    listenerActions: {
-        flexDirection: 'row',
-        gap: 8,
-    },
-    approveButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: '#10b981',
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 4,
-    },
-    removeButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: '#ef4444',
-        justifyContent: 'center',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 4,
-    },
-    chatMessages: {
-        padding: 16,
-    },
-    chatMessageContainer: {
-        marginBottom: 12,
-    },
-    chatMessageLeft: {
-        alignItems: 'flex-start',
-    },
-    chatMessageRight: {
-        alignItems: 'flex-end',
-    },
-    chatMessageUser: {
-        fontSize: 12,
-        color: 'rgba(255, 255, 255, 0.7)',
-        fontWeight: '600',
-        marginBottom: 4,
-        marginLeft: 8,
-    },
-    chatMessageBubble: {
-        padding: 12,
-        borderRadius: 16,
-        maxWidth: '80%',
-    },
-    ownMessageBubble: {
-        backgroundColor: '#4f46e5',
-        borderBottomRightRadius: 4,
-    },
-    otherMessageBubble: {
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        borderBottomLeftRadius: 4,
-    },
-    chatMessageText: {
-        fontSize: 14,
-        color: '#fff',
-    },
-    chatMessageTime: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 4,
-    },
-    ownMessageTime: {
-        justifyContent: 'flex-end',
-    },
-    otherMessageTime: {
-        justifyContent: 'flex-start',
-    },
-    chatTimeText: {
-        fontSize: 10,
-    },
-    emptyChat: {
-        alignItems: 'center',
-        padding: 40,
-    },
-    emptyChatIcon: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    emptyChatTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#fff',
-        marginBottom: 8,
-    },
-    emptyChatText: {
-        fontSize: 12,
-        color: 'rgba(255, 255, 255, 0.6)',
-        textAlign: 'center',
-    },
-    chatInputContainer: {
-        flexDirection: 'row',
-        padding: 16,
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255, 255, 255, 0.1)',
-        gap: 8,
-    },
-    chatInput: {
-        flex: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.2)',
-        borderRadius: 24,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        color: '#fff',
-        fontSize: 14,
-    },
-    sendButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#8b5cf6',
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        borderRadius: 24,
-        gap: 8,
-    },
-    sendButtonDisabled: {
-        opacity: 0.5,
-    },
-    sendButtonText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#fff',
-    },
-    bottomControls: {
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255, 255, 255, 0.1)',
-        paddingVertical: 16,
-    },
-    controlsRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 16,
-        marginBottom: 12,
-    },
-    controlButton: {
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderRadius: 999,
-    },
-    micButton: {
-        width: 64,
-        height: 64,
-    },
-    micButtonActive: {
-        backgroundColor: '#10b981',
-    },
-    micButtonMuted: {
-        backgroundColor: '#ef4444',
-    },
-    outputButton: {
-        width: 56,
-        height: 56,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    outputButtonMuted: {
-        backgroundColor: 'rgba(239, 68, 68, 0.3)',
-    },
-    requestButton: {
-        width: 56,
-        height: 56,
-        backgroundColor: '#3b82f6',
-    },
-    controlDivider: {
-        width: 1,
-        height: 32,
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    },
-    leaveButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#ef4444',
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        borderRadius: 24,
-        gap: 8,
-    },
-    leaveButtonText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#fff',
-    },
-    statusBar: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-    },
-    statusIndicator: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-    },
-    statusIndicatorActive: {
-        backgroundColor: '#10b981',
-    },
-    statusIndicatorMuted: {
-        backgroundColor: '#ef4444',
-    },
-    statusText: {
-        fontSize: 12,
-        color: 'rgba(255, 255, 255, 0.8)',
-    },
-});

@@ -344,6 +344,18 @@ export const communityService = {
     }).then(json);
   },
 
+  toggleHubReaction: (hubId, emoji, token) => {
+    const id = normalizeId(hubId);
+    if (!id) throw new Error("Invalid hub id");
+    if (!emoji) throw new Error("Emoji required");
+
+    return fetch(`${server}/community/hubs/${id}/react`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify({ emoji }),
+    }).then(json);
+  },
+
   updateHub: (hubId, payload, token) => {
     const id = normalizeId(hubId);
     if (!id) throw new Error("Invalid hub id");

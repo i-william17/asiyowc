@@ -3,15 +3,40 @@ import { Platform, AppState } from "react-native";
 import { Audio } from "expo-av";
 import { getSocket } from "../services/socket";
 
-// WebRTC globals (Expo / Web safe)
-const RTCPeerConnection =
-    global.RTCPeerConnection || window?.RTCPeerConnection;
+/* =====================================================
+   🌍 CROSS-PLATFORM WEBRTC ADAPTER
+===================================================== */
 
-const RTCSessionDescription =
-    global.RTCSessionDescription || window?.RTCSessionDescription;
+let RTCPeerConnection;
+let RTCIceCandidate;
+let RTCSessionDescription;
+let mediaDevices;
 
-const RTCIceCandidate =
-    global.RTCIceCandidate || window?.RTCIceCandidate;
+if (Platform.OS === "web") {
+    // Browser WebRTC
+    RTCPeerConnection = window.RTCPeerConnection;
+    RTCIceCandidate = window.RTCIceCandidate;
+    RTCSessionDescription = window.RTCSessionDescription;
+    mediaDevices = navigator.mediaDevices;
+
+    if (!RTCPeerConnection) {
+        console.error("❌ WebRTC not supported in this browser");
+    }
+} else {
+    // // Native WebRTC (Android / iOS)
+    // const webrtc = require("react-native-webrtc");
+
+    // RTCPeerConnection = webrtc.RTCPeerConnection;
+    // RTCIceCandidate = webrtc.RTCIceCandidate;
+    // RTCSessionDescription = webrtc.RTCSessionDescription;
+    // mediaDevices = webrtc.mediaDevices;
+}
+
+console.log("🌍 WebRTC Runtime", {
+    platform: Platform.OS,
+    RTCPeerConnection: !!RTCPeerConnection,
+    mediaDevices: !!mediaDevices,
+});
 
 /* =====================================================
    CONFIG
@@ -78,6 +103,11 @@ export function useVoiceWebRTC({
 
         socketRef.current = getSocket();
 
+        console.log("🔌 [voice-webrtc] socket ready", {
+            instanceId,
+            localUserId
+        });
+
         return () => {
             if (!enabled) cleanupAll();
         };
@@ -93,15 +123,13 @@ export function useVoiceWebRTC({
         if (Platform.OS !== "web") {
             Audio.setAudioModeAsync({
                 allowsRecordingIOS: true,
-                // ✅ FIXED: Changed from Audio.INTERRUPTION_MODE_IOS_DO_NOT_MIX to "doNotMix"
                 interruptionModeIOS: "doNotMix",
                 playsInSilentModeIOS: true,
                 shouldDuckAndroid: true,
-                // ✅ FIXED: Changed from Audio.INTERRUPTION_MODE_ANDROID_DO_NOT_MIX to "doNotMix"
                 interruptionModeAndroid: "doNotMix",
-                playThroughEarpieceAndroid: false, // speaker / bluetooth
+                playThroughEarpieceAndroid: false,
                 staysActiveInBackground: false,
-            }).catch(console.warn); // ✅ FIXED: Added error catching
+            }).catch(console.warn);
         }
     }, [enabled]);
 
@@ -113,31 +141,27 @@ export function useVoiceWebRTC({
 
         const handleAppStateChange = (nextState) => {
             if (nextState === "background" || nextState === "inactive") {
-                // 🔇 Mute mic when app is backgrounded
+                console.log("📱 [app] backgrounded - muting");
                 localStreamRef.current?.getAudioTracks().forEach((t) => {
                     t.enabled = false;
                 });
 
-                // 🔴 Stop speaking indicator
                 onSpeakingChange?.(false);
             }
 
             if (nextState === "active") {
-                // 🎤 Resume mic
+                console.log("📱 [app] foregrounded - resuming");
                 localStreamRef.current?.getAudioTracks().forEach((t) => {
                     t.enabled = true;
                 });
 
-                // 🔁 Re-offer peers (safe reconnect)
-                peersRef.current.forEach((_, peerId) => {
-                    reconnectPeer(peerId);
-                });
+                // ✅ FIX 1: DO NOTHING on foreground
+                // WebRTC handles ICE resume automatically
+                console.log("📱 [app] foregrounded — keeping peers intact");
             }
         };
 
         const sub = AppState.addEventListener("change", handleAppStateChange);
-
-        // ✅ FIXED: Removed duplicate AppState listener
 
         return () => sub.remove();
     }, [enabled]);
@@ -145,13 +169,31 @@ export function useVoiceWebRTC({
     /* =====================================================
        GET LOCAL AUDIO
     ===================================================== */
-
     const initLocalAudio = useCallback(async () => {
         if (localStreamRef.current) return localStreamRef.current;
 
-        const stream = await navigator.mediaDevices.getUserMedia({
+        console.log("🎤 [audio] requesting microphone");
+
+        if (Platform.OS !== "web") {
+            const { status } = await Audio.requestPermissionsAsync();
+            if (status !== "granted") {
+                console.error("⛔ [audio] microphone permission denied");
+                throw new Error("Microphone permission denied");
+            }
+        }
+
+        const stream = await mediaDevices.getUserMedia({
             audio: AUDIO_CONSTRAINTS,
             video: false,
+        });
+
+        console.log("✅ [audio] mic granted");
+        console.log("🎧 [audio] local stream ready", {
+            tracks: stream.getAudioTracks().map(t => ({
+                enabled: t.enabled,
+                muted: t.muted,
+                readyState: t.readyState
+            }))
         });
 
         localStreamRef.current = stream;
@@ -168,6 +210,8 @@ export function useVoiceWebRTC({
 
             if (audioContextsRef.current.has(userId)) return;
 
+            console.log("🗣️ [voice] speaking detection attached", userId);
+
             if (Platform.OS !== "web") return;
 
             const AudioContextClass =
@@ -176,7 +220,7 @@ export function useVoiceWebRTC({
             if (!AudioContextClass) return;
 
             if (Platform.OS !== "web") {
-                return; // speaking driven by socket events instead
+                return;
             }
 
             const audioContext = new AudioContextClass();
@@ -198,18 +242,20 @@ export function useVoiceWebRTC({
 
                 if (avg > SPEAKING_THRESHOLD && !speaking) {
                     speaking = true;
+                    console.log("🟢 [voice] speaking START", userId);
                     onSpeakingChange(userId, true);
                     socketRef.current?.emit("voice:speaking", {
-                        instanceId, // ✅ FIXED: Changed from roomId
+                        instanceId,
                         isSpeaking: true,
                     });
                 }
 
                 if (avg <= SPEAKING_THRESHOLD && speaking) {
                     speaking = false;
+                    console.log("🔴 [voice] speaking STOP", userId);
                     onSpeakingChange(userId, false);
                     socketRef.current?.emit("voice:speaking", {
-                        instanceId, // ✅ FIXED: Changed from roomId
+                        instanceId,
                         isSpeaking: false,
                     });
                 }
@@ -218,7 +264,7 @@ export function useVoiceWebRTC({
             audioContextsRef.current.set(userId, audioContext);
             speakingTimersRef.current.set(userId, interval);
         },
-        [onSpeakingChange, instanceId] // ✅ FIXED: Changed dependency from roomId to instanceId
+        [onSpeakingChange, instanceId]
     );
 
     /* =====================================================
@@ -233,15 +279,30 @@ export function useVoiceWebRTC({
                 return peersRef.current.get(remoteUserId);
             }
 
+            console.log("🤝 [webrtc] creating peer", {
+                remoteUserId,
+                initiator: isInitiator
+            });
+
             const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
             peersRef.current.set(remoteUserId, pc);
 
             const stream = await initLocalAudio();
             stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
+            console.log("🎙️ [webrtc] local tracks added", {
+                remoteUserId,
+                tracks: stream.getTracks().map(t => t.kind)
+            });
+
             /* ===== ICE ===== */
             pc.onicecandidate = (event) => {
                 if (!event.candidate) return;
+
+                console.log("🧊 [webrtc] ICE candidate", {
+                    to: remoteUserId,
+                    candidate: !!event.candidate
+                });
 
                 socketRef.current?.emit("voice:webrtc:ice", {
                     to: remoteUserId,
@@ -252,6 +313,11 @@ export function useVoiceWebRTC({
             /* ===== REMOTE TRACK ===== */
             pc.ontrack = (event) => {
                 const [remoteStream] = event.streams;
+
+                console.log("🔊 [audio] remote track received", {
+                    from: remoteUserId,
+                    tracks: event.streams[0]?.getAudioTracks().length
+                });
 
                 onRemoteTrack?.(remoteUserId, remoteStream);
                 attachSpeakingDetection(remoteUserId, remoteStream);
@@ -267,28 +333,39 @@ export function useVoiceWebRTC({
 
                         audio
                             .play()
+                            .then(() => {
+                                console.log("▶️ [audio] autoplay success", remoteUserId);
+                            })
                             .catch(() => {
-                                console.warn("🔇 Autoplay blocked, waiting for user gesture");
+                                console.warn("⛔ [audio] autoplay blocked — waiting for gesture");
                             });
 
                         audioElementsRef.current.set(remoteUserId, audio);
                     }
                 }
-
             };
 
             pc.onconnectionstatechange = () => {
-                if (
-                    pc.connectionState === "failed" ||
-                    pc.connectionState === "disconnected"
-                ) {
+                console.log(`🔄 [webrtc] connection state changed:`, {
+                    userId: remoteUserId,
+                    state: pc.connectionState
+                });
+
+                // ✅ FIX 2: STOP DESTROYING PEERS ON disconnected
+                if (pc.connectionState === "failed") {
+                    console.warn("❌ [webrtc] peer failed permanently", remoteUserId);
                     removePeer(remoteUserId);
                 }
+
+                // ⚠️ DO NOT REMOVE ON "disconnected"
+                // Disconnected is TEMPORARY (tab switch, network jitter)
             };
 
             if (isInitiator) {
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
+
+                console.log("📨 [webrtc] offer sent →", remoteUserId);
 
                 socketRef.current?.emit("voice:webrtc:offer", {
                     to: remoteUserId,
@@ -310,9 +387,13 @@ export function useVoiceWebRTC({
             if (!remoteUserId) return;
             if (remoteUserId === localUserIdRef.current) return;
 
-            // Deterministic initiator selection
-            const isInitiator =
-                String(localUserIdRef.current) < String(remoteUserId);
+            const isInitiator = String(localUserIdRef.current) < String(p.userId);
+            await createPeer(p.userId, isInitiator);
+
+            console.log("👤 [voice-webrtc] user joined", {
+                remoteUserId,
+                amInitiator: String(localUserId) < String(remoteUserId)
+            });
 
             await createPeer(remoteUserId, isInitiator);
         },
@@ -323,11 +404,15 @@ export function useVoiceWebRTC({
        RESYNC PEERS
     ===================================================== */
     const resyncPeers = async (participants) => {
-        cleanupAll();
+        console.log("🔄 [webrtc] resyncing peers", participants.length);
 
         for (const p of participants) {
-            if (p.role !== "speaker") continue;
-            await connectToPeer(p.userId);
+            if (!peersRef.current.has(p.userId)) {
+                const isInitiator =
+                    String(localUserIdRef.current) < String(p.userId);
+
+                await createPeer(p.userId, isInitiator);
+            }
         }
     };
 
@@ -336,6 +421,8 @@ export function useVoiceWebRTC({
     ===================================================== */
 
     const removePeer = useCallback((userId) => {
+        console.log("❌ [webrtc] peer removed", userId);
+
         const pc = peersRef.current.get(userId);
         if (!pc) return;
 
@@ -355,15 +442,8 @@ export function useVoiceWebRTC({
         audioElementsRef.current.delete(userId);
     }, []);
 
-    /* =====================================================
-       RECONNECT PEER
-    ===================================================== */
-    const reconnectPeer = async (remoteUserId) => {
-        removePeer(remoteUserId);
-        if (!peersRef.current.has(remoteUserId)) {
-            await createPeer(remoteUserId, true);
-        }
-    };
+    // ✅ FIX 3: DELETE reconnectPeer() COMPLETELY
+    // This function has been removed entirely
 
     /* =====================================================
        SOCKET SIGNALING
@@ -375,26 +455,38 @@ export function useVoiceWebRTC({
         const socket = socketRef.current;
         joinedRef.current = true;
 
-        socket.on("connect", () => {
-            socket.emit("voice:join", { instanceId }); // ✅ FIXED: Changed from roomId
-        });
+        console.log("➡️ [voice-webrtc] joining instance", instanceId);
 
         socket.emit("voice:join", { instanceId }, (res) => {
+            console.log("✅ [voice-webrtc] join ack", {
+                speakers: res?.instance?.participants?.filter(p => p.role === "speaker"),
+                total: res?.instance?.participants?.length
+            });
+
+            // ✅ FIX 4: Allowed peer creation location 1 - Initial join resync
             if (res?.instance?.participants) {
                 resyncPeers(
-                    res.instance.participants.map(p => ({
-                        userId: p._id
-                    }))
+                    res.instance.participants
+                        .filter(p => p.role === "speaker")
+                        .map(p => ({
+                            userId: p._id
+                        }))
                 );
             }
         });
 
         socket.on("voice:user:joined", async ({ userId: remoteUserId }) => {
+            console.log("👤 [voice-webrtc] user joined event", {
+                remoteUserId,
+                amInitiator: String(localUserId) < String(remoteUserId)
+            });
+
             if (remoteUserId === localUserId) return;
 
             const shouldInitiate =
                 String(localUserId) < String(remoteUserId);
 
+            // ✅ FIX 4: Allowed peer creation location 2 - voice:user:joined when initiator
             if (shouldInitiate) {
                 if (!peersRef.current.has(remoteUserId)) {
                     await createPeer(remoteUserId, true);
@@ -403,6 +495,8 @@ export function useVoiceWebRTC({
         });
 
         socket.on("voice:webrtc:offer", async ({ from, offer }) => {
+            console.log("📩 [webrtc] offer received ←", from);
+
             const pc = await createPeer(from, false);
             if (!pc) return;
 
@@ -415,9 +509,13 @@ export function useVoiceWebRTC({
                 to: from,
                 answer,
             });
+
+            console.log("📨 [webrtc] answer sent →", from);
         });
 
         socket.on("voice:webrtc:answer", async ({ from, answer }) => {
+            console.log("📩 [webrtc] answer received ←", from);
+
             const pc = peersRef.current.get(from);
             if (!pc) return;
 
@@ -427,17 +525,26 @@ export function useVoiceWebRTC({
         });
 
         socket.on("voice:webrtc:ice", async ({ from, candidate }) => {
+            console.log("🧊 [webrtc] ICE received ←", from);
+
             const pc = peersRef.current.get(from);
             if (!pc) return;
             try {
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                console.log("✅ [webrtc] ICE candidate added", from);
             } catch (error) {
-                console.log(error);
+                console.log("❌ [webrtc] ICE candidate error", error);
             }
         });
 
         socket.on("voice:user:left", ({ userId }) => {
+            console.log("👋 [voice-webrtc] user left", userId);
             removePeer(userId);
+        });
+
+        socket.on("voice:speaking", ({ userId, isSpeaking }) => {
+            console.log(isSpeaking ? "🟢 [voice] remote speaking" : "🔴 [voice] remote stopped", userId);
+            onSpeakingChange?.(userId, isSpeaking);
         });
 
         return () => {
@@ -446,15 +553,16 @@ export function useVoiceWebRTC({
             socket.off("voice:webrtc:answer");
             socket.off("voice:webrtc:ice");
             socket.off("voice:user:left");
+            socket.off("voice:speaking");
         };
     }, [
         enabled,
-        instanceId, // ✅ FIXED: Changed from roomId
+        instanceId,
         localUserId,
         createPeer,
         resyncPeers,
         removePeer,
-        reconnectPeer,
+        onSpeakingChange,
     ]);
 
     /* =====================================================
@@ -462,9 +570,11 @@ export function useVoiceWebRTC({
     ===================================================== */
 
     const muteLocal = useCallback(() => {
-        localStreamRef.current?.getAudioTracks().forEach((t) => {
-            t.enabled = !t.enabled;
-        });
+        const track = localStreamRef.current?.getAudioTracks()[0];
+        if (track) {
+            track.enabled = !track.enabled;
+            console.log(track.enabled ? "🔈 [audio] unmuted" : "🔇 [audio] muted");
+        }
     }, []);
 
     /* =====================================================
@@ -472,18 +582,32 @@ export function useVoiceWebRTC({
     ===================================================== */
 
     const cleanupAll = useCallback(() => {
+        console.log("🧹 [webrtc] cleanup all peers");
+
         destroyedRef.current = true;
 
-        peersRef.current.forEach((pc) => pc.close());
+        peersRef.current.forEach((pc, userId) => {
+            console.log("❌ [webrtc] closing peer", userId);
+            pc.close();
+        });
         peersRef.current.clear();
 
-        audioContextsRef.current.forEach((ctx) => ctx.close());
+        audioContextsRef.current.forEach((ctx, userId) => {
+            console.log("🔇 [audio] closing audio context", userId);
+            ctx.close();
+        });
         audioContextsRef.current.clear();
 
-        speakingTimersRef.current.forEach((i) => clearInterval(i));
+        speakingTimersRef.current.forEach((i, userId) => {
+            console.log("🗣️ [voice] clearing speaking timer", userId);
+            clearInterval(i);
+        });
         speakingTimersRef.current.clear();
 
-        localStreamRef.current?.getTracks().forEach((t) => t.stop());
+        localStreamRef.current?.getTracks().forEach((t) => {
+            console.log("🎤 [audio] stopping local track");
+            t.stop();
+        });
         localStreamRef.current = null;
 
         joinedRef.current = false;
@@ -499,3 +623,4 @@ export function useVoiceWebRTC({
         cleanup: cleanupAll,
     };
 }
+

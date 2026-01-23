@@ -53,8 +53,19 @@ export const fetchHubs = createAsyncThunk(
   "community/fetchHubs",
   async (_, { getState, rejectWithValue }) => {
     try {
-      return await communityService.getHubs(getState().auth.token);
+      const token = getState().auth.token;
+
+      console.log("🌍 [fetchHubs] START");
+      console.log("🌍 [fetchHubs] token:", token ? "OK" : "MISSING");
+
+      const res = await communityService.getHubs(token);
+
+      console.log("🌍 [fetchHubs] RAW RESPONSE:", res);
+      console.log("🌍 [fetchHubs] HUB COUNT:", res?.data?.length ?? 0);
+
+      return res;
     } catch (e) {
+      console.error("❌ [fetchHubs] ERROR:", e);
       return rejectWithValue(e?.message || "Failed to load hubs");
     }
   }
@@ -100,8 +111,16 @@ export const fetchHubDetail = createAsyncThunk(
   "community/fetchHubDetail",
   async (id, { getState, rejectWithValue }) => {
     try {
-      return await communityService.getHubById(id, getState().auth.token);
+      const token = getState().auth.token;
+
+      const res = await communityService.getHubById(id, token);
+
+      console.log("🟢 [fetchHubDetail] RAW:", res);
+
+      // ✅ RETURN HUB ONLY
+      return res.data;
     } catch (e) {
+      console.error("❌ [fetchHubDetail] ERROR:", e);
       return rejectWithValue(e?.message || "Failed to load hub");
     }
   }
@@ -145,9 +164,13 @@ export const fetchVoiceInstance = createAsyncThunk(
 
       // 🔑 NORMALIZE PAYLOAD
       return {
-        room: res.data.voice,
+        room: res.data.room,       // ✅ FIX
         instance: res.data.instance,
+        role: res.data.role,
+        chatEnabled: res.data.chatEnabled,
+        lockedStage: res.data.lockedStage,
       };
+
     } catch (err) {
       return rejectWithValue(
         err.message || "Failed to load voice instance"
@@ -167,6 +190,8 @@ export const joinGroup = createAsyncThunk(
         groupId,
         getState().auth.token
       );
+
+      console.log("📌 JOIN GROUP RESPONSE:", res);
       return res?.data;
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to join group");
@@ -252,6 +277,34 @@ export const sendGroupMessage = createAsyncThunk(
       );
     } catch (e) {
       return rejectWithValue(e.message);
+    }
+  }
+);
+
+/* ===========================
+   HUB REACTIONS
+=========================== */
+export const toggleHubReaction = createAsyncThunk(
+  "community/toggleHubReaction",
+  async ({ hubId, emoji }, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+      if (!token) throw new Error("Auth token missing");
+
+      const res = await communityService.toggleHubReaction(
+        hubId,
+        emoji,
+        token
+      );
+
+      return {
+        hubId,
+        reactions: res.data.reactions,
+      };
+    } catch (e) {
+      return rejectWithValue(
+        e?.message || "Failed to update hub reaction"
+      );
     }
   }
 );
@@ -444,6 +497,31 @@ const communitySlice = createSlice({
     },
 
     /* =====================================================
+       HUB REACTIONS (SAFE + REALTIME)
+    ===================================================== */
+    updateHubReactions: (state, action) => {
+      const { hubId, reactions } = action.payload || {};
+      if (!hubId || !Array.isArray(reactions)) return;
+
+      // 1️⃣ Update selectedHub (detail screen)
+      if (
+        state.selectedHub &&
+        String(state.selectedHub._id) === String(hubId)
+      ) {
+        state.selectedHub.reactions = reactions;
+      }
+
+      // 2️⃣ Update hubs list (optional badge/preview)
+      const hub = state.hubs.find(
+        (h) => String(h._id) === String(hubId)
+      );
+
+      if (hub) {
+        hub.reactions = reactions;
+      }
+    },
+
+    /* =====================================================
        DELETE (WHATSAPP STYLE)
     ===================================================== */
     deleteMessageForMe: (state, action) => {
@@ -492,18 +570,21 @@ const communitySlice = createSlice({
  VOICE ROOM – SESSION LIFECYCLE
 ===================================================== */
     voiceJoined: (state, action) => {
-      const { room, instance, role, chatEnabled, lockedStage } = action.payload;
+      const { room, instance, role, chatEnabled, lockedStage, reconnected } =
+        action.payload;
 
       state.room = room;
       state.instance = instance;
-      state.role = role;
+      state.role = role ?? state.role;
 
-      state.chatEnabled = chatEnabled ?? true;
-      state.lockedStage = lockedStage ?? false;
+      state.chatEnabled = chatEnabled ?? state.chatEnabled;
+      state.lockedStage = lockedStage ?? state.lockedStage;
 
-      state.messages = [];
-      state.speakingUsers = {};
-      state.voiceRequests = [];
+      if (!reconnected) {
+        state.messages = [];
+        state.speakingUsers = {};
+        state.voiceRequests = [];
+      }
     },
 
     voiceLeft: (state) => {
@@ -522,30 +603,24 @@ const communitySlice = createSlice({
     voiceUserJoined: (state, action) => {
       if (!state.instance) return;
 
-      state.instance.participants ??= [];
-
-      const exists = state.instance.participants.some(
-        (p) => String(p._id) === String(action.payload.userId)
-      );
+      const exists = state.instance.participants
+        .some(p => p._id === action.payload._id);
 
       if (!exists) {
-        state.instance.participants.push({
-          _id: action.payload.userId,
-          role: action.payload.role || "listener",
-          isMuted: false,
-          isSpeaking: false,
-        });
+        state.instance.participants.push(action.payload);
       }
     },
 
     voiceUserLeft: (state, action) => {
+      const uid = String(action.payload.userId);
       if (!state.instance) return;
 
-      state.instance.participants = state.instance.participants.filter(
-        (p) => String(p._id) !== String(action.payload.userId)
-      );
-    },
+      state.instance.participants =
+        state.instance.participants.filter(p => String(p._id) !== uid);
 
+      state.instance.speakers =
+        state.instance.speakers?.filter(s => String(s._id) !== uid) || [];
+    },
 
     voiceSpeakerRequested: (state, action) => {
       const { userId } = action.payload;
@@ -555,19 +630,50 @@ const communitySlice = createSlice({
     },
 
     voiceSpeakerApproved: (state, action) => {
-      const { userId } = action.payload;
-      if (state.voiceParticipants[userId]) {
-        state.voiceParticipants[userId].role = "speaker";
+      if (!state.instance) return;
+
+      const userId = String(action.payload.userId);
+
+      const user =
+        state.instance.participants.find(p => String(p._id) === userId) ||
+        state.instance.speakers.find(s => String(s._id) === userId);
+
+      if (!user) return;
+
+      // REMOVE FROM participants
+      state.instance.participants = state.instance.participants.filter(
+        p => String(p._id) !== userId
+      );
+
+      // ADD TO speakers (if not already there)
+      const exists = state.instance.speakers.some(
+        s => String(s._id) === userId
+      );
+
+      if (!exists) {
+        state.instance.speakers.push(user);
       }
-      state.voiceRequests = state.voiceRequests.filter((id) => id !== userId);
+
+      state.voiceRequests = state.voiceRequests.filter(id => id !== userId);
     },
 
     voiceSpeakerDemoted: (state, action) => {
-      const { userId } = action.payload;
-      if (state.voiceParticipants[userId]) {
-        state.voiceParticipants[userId].role = "listener";
-        state.voiceParticipants[userId].isSpeaking = false;
-      }
+      if (!state.instance) return;
+
+      const userId = String(action.payload.userId);
+
+      const user =
+        state.instance.speakers.find(s => String(s._id) === userId);
+
+      if (!user) return;
+
+      // REMOVE FROM speakers
+      state.instance.speakers = state.instance.speakers.filter(
+        s => String(s._id) !== userId
+      );
+
+      // ADD BACK TO participants
+      state.instance.participants.push(user);
     },
 
     voiceStageLocked: (state) => {
@@ -689,12 +795,23 @@ const communitySlice = createSlice({
       })
 
       .addCase(fetchVoiceInstance.fulfilled, (state, action) => {
+        const {
+          room,
+          instance,
+          role,
+          chatEnabled,
+          lockedStage,
+        } = action.payload;
+
         state.loadingDetail = false;
 
-        state.room = action.payload.room;
-        state.instance = action.payload.instance;
+        state.room = room;
+        state.instance = instance;
+        state.role = role;
 
-        // reset volatile session state
+        state.chatEnabled = chatEnabled ?? true;
+        state.lockedStage = lockedStage ?? false;
+
         state.speakingUsers = {};
         state.voiceRequests = [];
       })
@@ -738,6 +855,40 @@ const communitySlice = createSlice({
         s.loadingDetail = false;
         s.selectedVoice = null;
         s.error = a.payload || "Failed to load voice room";
+      })
+
+      .addCase(fetchHubs.pending, (s) => {
+        s.loadingList = true;
+      })
+
+      .addCase(fetchHubs.fulfilled, (s, a) => {
+
+        s.loadingList = false;
+        s.hubs = a.payload?.data || [];
+      })
+
+      .addCase(fetchHubs.rejected, (s, a) => {
+
+        s.loadingList = false;
+        s.hubs = [];
+        s.error = a.payload || "Failed to load hubs";
+      })
+
+      .addCase(fetchHubDetail.pending, (state) => {
+        state.loadingDetail = true;
+        state.error = null;
+      })
+
+      .addCase(fetchHubDetail.fulfilled, (state, action) => {
+
+        state.loadingDetail = false;
+        state.selectedHub = action.payload; // ✅ DIRECT HUB
+      })
+
+      .addCase(fetchHubDetail.rejected, (state, action) => {
+        state.loadingDetail = false;
+        state.selectedHub = null;
+        state.error = action.payload || "Failed to load hub";
       });
 
   },
@@ -749,6 +900,7 @@ export const {
   updateMessageReceipt,
   updateMessageReactions,
   updatePinnedMessage,
+  updateHubReactions,
   deleteMessageForMe,
   deleteMessageForEveryone,
   updateEditedMessage,

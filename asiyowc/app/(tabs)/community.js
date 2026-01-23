@@ -63,6 +63,7 @@ export default function CommunityScreen() {
 
   const fadeAnim = useState(new Animated.Value(0))[0];
 
+  console.log("Hubs:", hubs);
   /* =====================================================
      LOADERS
   ===================================================== */
@@ -325,15 +326,14 @@ export default function CommunityScreen() {
         );
       }
 
-      return hubs.map((h) => (
+      return hubs.map((hub) => (
         <HubCard
-          key={h._id}
-          id={h._id}
-          name={h.name}
-          members={h.members?.length ?? 0}
+          key={hub._id}
+          hub={hub}                 // 🔥 pass full object
           onPress={(id) => router.push(`/community/hub/${id}`)}
         />
       ));
+
     }
 
     return null;

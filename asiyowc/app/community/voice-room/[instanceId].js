@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector, useDispatch } from "react-redux";
@@ -9,6 +9,7 @@ import { useVoiceSocket } from "../../../hooks/useVoiceSocket";
 import { useVoiceWebRTC } from "../../../hooks/useVoiceWebRTC";
 import LoadingBlock from "../../../components/community/LoadingBlock";
 import EmptyState from "../../../components/community/EmptyState";
+import ConfirmModal from "../../../components/community/ConfirmModal";
 
 /* =====================================================
    LIVE VOICE ROOM (INSTANCE)
@@ -35,6 +36,14 @@ export default function VoiceRoomScreen() {
     const speakingUsers = useSelector((s) => s.community.speakingUsers);
     const chatEnabled = useSelector((s) => s.community.chatEnabled);
     const lockedStage = useSelector((s) => s.community.lockedStage);
+    const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+
+    const confirmLeave = () => {
+        voiceRTC?.cleanup?.();
+        voiceSocket?.leaveRoom();
+        router.replace("/community");
+    };
+
 
     const voiceState = {
         room,
@@ -84,6 +93,7 @@ export default function VoiceRoomScreen() {
         instanceId,
         enabled: canInit,
         token,
+        localUserId: user?._id,
     });
 
     /* =====================================================
@@ -94,7 +104,7 @@ export default function VoiceRoomScreen() {
         enabled: canInitRTC,
         localUserId,
 
-        onRemoteTrack: () => {},
+        onRemoteTrack: () => { },
 
         onSpeakingChange: (_userId, isSpeaking) => {
             voiceSocket?.setSpeaking?.(isSpeaking);
@@ -113,20 +123,19 @@ export default function VoiceRoomScreen() {
         );
     }
 
-    // if (!user || !user._id) {
-    //     return <LoadingBlock text="Loading user…" />;
-    // }
+    if (!user || !user._id) {
+        return <LoadingBlock text="Loading user…" />;
+    }
 
-    // // if (!room || !instance) {
-    // //     return <LoadingBlock text="Joining live voice room…" />;
-    // // }
+    if (!room || !instance) {
+        return <LoadingBlock text="Joining live voice room…" />;
+    }
 
     /* =====================================================
        EXIT HANDLER
     ===================================================== */
     const handleLeave = () => {
-        voiceRTC?.cleanup?.();
-        router.replace("/community");
+        setShowLeaveConfirm(true);
     };
 
     /* =====================================================
@@ -157,6 +166,17 @@ export default function VoiceRoomScreen() {
                 /* === EXIT === */
                 onLeave={handleLeave}
             />
+
+            <ConfirmModal
+                visible={showLeaveConfirm}
+                title="Leave voice room?"
+                message="You will stop hearing and speaking in this room."
+                confirmText="Leave"
+                danger
+                onCancel={() => setShowLeaveConfirm(false)}
+                onConfirm={confirmLeave}
+            />
+
         </View>
     );
 }

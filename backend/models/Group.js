@@ -66,7 +66,7 @@ const groupSchema = new mongoose.Schema(
 
     privacy: {
       type: String,
-      enum: ['public', 'private', 'invite'],
+      enum: ['public', 'private', 'invite', 'system'],
       default: 'public'
     },
 

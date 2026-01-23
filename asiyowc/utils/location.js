@@ -1,9 +1,38 @@
 import * as Location from "expo-location";
+import { Platform } from "react-native";
 
 /* ================= GET USER LOCATION ================= */
 export const getUserLocation = async () => {
-  const { status } = await Location.requestForegroundPermissionsAsync();
+  // 🌍 WEB: Use browser geolocation
+  if (Platform.OS === "web") {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation not supported"));
+        return;
+      }
 
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+          });
+        },
+        (error) => {
+          reject(error);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        }
+      );
+    });
+  }
+
+  // 📱 MOBILE: Use Expo Location
+  const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== "granted") {
     throw new Error("Location permission denied");
   }
@@ -13,17 +42,4 @@ export const getUserLocation = async () => {
   });
 
   return location.coords;
-};
-
-/* ================= REVERSE GEOCODE ================= */
-export const getLocationDetails = async (coords) => {
-  const result = await Location.reverseGeocodeAsync(coords);
-
-  if (!result || !result.length) return null;
-
-  return {
-    country: result[0].country,
-    city: result[0].city,
-    region: result[0].region,
-  };
 };

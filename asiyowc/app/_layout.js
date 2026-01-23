@@ -103,7 +103,6 @@ function AppShell() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="modals" />
-      <Stack.Screen name="more"/>
     </Stack>
   );
 }

@@ -4,7 +4,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
 const hpp = require('hpp');
 const compression = require('compression');
 const http = require('http');
@@ -22,6 +21,7 @@ const programRoutes = require('./routes/programs.js');
 const savingsRoutes = require('./routes/savings.js');
 const communityRoutes = require('./routes/community.js');
 const aiRoutes = require("./routes/ai.js");
+const legacyRoutes = require('./routes/legacy.js');
 // const eventRoutes = require('./routes/events.js');
 // const marketplaceRoutes = require('./routes/marketplace.js');
 // const mentorshipRoutes = require('./routes/mentorship.js');
@@ -80,6 +80,8 @@ app.use(cors({
     "http://localhost:8081",
     "http://192.168.1.112:5000",
     "http://192.168.1.112:8081",
+    "https://www.asiyowc.com",
+    "https://www.asiyowc.onrender.com",
     "*"
   ],
   credentials: true
@@ -91,7 +93,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Data sanitization
 app.use(mongoSanitize());
-app.use(xss());
 app.use(hpp());
 
 // Compression
@@ -131,6 +132,7 @@ app.use('/api/programs', programRoutes);
 app.use('/api/savings', savingsRoutes);
 app.use("/api/ai", aiRoutes);
 app.use('/api/community', communityRoutes);
+app.use('/api/legacy', legacyRoutes);
 // app.use('/api/chat', chatRoutes);
 // app.use('/api/events', eventRoutes);
 // app.use('/api/marketplace', marketplaceRoutes);

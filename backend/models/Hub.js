@@ -1,13 +1,43 @@
 // models/Hub.js
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
+/* =====================================================
+   HUB REACTION SUBSCHEMA
+===================================================== */
+const hubReactionSchema = new mongoose.Schema(
+  {
+    emoji: {
+      type: String, // 👍 ❤️ 🔥 😂
+      required: true,
+      trim: true,
+    },
+
+    users: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        index: true,
+      },
+    ],
+
+    count: {
+      type: Number,
+      default: 0,
+    },
+  },
+  { _id: false }
+);
+
+/* =====================================================
+   HUB SCHEMA
+===================================================== */
 const hubSchema = new mongoose.Schema(
   {
     name: {
       type: String,
       required: true,
       trim: true,
-      maxlength: 100
+      maxlength: 100,
     },
 
     /* =====================
@@ -16,67 +46,85 @@ const hubSchema = new mongoose.Schema(
     description: {
       type: String,
       maxlength: 500,
-      default: ''
+      default: "",
     },
 
     avatar: {
       type: String, // Cloudinary / S3 URL
-      default: null
+      default: null,
     },
     /* ===================== */
 
     type: {
       type: String,
-      enum: ['regional', 'international', 'global'],
-      required: true
+      enum: ["regional", "international", "global"],
+      required: true,
     },
 
     region: {
       type: String,
       required: function () {
-        return this.type === 'regional';
-      }
+        return this.type === "regional";
+      },
     },
 
-    moderators: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }],
+    moderators: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
 
-    members: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }],
+    /* =====================
+       MEMBERS (UNCHANGED)
+    ===================== */
+    members: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
 
-    posts: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Post'
-    }],
+    posts: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Post",
+      },
+    ],
+
+    /* =====================
+       ✅ HUB REACTIONS
+    ===================== */
+    reactions: {
+      type: [hubReactionSchema],
+      default: [],
+    },
 
     isRemoved: {
       type: Boolean,
-      default: false
-    }
+      default: false,
+    },
   },
   {
     timestamps: true,
     toJSON: { virtuals: true },
-    toObject: { virtuals: true }
+    toObject: { virtuals: true },
   }
 );
 
 /* =====================================================
    VIRTUALS (UI-DERIVED)
 ===================================================== */
-hubSchema.virtual('membersCount').get(function () {
+hubSchema.virtual("membersCount").get(function () {
   return this.members ? this.members.length : 0;
 });
 
 /* =====================================================
-   INDEXES (UNCHANGED)
+   INDEXES
 ===================================================== */
 hubSchema.index({ type: 1, region: 1 });
 hubSchema.index({ members: 1 });
+hubSchema.index({ "reactions.users": 1 });
 hubSchema.index({ isRemoved: 1 });
 
-module.exports = mongoose.model('Hub', hubSchema);
+module.exports = mongoose.model("Hub", hubSchema);

@@ -88,9 +88,15 @@ const ensureGroupVisibility = async (group, userId) => {
   // Public: anyone can view
   if (group.privacy === 'public') return { ok: true };
 
+  // Private: must be member
+  if (group.privacy === 'private') return { ok: true };
+
+  // 🔒 System groups (GBV, etc.)
+  if (group.privacy === 'system') return { ok: true };
+
   // Private/invite: must be member/admin/creator
   const isMember = group.members.some(
-    (m) => String(m.user?._id) === String(user.id)
+    (m) => String(m.user?._id || m.user) === String(user.id)
   );
 
 
@@ -182,7 +188,7 @@ exports.createGroup = async (req, res) => {
       return bad(res, 'Group name is required');
     }
 
-    if (privacy && !['public', 'private', 'invite'].includes(privacy)) {
+    if (privacy && !['public', 'private', 'invite', 'system'].includes(privacy)) {
       return bad(res, 'Invalid privacy value');
     }
 
@@ -232,6 +238,7 @@ exports.getGroups = async (req, res) => {
     const query = {
       isRemoved: false,
       isArchived: false,
+      privacy: { $ne: 'system' },
       ...(mine
         ? { 'members.user': user.id }
         : { privacy: 'public' })
@@ -335,6 +342,7 @@ exports.joinGroup = async (req, res) => {
     const userId = req.user?.id || req.user?._id;
     const { groupId } = req.params;
 
+    console.log('[joinGroup]', { groupId, userId });
     if (!mongoose.Types.ObjectId.isValid(groupId)) {
       return bad(res, 'Invalid group ID');
     }
@@ -375,7 +383,6 @@ exports.joinGroup = async (req, res) => {
     return serverError(res, err);
   }
 };
-
 
 // 6. Leave group
 exports.leaveGroup = async (req, res) => {
@@ -458,7 +465,7 @@ exports.updateGroup = async (req, res) => {
     }
 
     const allowed = pick(req.body, ['name', 'description', 'avatar', 'privacy', 'isArchived']);
-    if (allowed.privacy && !['public', 'private', 'invite'].includes(allowed.privacy)) {
+    if (allowed.privacy && !['public', 'private', 'invite', 'system'].includes(allowed.privacy)) {
       return bad(res, 'Invalid privacy value');
     }
 
@@ -938,31 +945,66 @@ exports.getHubs = async (req, res) => {
     const { page, limit, skip } = parsePage(req);
     const mine = String(req.query.mine || 'false') === 'true';
 
+    /* =====================
+       QUERY
+    ===================== */
     const query = {
       isRemoved: false,
       ...(mine ? { members: user.id } : {})
     };
 
+    /* =====================
+       FETCH
+    ===================== */
     const [hubs, total] = await Promise.all([
-      Hub.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Hub.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select(
+          'name description avatar type region members createdAt'
+        ),
+
       Hub.countDocuments(query)
     ]);
 
-    const data = hubs.map((h) => ({
-      _id: h._id,
-      name: h.name,
-      description: h.description,
-      avatar: h.avatar,
-      type: h.type,
-      region: h.region,
-      membersCount: h.membersCount, // virtual
-      isMember: (h.members || []).some((m) => String(m) === String(user.id))
-    }));
+    /* =====================
+       NORMALIZE RESPONSE
+    ===================== */
+    const data = hubs.map((h) => {
+      const members = h.members || [];
+      const isMember = members.some(
+        (m) => String(m) === String(user.id)
+      );
 
+      return {
+        _id: h._id,
+        name: h.name,
+        description: h.description,
+        avatar: h.avatar,
+        type: h.type,
+        region: h.region || null,
+
+        membersCount: members.length, // 🔒 explicit, no reliance on virtual
+        isMember,
+
+        createdAt: h.createdAt
+      };
+    });
+
+    /* =====================
+       RESPONSE
+    ===================== */
     return ok(res, data, null, {
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) }
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
     });
   } catch (error) {
+    console.error('[getHubs]', error);
     return serverError(res, error);
   }
 };
@@ -973,20 +1015,52 @@ exports.getHubById = async (req, res) => {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
-    const { hubId } = req.params;
+    const { id: hubId } = req.params;
     if (!ensureObjectIdParam(res, hubId, 'hubId')) return;
 
-    const hub = await Hub.findOne({ _id: hubId, isRemoved: false })
-      .populate('moderators', 'name avatar')
-      .populate({ path: 'members', select: 'name avatar' });
+    const hub = await Hub.findOne({
+      _id: hubId,
+      isRemoved: false
+    })
+      .populate(
+        'moderators',
+        'profile.fullName profile.avatar'
+      )
+      .populate(
+        'members',
+        'profile.fullName profile.avatar'
+      );
 
     if (!hub) return notFound(res, 'Hub not found');
 
-    const isMember = (hub.members || []).some((m) => String(m._id || m) === String(user.id));
+    const members = hub.members || [];
+
+    const isMember = members.some(
+      (m) => String(m?._id || m) === String(user.id)
+    );
+
     const isModerator = isHubModeratorOrAdmin(hub, user);
 
-    return ok(res, { ...hub.toObject(), isMember, isModerator });
+    return ok(res, {
+      _id: hub._id,
+      name: hub.name,
+      description: hub.description,
+      avatar: hub.avatar,
+      type: hub.type,
+      region: hub.region || null,
+
+      moderators: hub.moderators,
+      members,
+
+      membersCount: members.length, // 🔒 explicit, no reliance on virtual
+      isMember,
+      isModerator,
+
+      createdAt: hub.createdAt,
+      updatedAt: hub.updatedAt
+    });
   } catch (error) {
+    console.error('[getHubById]', error);
     return serverError(res, error);
   }
 };
@@ -1000,17 +1074,57 @@ exports.joinHub = async (req, res) => {
     const { hubId } = req.params;
     if (!ensureObjectIdParam(res, hubId, 'hubId')) return;
 
-    const hub = await Hub.findOne({ _id: hubId, isRemoved: false });
-    if (!hub) return notFound(res, 'Hub not found');
+    /* =====================
+       ATOMIC ADD (NO DUPES)
+    ===================== */
+    const hub = await Hub.findOneAndUpdate(
+      {
+        _id: hubId,
+        isRemoved: false,
+        members: { $ne: user.id } // prevent duplicates
+      },
+      {
+        $addToSet: { members: user.id }
+      },
+      { new: true }
+    ).select('members name');
 
-    const already = (hub.members || []).some((m) => String(m) === String(user.id));
-    if (already) return ok(res, hub, 'Already a member');
+    /* =====================
+       ALREADY A MEMBER
+    ===================== */
+    if (!hub) {
+      const existing = await Hub.findOne({
+        _id: hubId,
+        isRemoved: false
+      }).select('members');
 
-    hub.members.push(user.id);
-    await hub.save();
+      if (!existing) return notFound(res, 'Hub not found');
 
-    return ok(res, hub, 'Joined hub');
+      return ok(
+        res,
+        {
+          _id: hubId,
+          isMember: true,
+          membersCount: existing.members.length
+        },
+        'Already a member'
+      );
+    }
+
+    /* =====================
+       SUCCESS RESPONSE
+    ===================== */
+    return ok(
+      res,
+      {
+        _id: hub._id,
+        isMember: true,
+        membersCount: hub.members.length
+      },
+      'Joined hub'
+    );
   } catch (error) {
+    console.error('[joinHub]', error);
     return serverError(res, error);
   }
 };
@@ -1024,24 +1138,80 @@ exports.leaveHub = async (req, res) => {
     const { hubId } = req.params;
     if (!ensureObjectIdParam(res, hubId, 'hubId')) return;
 
-    const hub = await Hub.findOne({ _id: hubId, isRemoved: false });
+    /* =====================
+       LOAD HUB (LIGHT)
+    ===================== */
+    const hub = await Hub.findOne({
+      _id: hubId,
+      isRemoved: false
+    }).select('members moderators');
+
     if (!hub) return notFound(res, 'Hub not found');
 
-    // Prevent last moderator from leaving (unless admin)
-    const isModerator = isHubModeratorOrAdmin(hub, user);
+    const isMember = (hub.members || []).some(
+      (m) => String(m) === String(user.id)
+    );
+
+    if (!isMember) {
+      return ok(
+        res,
+        {
+          _id: hubId,
+          isMember: false,
+          membersCount: hub.members.length
+        },
+        'Already not a member'
+      );
+    }
+
+    /* =====================
+       MODERATOR SAFETY CHECK
+    ===================== */
+    const isModerator = hub.moderators.some(
+      (m) => String(m) === String(user.id)
+    );
+
     if (isModerator && !hasRole(user, ['admin'])) {
-      const moderatorCount = (hub.moderators || []).length;
-      if (moderatorCount <= 1) {
-        return bad(res, 'Last moderator cannot leave hub. Assign another moderator first.');
+      const remainingMods = hub.moderators.filter(
+        (m) => String(m) !== String(user.id)
+      );
+
+      if (remainingMods.length === 0) {
+        return bad(
+          res,
+          'Last moderator cannot leave hub. Assign another moderator first.'
+        );
       }
     }
 
-    hub.members = (hub.members || []).filter((m) => String(m) !== String(user.id));
-    hub.moderators = (hub.moderators || []).filter((m) => String(m) !== String(user.id));
-    await hub.save();
+    /* =====================
+       ATOMIC REMOVE
+    ===================== */
+    const updated = await Hub.findOneAndUpdate(
+      { _id: hubId, isRemoved: false },
+      {
+        $pull: {
+          members: user.id,
+          moderators: user.id
+        }
+      },
+      { new: true }
+    ).select('members');
 
-    return ok(res, hub, 'Left hub');
+    /* =====================
+       RESPONSE
+    ===================== */
+    return ok(
+      res,
+      {
+        _id: hubId,
+        isMember: false,
+        membersCount: updated.members.length
+      },
+      'Left hub'
+    );
   } catch (error) {
+    console.error('[leaveHub]', error);
     return serverError(res, error);
   }
 };
@@ -1055,32 +1225,78 @@ exports.updateHub = async (req, res) => {
     const { hubId } = req.params;
     if (!ensureObjectIdParam(res, hubId, 'hubId')) return;
 
-    const hub = await Hub.findOne({ _id: hubId, isRemoved: false });
+    const hub = await Hub.findOne({
+      _id: hubId,
+      isRemoved: false
+    });
+
     if (!hub) return notFound(res, 'Hub not found');
 
-    if (!isHubModeratorOrAdmin(hub, user) && !hasRole(user, ['moderator', 'admin'])) {
+    /* =====================
+       PERMISSION
+    ===================== */
+    if (!isHubModeratorOrAdmin(hub, user)) {
       return forbidden(res, 'Only moderators can update hubs');
     }
 
-    const allowed = pick(req.body, ['name', 'description', 'avatar', 'type', 'region']);
+    /* =====================
+       ALLOWED FIELDS
+    ===================== */
+    const allowed = pick(req.body, [
+      'name',
+      'description',
+      'avatar',
+      'type',
+      'region'
+    ]);
+
+    /* =====================
+       VALIDATION
+    ===================== */
     if (allowed.type && !['regional', 'international', 'global'].includes(allowed.type)) {
       return bad(res, 'Invalid hub type');
     }
 
-    if (allowed.type === 'regional' && (!allowed.region || typeof allowed.region !== 'string')) {
-      return bad(res, 'region is required for regional hubs');
+    if (allowed.type === 'regional') {
+      if (!allowed.region || typeof allowed.region !== 'string') {
+        return bad(res, 'region is required for regional hubs');
+      }
     }
 
-    if (allowed.name && typeof allowed.name === 'string') {
+    if (allowed.type && allowed.type !== 'regional') {
+      allowed.region = null; // 🔒 prevent stale region data
+    }
+
+    if (allowed.name) {
+      if (typeof allowed.name !== 'string') return bad(res, 'Invalid hub name');
       allowed.name = allowed.name.trim();
       if (allowed.name.length < 2) return bad(res, 'Hub name too short');
     }
 
+    /* =====================
+       APPLY UPDATE
+    ===================== */
     Object.assign(hub, allowed);
     await hub.save();
 
-    return ok(res, hub, 'Hub updated');
+    /* =====================
+       RESPONSE (LIGHT)
+    ===================== */
+    return ok(
+      res,
+      {
+        _id: hub._id,
+        name: hub.name,
+        description: hub.description,
+        avatar: hub.avatar,
+        type: hub.type,
+        region: hub.region || null,
+        updatedAt: hub.updatedAt
+      },
+      'Hub updated'
+    );
   } catch (error) {
+    console.error('[updateHub]', error);
     return serverError(res, error);
   }
 };
@@ -1094,18 +1310,133 @@ exports.deleteHub = async (req, res) => {
     const { hubId } = req.params;
     if (!ensureObjectIdParam(res, hubId, 'hubId')) return;
 
-    const hub = await Hub.findOne({ _id: hubId, isRemoved: false });
+    /* =====================
+       FIND HUB (LIGHT)
+    ===================== */
+    const hub = await Hub.findOne({
+      _id: hubId,
+      isRemoved: false
+    }).select('_id moderators');
+
     if (!hub) return notFound(res, 'Hub not found');
 
-    if (!isHubModeratorOrAdmin(hub, user) && !hasRole(user, ['admin'])) {
+    /* =====================
+       PERMISSION
+    ===================== */
+    if (!isHubModeratorOrAdmin(hub, user)) {
       return forbidden(res, 'Only moderators can delete hubs');
     }
 
-    hub.isRemoved = true;
-    await hub.save();
+    /* =====================
+       SOFT DELETE
+    ===================== */
+    await Hub.updateOne(
+      { _id: hubId },
+      { $set: { isRemoved: true, updatedAt: new Date() } }
+    );
 
     return ok(res, null, 'Hub deleted');
   } catch (error) {
+    console.error('[deleteHub]', error);
+    return serverError(res, error);
+  }
+};
+
+ //Toggle Hub Reactions
+exports.toggleHubReaction = async (req, res) => {
+  try {
+    const user = ensureAuthUser(req, res);
+    if (!user) return;
+
+    const { hubId } = req.params;
+    const { emoji } = req.body;
+
+    if (!ensureObjectIdParam(res, hubId, 'hubId')) return;
+    if (!emoji || typeof emoji !== 'string') {
+      return bad(res, 'emoji is required');
+    }
+
+    /* =====================
+       LOAD HUB (LIGHT)
+    ===================== */
+    const hub = await Hub.findOne({
+      _id: hubId,
+      isRemoved: false
+    }).select('reactions members');
+
+    if (!hub) return notFound(res, 'Hub not found');
+
+    /* =====================
+       OPTIONAL: MEMBER ONLY
+    ===================== */
+    const isMember = (hub.members || []).some(
+      (m) => String(m) === String(user.id)
+    );
+    if (!isMember) {
+      return forbidden(res, 'Only hub members can react');
+    }
+
+    /* =====================
+       FIND REACTION
+    ===================== */
+    let reaction = (hub.reactions || []).find(
+      (r) => r.emoji === emoji
+    );
+
+    /* =====================
+       TOGGLE LOGIC
+    ===================== */
+    if (!reaction) {
+      hub.reactions.push({
+        emoji,
+        users: [user.id],
+        count: 1
+      });
+    } else {
+      const hasReacted = (reaction.users || []).some(
+        (u) => String(u) === String(user.id)
+      );
+
+      if (hasReacted) {
+        reaction.users = reaction.users.filter(
+          (u) => String(u) !== String(user.id)
+        );
+        reaction.count = Math.max(0, reaction.count - 1);
+
+        // remove empty reaction bucket
+        if (reaction.count === 0) {
+          hub.reactions = hub.reactions.filter(
+            (r) => r.emoji !== emoji
+          );
+        }
+      } else {
+        reaction.users.push(user.id);
+        reaction.count += 1;
+      }
+    }
+
+    await hub.save();
+
+    /* =====================
+       RESPONSE
+    ===================== */
+    return ok(
+      res,
+      {
+        emoji,
+        reacted: true,
+        reactions: hub.reactions.map((r) => ({
+          emoji: r.emoji,
+          count: r.count,
+          reacted: r.users.some(
+            (u) => String(u) === String(user.id)
+          )
+        }))
+      },
+      'Reaction updated'
+    );
+  } catch (error) {
+    console.error('[toggleHubReaction]', error);
     return serverError(res, error);
   }
 };
@@ -1824,7 +2155,6 @@ exports.getVoiceInstanceById = async (req, res) => {
       hub: voice.hub || null
     };
 
-    console.log("Response:", room, instance, role);
     /* ===========================
        6️⃣ FINAL RESPONSE
     =========================== */

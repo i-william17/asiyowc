@@ -1,35 +1,17 @@
 // backend/socket/voice.js
 const Voice = require("../models/Voice");
+const User = require("../models/User");
 
 /* =====================================================
    EPHEMERAL IN-MEMORY VOICE INSTANCE SESSIONS
 ===================================================== */
 
-/**
- * voiceInstanceSessions (GLOBAL, EPHEMERAL)
- *
- * Map<instanceId, {
- *   voiceId: string,                  // Parent voice document ID
- *   hostId: string,
- *   chatEnabled: boolean,
- *   lockedStage: boolean,
- *   mutedUsers: Set<string>,           // chat-muted users
- *   createdAt: number,
- *   participants: Map<string, {
- *     role: "speaker" | "listener",
- *     isMuted: boolean,
- *     isSpeaking: boolean,
- *     joinedAt: number,
- *     lastActiveAt: number,
- *     socketId: string
- *   }>,
- *   rateLimit: Map<string, number>     // chat rate limiting
- * }>
- */
 const voiceInstanceSessions = new Map();
 
 const CHAT_RATE_LIMIT_MS = 1200;
 const HEARTBEAT_TIMEOUT_MS = 30000;
+
+const disconnectTimers = new Map();
 
 /* =====================================================
    HELPERS
@@ -104,6 +86,19 @@ module.exports = function voiceSocket(io, socket) {
         return cb?.({ success: false, message: "Voice instance not found" });
       }
 
+      // 🔐 AUTHORITATIVE DB JOIN (IDEMPOTENT)
+      await Voice.updateOne(
+        {
+          "instances.instanceId": instanceId,
+          isRemoved: false,
+        },
+        {
+          $addToSet: {
+            "instances.$.participants": userId,
+          },
+        }
+      );
+
       // Find the specific instance
       const instance = voice.instances.find(
         (i) => String(i.instanceId) === String(instanceId)
@@ -120,42 +115,140 @@ module.exports = function voiceSocket(io, socket) {
         voice.host._id
       );
 
+      // 🔥 HYDRATE SESSION FROM DB (ONLY ON FIRST JOIN) - MANDATORY FIX
+      if (session.participants.size === 0) {
+        // Add speakers from DB
+        for (const speakerId of instance.speakers || []) {
+          const uid = String(speakerId);
+
+          session.participants.set(uid, {
+            role: "speaker",
+            isMuted: false,
+            isSpeaking: false,
+            joinedAt: now(),
+            lastActiveAt: now(),
+            socketId: null, // not connected yet
+          });
+        }
+
+        // Add listeners from DB
+        for (const participantId of instance.participants || []) {
+          const uid = String(participantId);
+
+          if (!session.participants.has(uid)) {
+            session.participants.set(uid, {
+              role: "listener",
+              isMuted: false,
+              isSpeaking: false,
+              joinedAt: now(),
+              lastActiveAt: now(),
+              socketId: null,
+            });
+          }
+        }
+      }
+
       // Determine role (host is speaker, others are listeners initially)
       const role =
-        String(voice.host._id) === userId ? "speaker" : "listener";
+        String(voice.host._id) === userId ||
+          instance.speakers.some(id => String(id) === userId)
+          ? "speaker"
+          : "listener";
 
       // Join the socket room for this instance
       socket.join(roomName(instanceId));
 
-      // Add participant to session
-      session.participants.set(userId, {
-        role,
-        isMuted: false,
-        isSpeaking: false,
-        joinedAt: now(),
-        lastActiveAt: now(),
-        socketId: socket.id,
+      // 🔹 THEN add the joining user (overwrite socketId)
+      let participant = session.participants.get(userId);
+
+      if (!participant) {
+        // ✅ Allow live join as LISTENER
+        participant = {
+          role: "listener",
+          isMuted: false,
+          isSpeaking: false,
+          joinedAt: now(),
+          lastActiveAt: now(),
+          socketId: socket.id,
+        };
+
+        session.participants.set(userId, participant);
+      } else {
+        // 🔥 ENFORCE ROLE FROM DB ON EVERY JOIN
+        participant.role = role;   // ← THIS LINE IS THE FIX
+        participant.socketId = socket.id;
+        participant.lastActiveAt = now();
+      }
+
+      // 🔥 RETURN FULL PARTICIPANT OBJECTS (NOT JUST IDS) - FIX #2
+      const speakers = Array.from(session.participants.entries())
+        .filter(([, p]) => p.role === "speaker")
+        .map(([uid]) => ({ _id: uid, role: "speaker" }));
+
+      const participants = Array.from(session.participants.entries()).map(
+        ([uid, p]) => ({
+          _id: uid,
+          role: p.role,
+          isMuted: p.isMuted,
+          isSpeaking: p.isSpeaking,
+        })
+      );
+
+      const listeners = participants.filter(p => p.role === "listener");
+
+      // Populate user data for UI
+      const speakerIds = speakers.map(s => s._id);
+      const participantIds = participants.map(p => p._id);
+
+      const allUserIds = [...new Set([...speakerIds, ...participantIds])];
+      const populatedUsers = await User.find({
+        _id: { $in: allUserIds }
+      })
+        .select("profile.fullName profile.avatar")
+        .lean();
+
+      // Create user map for quick lookup
+      const userMap = {};
+      populatedUsers.forEach(user => {
+        userMap[String(user._id)] = user;
       });
 
-      // Prepare instance data
+      // Enrich participants with user data
+      const enrichedSpeakers = speakers.map(speaker => ({
+        ...speaker,
+        ...userMap[speaker._id],
+      }));
+
+      const enrichedParticipants = participants.map(participant => ({
+        ...participant,
+        ...userMap[participant._id],
+      }));
+
       const instanceData = {
-        id: instanceId,
-        voiceId: voice._id,
-        speakers: Array.from(session.participants.entries())
-          .filter(([, p]) => p.role === "speaker")
-          .map(([uid]) => uid),
-        participants: Array.from(session.participants.entries()).map(
-          ([uid, p]) => ({
-            _id: uid,
-            role: p.role,
-            isMuted: p.isMuted,
-            isSpeaking: p.isSpeaking,
-          })
-        ),
+        _id: instance._id,
+        instanceId: instance.instanceId,
+        status: instance.status,
+        startsAt: instance.startsAt,
+        endsAt: instance.endsAt,
+
+        speakers: enrichedSpeakers,
+        participants: enrichedParticipants,
+        listeners: enrichedParticipants.filter(p => p.role === "listener"),
+
+        chatEnabled: instance.chatEnabled,
+        recording: instance.recording,
       };
 
       // Notify others in the instance
-      emit(io, instanceId, "voice:user:joined", { userId, role });
+      emit(io, instanceId, "voice:user:joined", {
+        participant: {
+          _id: userId,
+          role,
+          isMuted: false,
+          isSpeaking: false,
+          profile: userMap[userId]?.profile,
+        },
+      });
 
       // Send response to joining user
       cb?.({
@@ -167,42 +260,77 @@ module.exports = function voiceSocket(io, socket) {
         lockedStage: session.lockedStage,
       });
 
-      // 🔥 FORCE HYDRATION EVENT (FIX FOR REDUX)
-      emit(io, instanceId, "voice:room:hydrated", {
-        room: voice,
-        instance: instanceData,
-      });
-
     } catch (e) {
       console.error("Voice join error:", e);
       cb?.({ success: false, message: e.message });
     }
   });
 
-  socket.on("voice:leave", ({ instanceId }) => {
+  socket.on("voice:leave", async ({ instanceId }) => {
     const session = getSession(instanceId);
     if (!session) return;
 
+    // 🔐 REMOVE FROM DB
+    await Voice.updateOne(
+      {
+        "instances.instanceId": instanceId,
+        isRemoved: false,
+      },
+      {
+        $pull: {
+          "instances.$.participants": userId,
+        },
+      }
+    );
+
     socket.leave(roomName(instanceId));
+
     session.participants.delete(userId);
     session.rateLimit.delete(userId);
     session.mutedUsers.delete(userId);
 
-    emit(io, instanceId, "voice:user:left", { userId });
+    emit(io, instanceId, "voice:user:left", {
+      userId,
+    });
+
     cleanupIfEmpty(instanceId);
   });
 
   socket.on("disconnect", () => {
-    voiceInstanceSessions.forEach((session, instanceId) => {
-      if (session.participants.has(userId)) {
-        session.participants.delete(userId);
-        session.rateLimit.delete(userId);
-        session.mutedUsers.delete(userId);
+    for (const [instanceId, session] of voiceInstanceSessions.entries()) {
+      if (!session.participants.has(userId)) continue;
 
-        emit(io, instanceId, "voice:user:left", { userId });
-        cleanupIfEmpty(instanceId);
+      const key = `${instanceId}:${userId}`;
+      if (disconnectTimers.has(key)) {
+        clearTimeout(disconnectTimers.get(key));
+        disconnectTimers.delete(key);
       }
-    });
+
+
+      disconnectTimers.set(
+        key,
+        setTimeout(async () => {
+          // 🔐 REMOVE FROM DB
+          await Voice.updateOne(
+            {
+              "instances.instanceId": instanceId,
+              isRemoved: false,
+            },
+            {
+              $pull: {
+                "instances.$.participants": userId,
+              },
+            }
+          );
+
+          session.participants.delete(userId);
+          emit(io, instanceId, "voice:user:left", { userId });
+
+          cleanupIfEmpty(instanceId);
+          disconnectTimers.delete(key);
+        }, HEARTBEAT_TIMEOUT_MS)
+      );
+    }
   });
 
   socket.on("voice:reconnect", async ({ instanceId }, cb) => {
@@ -229,21 +357,53 @@ module.exports = function voiceSocket(io, socket) {
       participant.socketId = socket.id;
       participant.lastActiveAt = now();
 
-      // Prepare instance data
+      // 🔥 RETURN FULL PARTICIPANT OBJECTS (NOT JUST IDS) - FIX #2
+      const speakers = Array.from(session.participants.entries())
+        .filter(([, p]) => p.role === "speaker")
+        .map(([uid]) => ({ _id: uid, role: "speaker" }));
+
+      const participants = Array.from(session.participants.entries()).map(
+        ([uid, p]) => ({
+          _id: uid,
+          role: p.role,
+          isMuted: p.isMuted,
+          isSpeaking: p.isSpeaking,
+        })
+      );
+
+      // Populate user data for UI
+      const speakerIds = speakers.map(s => s._id);
+      const participantIds = participants.map(p => p._id);
+
+      const allUserIds = [...new Set([...speakerIds, ...participantIds])];
+      const populatedUsers = await User.find({
+        _id: { $in: allUserIds }
+      })
+        .select("profile.fullName profile.avatar")
+        .lean();
+
+      // Create user map for quick lookup
+      const userMap = {};
+      populatedUsers.forEach(user => {
+        userMap[String(user._id)] = user;
+      });
+
+      // Enrich participants with user data
+      const enrichedSpeakers = speakers.map(speaker => ({
+        ...speaker,
+        ...userMap[speaker._id],
+      }));
+
+      const enrichedParticipants = participants.map(participant => ({
+        ...participant,
+        ...userMap[participant._id],
+      }));
+
       const instanceData = {
         id: instanceId,
         voiceId: voice._id,
-        speakers: Array.from(session.participants.entries())
-          .filter(([, p]) => p.role === "speaker")
-          .map(([uid]) => uid),
-        participants: Array.from(session.participants.entries()).map(
-          ([uid, p]) => ({
-            _id: uid,
-            role: p.role,
-            isMuted: p.isMuted,
-            isSpeaking: p.isSpeaking,
-          })
-        ),
+        speakers: enrichedSpeakers,
+        participants: enrichedParticipants,
       };
 
       // Send response to reconnecting user
@@ -254,12 +414,6 @@ module.exports = function voiceSocket(io, socket) {
         role: participant.role,
         chatEnabled: session.chatEnabled,
         lockedStage: session.lockedStage,
-      });
-
-      // 🔥 FORCE HYDRATION EVENT (FIX FOR REDUX - RECONNECT)
-      emit(io, instanceId, "voice:room:hydrated", {
-        room: voice,
-        instance: instanceData,
       });
 
     } catch (e) {
@@ -460,7 +614,7 @@ module.exports = function voiceSocket(io, socket) {
     session.participants.delete(targetId);
 
     emit(io, instanceId, "voice:user:kicked", { userId: targetId });
-    
+
     // Disconnect the kicked user's socket
     if (targetSocketId) {
       io.to(targetSocketId)?.emit("voice:kicked");

@@ -8,6 +8,7 @@ import communityReducer from './slices/communitySlice';
 import postReducer from './slices/postSlice';
 import uiReducer from './slices/uiSlice';
 import presenceReducer from './slices/presenceSlice';
+import legacyReducer from './slices/legacySlice';
 
 export const store = configureStore({
   reducer: {
@@ -20,6 +21,7 @@ export const store = configureStore({
     posts: postReducer,
     ui: uiReducer,
     presence: presenceReducer,
+    legacy: legacyReducer
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

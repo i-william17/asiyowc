@@ -1,15 +1,26 @@
 /* =====================================================
    useVoiceSocket.js
    -----------------------------------------------------
-   Voice Room Socket Hook
+   Voice Room Socket Hookconst state = store.getState().community;
+
+const alreadyPresent =
+  state.instance?.participants?.some(
+    p => String(p._id) === String(participant?._id)
+  );
+
+if (!alreadyPresent && participant._id !== localUserId) {
+  playJoin();
+}
+
    - Handles signaling only (NO WebRTC)
    - Redux is the source of truth
    - Instance-based lifecycle
 ===================================================== */
 
 import { useEffect, useRef, useCallback } from "react";
-import { useDispatch } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { connectSocket } from "../services/socket";
+import { loadVoiceSounds, playJoin, playLeave, playReconnect } from "../utils/voiceSounds";
 
 /* =====================================================
    REDUX ACTIONS
@@ -60,6 +71,7 @@ export function useVoiceSocket({
     instanceId,
     enabled = true,
     token,
+    localUserId
 }) {
     /* =====================================================
        INTERNAL REFS
@@ -75,6 +87,20 @@ export function useVoiceSocket({
      * This is CRITICAL for React Strict Mode
      */
     const joinedRef = useRef(false);
+    const leftRef = useRef(false);
+    const hasReconnectedRef = useRef(false);
+    const hasEverConnectedRef = useRef(false);
+    const soundsLoadedRef = useRef(false);
+
+    useEffect(() => {
+        if (!enabled) return;
+        if (soundsLoadedRef.current) return;
+
+        loadVoiceSounds();
+        soundsLoadedRef.current = true;
+    }, [enabled]);
+
+    const instance = useSelector((s) => s.community.instance);
 
     /* =====================================================
        DEBUG LOG
@@ -86,6 +112,16 @@ export function useVoiceSocket({
         enabled,
         token: token ? "present" : "missing",
     });
+
+    // const state = useSelector(s => s.community);
+
+    // const MAX_SOUND_PARTICIPANTS = 30;
+
+    // if (
+    //     state.instance?.participants?.length < MAX_SOUND_PARTICIPANTS
+    // ) {
+    //     playJoin();
+    // }
 
     /* =====================================================
        CONNECT + JOIN (INSTANCE SCOPED)
@@ -155,6 +191,13 @@ export function useVoiceSocket({
             dispatch(voiceHeartbeat());
         }, 15000);
 
+        socket.on("disconnect", () => {
+            if (heartbeatRef.current) {
+                clearInterval(heartbeatRef.current);
+                heartbeatRef.current = null;
+            }
+        });
+
         /* =====================================================
            CLEANUP ON UNMOUNT
         ===================================================== */
@@ -188,6 +231,11 @@ export function useVoiceSocket({
         const handleReconnect = () => {
             if (!joinedRef.current) return;
 
+            if (!hasEverConnectedRef.current) {
+                hasEverConnectedRef.current = true;
+                return; // 🚫 initial connect → no sound
+            }
+
             console.log("[voice] reconnecting instance:", instanceId);
 
             socket.emit(
@@ -209,7 +257,13 @@ export function useVoiceSocket({
                             reconnected: true,
                         })
                     );
+
+                    if (!hasReconnectedRef.current) {
+                        playReconnect();
+                        hasReconnectedRef.current = true;
+                    }
                 }
+
             );
         };
 
@@ -233,13 +287,37 @@ export function useVoiceSocket({
         /* =====================================================
            USER PRESENCE
         ===================================================== */
+        socket.on("voice:user:joined", ({ userId, role, participant }) => {
+            if (!participant?._id) return;
 
-        socket.on("voice:user:joined", ({ userId, role }) => {
-            dispatch(voiceUserJoined({ userId, role }));
+            dispatch(voiceUserJoined(participant));
+
+            const alreadyPresent =
+                instance?.participants?.some(
+                    (p) => String(p._id) === String(participant._id)
+                );
+
+            // 🔊 play sound ONLY for real new joins, not reconnects
+            if (!alreadyPresent && participant._id !== localUserId) {
+                playJoin();
+            }
+        });
+
+        socket.on("voice:room:hydrated", ({ room, instance }) => {
+            dispatch(voiceJoined({
+                room,
+                instance,
+                reconnected: true,
+            }));
         });
 
         socket.on("voice:user:left", ({ userId }) => {
             dispatch(voiceUserLeft({ userId }));
+
+            // 🔊 DO NOT play sound for self
+            if (userId !== localUserId) {
+                playLeave();
+            }
         });
 
         socket.on("voice:room:ended", () => {
@@ -396,7 +474,13 @@ export function useVoiceSocket({
         unlockStage: () => emit("voice:stage:unlock"),
 
         /* ===== SESSION ===== */
-        leaveRoom: () => emit("voice:leave"),
+        leaveRoom: () => {
+            if (leftRef.current) return;
+            leftRef.current = true;
+            hasReconnectedRef.current = false;
+
+            emit("voice:leave");
+        },
 
         /* ===== RECORDING ===== */
         startRecording: () => emit("voice:recording:start"),
