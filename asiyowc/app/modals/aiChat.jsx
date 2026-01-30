@@ -14,12 +14,36 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSelector } from "react-redux";
 import { server } from "../../server";
+import * as Clipboard from "expo-clipboard";
+
 import tw from "../../utils/tw";
+import { useAiStream } from "../../hooks/useAiStream";
 
 export default function AiChatModal() {
   const router = useRouter();
   const scrollRef = useRef(null);
   const { token } = useSelector((state) => state.auth);
+  const renderBoldText = (text) => {
+    const parts = text.split("**");
+
+    return parts.map((part, index) => {
+      // Odd indexes = bold text
+      if (index % 2 === 1) {
+        return (
+          <Text key={index} style={{ fontFamily: "Poppins-SemiBold" }}>
+            {part}
+          </Text>
+        );
+      }
+
+      // Even indexes = normal text
+      return (
+        <Text key={index} style={{ fontFamily: "Poppins-Regular" }}>
+          {part}
+        </Text>
+      );
+    });
+  };
 
   const [messages, setMessages] = useState([
     {
@@ -29,6 +53,54 @@ export default function AiChatModal() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const { clearAiMemory } = useAiStream({
+    token,
+    onChunk: (chunk) => {
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1].content += chunk;
+        return updated;
+      });
+    },
+    onDone: () => {
+      setLoading(false);
+      requestAnimationFrame(() =>
+        scrollRef.current?.scrollToEnd({ animated: true })
+      );
+    },
+    onError: () => {
+      setLoading(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Something went wrong. Please take a breath and try again.",
+        },
+      ]);
+    },
+  });
+
+  const handleClose = () => {
+    clearAiMemory();        // ✅ clears backend AI context
+    setMessages([
+      {
+        role: "assistant",
+        content: "Hi! I'm Asiyo AI. How can I help you today?",
+      },
+    ]);
+    setInput("");
+    setLoading(false);
+    router.push("/");
+  };
+
+  const copyMessage = async (text) => {
+    try {
+      await Clipboard.setStringAsync(text);
+    } catch (err) {
+      console.warn("Copy failed", err);
+    }
+  };
 
   /* ================= TYPING ANIMATION ================= */
   const dot1 = useRef(new Animated.Value(0)).current;
@@ -77,40 +149,34 @@ export default function AiChatModal() {
     if (!input.trim() || loading) return;
 
     const userMessage = input.trim();
+
+    const history = messages
+      .filter((m) => m.role !== "assistant" || m.content.trim() !== "")
+      .slice(-6); // last 6 messages only (keeps it light)
+
     setInput("");
     setLoading(true);
 
-    setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: userMessage },
+      { role: "assistant", content: "" },
+    ]);
 
     try {
-      const res = await fetch(`${server}/ai/chat`, {
+      await fetch(`${server}/ai/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({
+          message: userMessage,
+          history, // ✅ ADD THIS
+        }),
       });
-
-      const data = await res.json();
-
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: data.reply },
-      ]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "⚠️ Something went wrong. Please try again.",
-        },
-      ]);
-    } finally {
+    } catch (err) {
       setLoading(false);
-      requestAnimationFrame(() =>
-        scrollRef.current?.scrollToEnd({ animated: true })
-      );
     }
   };
 
@@ -137,7 +203,7 @@ export default function AiChatModal() {
         }}
       >
         <View style={tw`flex-row items-center justify-between`}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={12}>
+          <TouchableOpacity onPress={handleClose} hitSlop={12}>
             <Ionicons name="close" size={26} color="#FFFFFF" />
           </TouchableOpacity>
 
@@ -176,22 +242,48 @@ export default function AiChatModal() {
             >
               <View
                 style={[
-                  tw`px-4 py-3 rounded-2xl`,
+                  tw`px-4 py-3 rounded-2xl relative`,
                   isUser
                     ? tw`bg-purple-600`
                     : tw`bg-white border border-gray-200`,
                 ]}
               >
+                {/* Copy icon – AI messages only */}
+                {!isUser && m.content?.trim() && (
+                  <TouchableOpacity
+                    onPress={() => copyMessage(m.content)}
+                    hitSlop={10}
+                    style={tw`absolute top-2 right-2`}
+                  >
+                    <Ionicons name="copy-outline" size={16} color="#6A1B9A" />
+                  </TouchableOpacity>
+                )}
+
                 <Text
                   style={{
-                    fontFamily: "Poppins-Regular",
                     fontSize: 14,
                     lineHeight: 20,
                     color: isUser ? "#FFFFFF" : "#111827",
+                    paddingRight: !isUser && m.content?.trim() ? 20 : 0,
                   }}
                 >
-                  {m.content}
+                  {renderBoldText(m.content)}
                 </Text>
+
+                {/* Optional hint text */}
+                {!isUser && m.content?.trim() && (
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Italic",
+                      fontSize: 10,
+                      color: "#9CA3AF", // softer gray
+                      marginTop: 10,
+                      letterSpacing: 0.3,
+                    }}
+                  >
+                    Tap icon to copy text
+                  </Text>
+                )}
               </View>
             </View>
           );
@@ -251,6 +343,23 @@ export default function AiChatModal() {
           <Ionicons name="send" size={18} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
+
+      {/* ================= PRIVACY NOTICE ================= */}
+      <Text
+        style={{
+          fontFamily: "Poppins-Regular",
+          fontSize: 11,
+          color: "#9CA3AF", // soft neutral gray
+          textAlign: "center",
+          marginTop: 10,
+          paddingHorizontal: 24,
+          lineHeight: 16,
+          letterSpacing: 0.2,
+        }}
+      >
+        Closing this chat will permanently clear the AI conversation history.
+      </Text>
+
     </KeyboardAvoidingView>
   );
 }

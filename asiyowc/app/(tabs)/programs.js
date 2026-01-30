@@ -62,9 +62,9 @@ const ProgramsScreen = () => {
       const myRes = await programService.getMyPrograms();
       const completedRes = await programService.getCompletedPrograms();
 
-      console.log("📌 PUBLIC:", publicRes);
-      console.log("📌 MY PROGRAMS:", myRes);
-      console.log("📌 COMPLETED:", completedRes);
+      // console.log("📌 PUBLIC:", publicRes);
+      // console.log("📌 MY PROGRAMS:", myRes);
+      // console.log("📌 COMPLETED:", completedRes);
 
       setAllPrograms(extractPrograms(publicRes));
       setMyPrograms(extractPrograms(myRes));
@@ -150,7 +150,7 @@ const ProgramsScreen = () => {
             HEADER
         -------------------------------------------------------------- */}
         <LinearGradient
-          colors={["#6A1B9A", "#8E24AA"]}
+          colors={["#6A1B9A","#6A1B9A"]}
           style={tw`px-6 pt-16 pb-10 rounded-b-3xl shadow-lg`}
         >
           <View style={tw`flex-row justify-between items-center`}>
@@ -178,7 +178,7 @@ const ProgramsScreen = () => {
             </View>
 
             {/* 🔔 Notifications */}
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={[
                 tw`p-3 rounded-2xl`,
                 { backgroundColor: "rgba(255,255,255,0.18)" },
@@ -190,41 +190,45 @@ const ProgramsScreen = () => {
                 size={26}
                 color="#FFFFFF"
               />
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
         </LinearGradient>
 
         {/* --------------------------------------------------------------
             TABS
         -------------------------------------------------------------- */}
-        <View style={tw`px-6 -mt-4 mb-4`}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {tabs.map((tab) => (
-              <TouchableOpacity
-                key={tab.id}
-                onPress={() => setActiveTab(tab.id)}
-                style={[
-                  tw`px-5 py-3 mr-3 rounded-2xl`,
-                  {
-                    backgroundColor:
-                      activeTab === tab.id ? "#6A1B9A" : "#FFFFFF",
-                    borderWidth: activeTab === tab.id ? 0 : 1,
-                    borderColor: "#E5E7EB",
-                  },
-                ]}
-              >
-                <Text
-                  style={{
-                    fontFamily: "Poppins-Medium",
-                    fontSize: 14,
-                    color: activeTab === tab.id ? "#FFFFFF" : "#374151",
-                  }}
+        <View style={tw`px-4 -mt-4 mb-4`}>
+          <View style={tw`bg-white rounded-2xl p-2 shadow-sm`}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={tw`flex-row`}
+            >
+              {tabs.map((tab) => (
+                <TouchableOpacity
+                  key={tab.id}
+                  onPress={() => setActiveTab(tab.id)}
+                  style={[
+                    tw`px-5 py-3 mr-2 rounded-xl flex-row items-center justify-center`,
+                    {
+                      backgroundColor:
+                        activeTab === tab.id ? "#6A1B9A" : "transparent",
+                    },
+                  ]}
                 >
-                  {tab.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Medium",
+                      fontSize: 14,
+                      color: activeTab === tab.id ? "#FFFFFF" : "#6B7280",
+                    }}
+                  >
+                    {tab.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
         </View>
 
         {/* --------------------------------------------------------------

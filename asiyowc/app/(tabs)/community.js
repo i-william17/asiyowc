@@ -141,7 +141,7 @@ export default function CommunityScreen() {
             onPress={() => setActiveTab(t.id)}
             style={[
               tw`flex-1 py-3 rounded-xl flex-row justify-center items-center`,
-              activeTab === t.id ? tw`bg-purple-600` : tw`bg-transparent`,
+              activeTab === t.id ? tw`bg-[#6A1B9A]` : tw`bg-transparent`,
             ]}
           >
             <Ionicons
@@ -357,7 +357,7 @@ export default function CommunityScreen() {
         showsVerticalScrollIndicator={false}
       >
         <LinearGradient
-          colors={["#6A1B9A", "#8E24AA"]}
+          colors={["#6A1B9A","#6A1B9A"]}
           style={tw`px-6 pt-16 pb-10 rounded-b-3xl shadow-sm`}
         >
           <Text

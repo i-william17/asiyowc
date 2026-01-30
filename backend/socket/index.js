@@ -88,6 +88,24 @@ module.exports = function initSocket(io) {
     });
 
     /* =====================================================
+   AI MEMORY CONTROL
+   - Clears conversation memory when frontend closes chat
+===================================================== */
+    socket.on("ai:clear", () => {
+      const userId = socket.user?.id;
+      if (!userId) return;
+
+      const room = `user:${String(userId)}`;
+
+      // This function is exported from your AI controller file
+      const { clearAiMemory } = require("../controllers/aiController");
+
+      clearAiMemory(userId);
+
+      console.log("🧹 AI memory cleared for", room);
+    });
+
+    /* =====================================================
        REGISTER DOMAIN MODULES
        (safe – they rely on rooms above)
     ===================================================== */

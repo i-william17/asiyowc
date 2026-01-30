@@ -9,15 +9,15 @@ const FeedShimmer = () => {
   const isWeb = Platform.OS === "web";
 
   // Medium sizing for web
-  const lottieSize = isWeb ? 260 : 220;
-  const cardHeight = isWeb ? 150 : 130;
-  const containerWidth = isWeb ? Math.min(width, 560) : "100%";
+  const lottieSize = isWeb ? 180 : 220;
+  const cardHeight = isWeb ? 110 : 130;
+  const containerWidth = isWeb ? Math.min(width, 480) : "100%";
 
   return (
     <View
       style={[
         tw`flex-1 items-center justify-center`,
-        { paddingTop: isWeb ? 60 : 40 }
+        { paddingTop: isWeb ? 30 : 40 }
       ]}
     >
       {/* Loader */}

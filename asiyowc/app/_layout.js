@@ -12,6 +12,8 @@ import { AnimationProvider } from "../context/AnimationContext";
 import { AuthProvider } from "../context/AuthContext";
 
 import * as SplashScreen from "expo-splash-screen";
+import * as Notifications from "expo-notifications";
+
 import { useFonts } from "../hooks/useFonts";
 
 import {
@@ -22,7 +24,7 @@ import {
 import useCommunitySocket from "../hooks/useCommunitySocket";
 import { Audio } from "expo-av";
 
-SplashScreen.preventAutoHideAsync().catch(() => {});
+SplashScreen.preventAutoHideAsync().catch(() => { });
 
 /* ============================================================
    APP SHELL (SAFE TO USE REDUX HERE)
@@ -36,6 +38,7 @@ function AppShell() {
   const { fontsLoaded } = useFonts();
 
   useCommunitySocket();
+
 
   /* ================= GLOBAL AUDIO MODE ================= */
   useEffect(() => {
@@ -64,12 +67,27 @@ function AppShell() {
   useEffect(() => {
     (async () => {
       try {
-        await dispatch(restoreToken());
+        const result = await dispatch(restoreToken()).unwrap();
+
+        const { token } = result;
+
+        // 🔐 ENFORCED COLD-START ROUTING
+        if (!token) {
+          router.replace("/onboarding");
+          return;
+        }
+
+        // Token exists → app
+        router.replace("/(tabs)");
+      } catch (e) {
+        // Absolute fallback
+        router.replace("/onboarding");
       } finally {
-        SplashScreen.hideAsync().catch(() => {});
+        SplashScreen.hideAsync().catch(() => { });
       }
     })();
   }, []);
+
 
   /* ================= FETCH AUTHENTICATED USER ================= */
   useEffect(() => {

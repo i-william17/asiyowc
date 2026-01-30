@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "asiyowc",
+    "name": "Asiyo Women Connect",
     "slug": "asiyowc",
     "scheme": "asiyowc",
     "version": "1.0.0",
@@ -27,6 +27,7 @@
       "permissions": []
     },
     "web": {
+      "name": "Asiyo Women Connect",
       "favicon": "./assets/images/asiyo-nobg.png"
     },
     "plugins": [

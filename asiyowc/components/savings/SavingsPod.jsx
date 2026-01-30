@@ -1,23 +1,124 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, Image, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import tw from "../../utils/tw";
 
 /**
  * SavingsPod Component
- * 
+ *
  * Props:
- * - pod: {
- *     id, name, description, goalAmount, savedAmount, myContribution,
- *     targetDate, membersCount, isMember, image
- *   }
+ * - pod: backend pod object (raw)
+ * - style: animated style
+ * - onPress: view pod
+ * - onJoin: join pod
+ * - onContribute: contribute to pod
+ * - currentUserId: logged in user id (optional, for contribution calc)
  */
 
-const SavingsPod = ({ pod, style, onPress }) => {
-  const progress = Math.min(
-    Math.round((pod.savedAmount / pod.goalAmount) * 100),
-    100
-  );
+const SavingsPod = ({
+  pod,
+  style,
+  onPress,
+  onJoin,
+  onContribute,
+  currentUserId,
+}) => {
+  /* ============================================================
+     NORMALIZE BACKEND DATA (SAFE)
+  ============================================================ */
+
+  const {
+    id,
+    image,
+    membersCount,
+    savedAmount,
+    myContribution,
+    goalAmount,
+    targetDate,
+    isMember,
+  } = useMemo(() => {
+    const id = pod._id || pod.id;
+
+    const image = "https://res.cloudinary.com/ducckh8ip/image/upload/v1766603798/asiyo-app/a8vl3ff1muzlnnunkjy3.jpg";
+
+    const membersCount =
+      pod.membersCount ??
+      pod.members?.length ??
+      0;
+
+    const savedAmount =
+      pod.savedAmount ??
+      pod.totalSaved ??
+      pod.balance ??
+      0;
+
+    const myContribution =
+      pod.myContribution ??
+      pod.contributions
+        ?.filter(
+          (c) =>
+            c.user === currentUserId ||
+            c.member === currentUserId
+        )
+        ?.reduce((s, c) => s + c.amount, 0) ??
+      0;
+
+    const goalAmount =
+      pod.goalAmount ??
+      pod.targetAmount ??
+      0;
+
+    const targetDate =
+      pod.targetDate ||
+      pod.endsAt ||
+      pod.deadline;
+
+    const isMember =
+      typeof pod.isMember === "boolean"
+        ? pod.isMember
+        : pod.members?.some(
+          (m) =>
+            m === currentUserId ||
+            m?._id === currentUserId
+        );
+
+    return {
+      id,
+      image,
+      membersCount,
+      savedAmount,
+      myContribution,
+      goalAmount,
+      targetDate,
+      isMember,
+    };
+  }, [pod, currentUserId]);
+
+  /* ============================================================
+     DERIVED UI VALUES
+  ============================================================ */
+
+  const progress =
+    goalAmount > 0
+      ? Math.min(
+        Math.round((savedAmount / goalAmount) * 100),
+        100
+      )
+      : 0;
+
+  const daysLeft = targetDate
+    ? Math.max(
+      0,
+      Math.ceil(
+        (new Date(targetDate) - new Date()) /
+        (1000 * 60 * 60 * 24)
+      )
+    )
+    : "--";
+
+  /* ============================================================
+     UI
+  ============================================================ */
 
   return (
     <TouchableOpacity
@@ -35,23 +136,21 @@ const SavingsPod = ({ pod, style, onPress }) => {
         style,
       ]}
     >
-      {/* =============================== */}
-      {/* HEADER */}
-      {/* =============================== */}
+      {/* ================= HEADER ================= */}
       <View style={tw`flex-row items-start`}>
         <Image
-          source={{ uri: pod.image }}
+          source={{ uri: image }}
           style={tw`w-20 h-20 rounded-2xl`}
         />
 
         <View style={tw`flex-1 ml-4`}>
           <Text
+            numberOfLines={2}
             style={{
               fontFamily: "Poppins-SemiBold",
               fontSize: 18,
               color: "#111827",
             }}
-            numberOfLines={2}
           >
             {pod.name}
           </Text>
@@ -63,19 +162,18 @@ const SavingsPod = ({ pod, style, onPress }) => {
                 fontFamily: "Poppins-Medium",
                 color: "#6A1B9A",
                 marginLeft: 6,
+                fontSize: 13,
               }}
             >
-              {pod.membersCount} members
+              {membersCount} members
             </Text>
           </View>
         </View>
       </View>
 
-      {/* =============================== */}
-      {/* PROGRESS BAR */}
-      {/* =============================== */}
+      {/* ================= PROGRESS ================= */}
       <View style={tw`mt-4`}>
-        <View style={tw`h-3 bg-gray-200 rounded-full`}>
+        <View style={tw`h-3 bg-gray-200 rounded-full overflow-hidden`}>
           <View
             style={{
               width: `${progress}%`,
@@ -94,119 +192,136 @@ const SavingsPod = ({ pod, style, onPress }) => {
             fontSize: 12,
           }}
         >
-          {progress}% of KES {pod.goalAmount.toLocaleString()}
+          {progress}% of KES {goalAmount.toLocaleString()}
         </Text>
       </View>
 
-      {/* =============================== */}
-      {/* ANALYTICS MINI DASHBOARD */}
-      {/* =============================== */}
+      {/* ================= METRICS ================= */}
       <View style={tw`flex-row justify-between mt-5`}>
-        {/* Total Saved */}
-        <View style={tw`flex-1 items-center`}>
-          <Text
-            style={{
-              fontFamily: "Poppins-SemiBold",
-              fontSize: 16,
-              color: "#111827",
-            }}
-          >
-            KES {pod.savedAmount.toLocaleString()}
-          </Text>
-          <Text style={tw`text-gray-500 text-xs mt-1`}>Total Saved</Text>
-        </View>
-
-        {/* My Contribution */}
-        <View style={tw`flex-1 items-center`}>
-          <Text
-            style={{
-              fontFamily: "Poppins-SemiBold",
-              fontSize: 16,
-              color: "#6A1B9A",
-            }}
-          >
-            KES {pod.myContribution?.toLocaleString() || 0}
-          </Text>
-          <Text style={tw`text-gray-500 text-xs mt-1`}>My Contribution</Text>
-        </View>
-
-        {/* Days Left */}
-        <View style={tw`flex-1 items-center`}>
-          <Text
-            style={{
-              fontFamily: "Poppins-SemiBold",
-              fontSize: 16,
-              color: "#111827",
-            }}
-          >
-            {Math.max(
-              0,
-              Math.ceil(
-                (new Date(pod.targetDate) - new Date()) /
-                  (1000 * 60 * 60 * 24)
-              )
-            )}
-          </Text>
-          <Text style={tw`text-gray-500 text-xs mt-1`}>Days Left</Text>
-        </View>
+        <Metric
+          label="Total Saved"
+          value={`KES ${savedAmount.toLocaleString()}`}
+          strong
+        />
+        <Metric
+          label="My Contribution"
+          value={`KES ${myContribution.toLocaleString()}`}
+          color="#6A1B9A"
+          strong
+        />
+        <Metric label="Days Left" value={daysLeft} />
       </View>
 
-      {/* =============================== */}
-      {/* ACTION BUTTONS */}
-      {/* =============================== */}
+      {/* ================= ACTIONS ================= */}
       <View style={tw`flex-row justify-between mt-6`}>
-        {/* VIEW POD */}
+        {/* VIEW */}
         <TouchableOpacity
           style={tw`flex-1 bg-purple-600 rounded-xl py-3 mr-2`}
-          onPress={() => onPress?.()}
+          onPress={onPress}
         >
           <Text
             style={{
               fontFamily: "Poppins-SemiBold",
               textAlign: "center",
-              color: "white",
+              color: "#FFFFFF",
+              fontSize: 14,
             }}
           >
             View Pod
           </Text>
         </TouchableOpacity>
 
-        {/* CONTRIBUTE */}
-        {pod.isMember && (
-          <TouchableOpacity
-            style={tw`flex-1 bg-green-600 rounded-xl py-3 ml-2`}
-          >
-            <Text
-              style={{
-                fontFamily: "Poppins-SemiBold",
-                textAlign: "center",
-                color: "white",
-              }}
-            >
-              Contribute
-            </Text>
-          </TouchableOpacity>
-        )}
+        {/* JOIN */}
+        {/* ================= ACTIONS ================= */}
+        <View style={tw`flex-row justify-between mt-6`}>
+          {/* MEMBER ACTIONS */}
+          {isMember && (
+            <>
+              <TouchableOpacity
+                style={tw`flex-1 bg-purple-600 rounded-xl py-3 mr-2`}
+                onPress={onPress}
+              >
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    textAlign: "center",
+                    color: "#FFFFFF",
+                    fontSize: 14,
+                  }}
+                >
+                  View Pod
+                </Text>
+              </TouchableOpacity>
 
-        {/* JOIN POD */}
-        {!pod.isMember && (
-          <TouchableOpacity
-            style={tw`flex-1 bg-gray-800 rounded-xl py-3 ml-2`}
-          >
-            <Text
-              style={{
-                fontFamily: "Poppins-SemiBold",
-                textAlign: "center",
-                color: "white",
-              }}
+              <TouchableOpacity
+                style={tw`flex-1 bg-green-600 rounded-xl py-3 ml-2`}
+                onPress={() => onContribute?.(id)}
+              >
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    textAlign: "center",
+                    color: "#FFFFFF",
+                    fontSize: 14,
+                  }}
+                >
+                  Contribute
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {/* NON-MEMBER ACTION */}
+          {/* {!isMember && (
+            <TouchableOpacity
+              style={tw`flex-1 bg-gray-800 rounded-xl py-3`}
+              onPress={() => onJoin?.(id)}
             >
-              Join Pod
-            </Text>
-          </TouchableOpacity>
-        )}
+              <Text
+                style={{
+                  fontFamily: "Poppins-SemiBold",
+                  textAlign: "center",
+                  color: "#FFFFFF",
+                  fontSize: 14,
+                }}
+              >
+                Join Pod
+              </Text>
+            </TouchableOpacity>
+          )} */}
+        </View>
+
       </View>
     </TouchableOpacity>
   );
 };
 
-export default SavingsPod;
+/* ============================================================
+   SMALL METRIC COMPONENT
+============================================================ */
+
+const Metric = ({ label, value, strong, color }) => (
+  <View style={tw`flex-1 items-center`}>
+    <Text
+      style={{
+        fontFamily: strong ? "Poppins-SemiBold" : "Poppins-Regular",
+        fontSize: 16,
+        color: color || "#111827",
+      }}
+    >
+      {value}
+    </Text>
+    <Text
+      style={{
+        fontFamily: "Poppins-Regular",
+        color: "#6B7280",
+        fontSize: 12,
+        marginTop: 4,
+      }}
+    >
+      {label}
+    </Text>
+  </View>
+);
+
+export default React.memo(SavingsPod);

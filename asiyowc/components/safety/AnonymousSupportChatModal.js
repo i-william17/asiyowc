@@ -17,11 +17,34 @@ import { useRouter } from "expo-router";
 import { useSelector } from "react-redux";
 import { server } from "../../server";
 import tw from "../../utils/tw";
+import { useAiStream } from "../../hooks/useAiStream";
 
 export default function AnonymousSupportChatModal({ onClose }) {
   const router = useRouter();
   const scrollRef = useRef(null);
   const { token } = useSelector((state) => state.auth);
+
+  const renderBoldText = (text) => {
+    const parts = text.split("**");
+
+    return parts.map((part, index) => {
+      // Odd indexes = bold text
+      if (index % 2 === 1) {
+        return (
+          <Text key={index} style={{ fontFamily: "Poppins-SemiBold" }}>
+            {part}
+          </Text>
+        );
+      }
+
+      // Even indexes = normal text
+      return (
+        <Text key={index} style={{ fontFamily: "Poppins-Regular" }}>
+          {part}
+        </Text>
+      );
+    });
+  };
 
   /* ================= ANONYMOUS STATE ================= */
   const [messages, setMessages] = useState([
@@ -35,6 +58,54 @@ export default function AnonymousSupportChatModal({ onClose }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const { clearAiMemory } = useAiStream({
+    token,
+    onChunk: (chunk) => {
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1].content += chunk;
+        return updated;
+      });
+    },
+    onDone: () => {
+      setLoading(false);
+      requestAnimationFrame(() =>
+        scrollRef.current?.scrollToEnd({ animated: true })
+      );
+    },
+    onError: () => {
+      setLoading(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Something went wrong. Please take a breath and try again.",
+        },
+      ]);
+    },
+  });
+
+  const handleClose = () => {
+    clearAiMemory();        // ✅ clears backend AI context
+    setMessages([
+      {
+        role: "assistant",
+        content:
+          "This is a safe, anonymous space. You can share freely. I’m here to listen.",
+      },
+    ]);
+    setInput("");
+    setLoading(false);
+    onClose?.();
+  };
+
+  const copyMessage = async (text) => {
+    try {
+      await Clipboard.setStringAsync(text);
+    } catch (err) {
+      console.warn("Copy failed", err);
+    }
+  };
   /* ================= QUICK SUGGESTIONS ================= */
   const suggestions = [
     "I feel low and need someone to talk to",
@@ -98,6 +169,7 @@ export default function AnonymousSupportChatModal({ onClose }) {
     setMessages((prev) => [
       ...prev,
       { role: "user", content: messageToSend },
+      { role: "assistant", content: "" }, // placeholder for streaming
     ]);
 
     try {
@@ -110,28 +182,15 @@ export default function AnonymousSupportChatModal({ onClose }) {
         body: JSON.stringify({ message: messageToSend }),
       });
 
-      const data = await res.json();
-
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: data.reply },
-      ]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            "⚠️ Something went wrong. Please take a breath and try again.",
-        },
-      ]);
-    } finally {
+      if (!res.ok) {
+        throw new Error("AI request failed");
+      }
+    } catch (error) {
+      console.error("AI chat error:", error);
       setLoading(false);
-      requestAnimationFrame(() =>
-        scrollRef.current?.scrollToEnd({ animated: true })
-      );
     }
   };
+
 
   /* ================= SUGGESTION TAP ================= */
   const sendSuggestion = (text) => {
@@ -139,19 +198,6 @@ export default function AnonymousSupportChatModal({ onClose }) {
     sendMessage(text);
   };
 
-  /* ================= CLOSE & WIPE HISTORY ================= */
-  const handleClose = () => {
-    setMessages([
-      {
-        role: "assistant",
-        content:
-          "This is a safe, anonymous space. You can share freely. I’m here to listen.",
-      },
-    ]);
-    setInput("");
-    setLoading(false);
-    onClose?.();
-  };
 
   /* ================= UI ================= */
   return (
@@ -237,13 +283,12 @@ export default function AnonymousSupportChatModal({ onClose }) {
                 >
                   <Text
                     style={{
-                      fontFamily: "Poppins-Regular",
                       fontSize: 14,
                       lineHeight: 20,
                       color: isUser ? "#FFFFFF" : "#111827",
                     }}
                   >
-                    {m.content}
+                    {renderBoldText(m.content)}
                   </Text>
                 </View>
               </View>

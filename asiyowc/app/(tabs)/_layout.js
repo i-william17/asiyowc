@@ -153,6 +153,18 @@ export default function TabLayout() {
           }}
         />
 
+        {/* SAVINGS */}
+        <Tabs.Screen
+          name="savings"
+          options={{
+            headerShown: false,
+            title: "Savings",
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="wallet" size={size} color={color} />
+            ),
+          }}
+        />
+
         {/* 👤 PROFILE */}
         <Tabs.Screen
           name="profile"
