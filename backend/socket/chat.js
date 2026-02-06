@@ -105,6 +105,19 @@ module.exports = (io, socket) => {
         return cb?.({ success: false, message: 'At least 2 participants required' });
       }
 
+      if (type === "dm") {
+        const existing = await Chat.findOne({
+          type: "dm",
+          participants: { $all: uniqueParticipants, $size: uniqueParticipants.length },
+          isRemoved: false,
+        });
+
+        if (existing) {
+          socket.join(`chat:${existing._id}`);
+          return cb?.({ success: true, chat: existing });
+        }
+      }
+
       const chat = await Chat.create({
         type,
         participants: uniqueParticipants,
@@ -215,20 +228,33 @@ module.exports = (io, socket) => {
       if (!msg) return;
 
       // ✅ ALWAYS REMOVE USER'S EXISTING REACTION FIRST
-      msg.reactions = msg.reactions.filter(
+      let reactions = msg.reactions.filter(
         (r) => String(r.user?._id || r.user) !== String(userId)
       );
 
-      // ✅ ONLY ADD IF EMOJI EXISTS
       if (emoji) {
-        msg.reactions.push({
+        reactions.push({
           user: userId,
           emoji,
           createdAt: new Date(),
         });
       }
 
-      await chat.save();
+      await Chat.updateOne(
+        {
+          _id: cid,
+          participants: userId,
+          "messages._id": mid,
+          "messages.sender": userId
+        },
+        {
+          $set: {
+            "messages.$.ciphertext": ciphertext,
+            "messages.$.editedAt": new Date(),
+          }
+        },
+        { runValidators: false }
+      );
 
       const populatedChat = await Chat.findOne(
         { _id: cid, "messages._id": mid },
@@ -256,19 +282,20 @@ module.exports = (io, socket) => {
       const mid = normalizeId(messageId);
       if (!isValidId(cid) || !isValidId(mid)) return;
 
-      const chat = await Chat.findById(cid);
-      if (!chat) return;
+      await Chat.updateOne(
+        { _id: cid, "messages._id": mid },
+        {
+          $addToSet: {
+            "messages.$.readBy": {
+              user: userId,
+              readAt: new Date(),
+            }
+          }
+        },
+        { runValidators: false }
+      );
 
-      const msg = chat.messages.id(mid);
-      if (!msg) return;
-
-      msg.readBy = msg.readBy || [];
-      if (!msg.readBy.includes(String(userId))) {
-        msg.readBy.push(String(userId));
-        await chat.save();
-      }
-
-      socket.to(`chat:${cid}`).emit('message:read', {
+      io.to(`chat:${cid}`).emit('message:read', {
         chatId: cid,
         messageId: mid,
         userId,
@@ -297,18 +324,20 @@ module.exports = (io, socket) => {
       if (!chat) return;
 
       // 🔁 TOGGLE PIN
-      if (chat.pinnedMessage && String(chat.pinnedMessage) === String(mid)) {
-        chat.pinnedMessage = null; // UNPIN
-      } else {
-        chat.pinnedMessage = mid; // PIN (only one allowed)
-      }
+      const newPinned =
+        chat.pinnedMessage && String(chat.pinnedMessage) === String(mid)
+          ? null
+          : mid;
 
-      await chat.save();
-
+      await Chat.updateOne(
+        { _id: cid },
+        { $set: { pinnedMessage: newPinned } },
+        { runValidators: false }
+      );
       // 🔥 REALTIME UPDATE
       io.to(`chat:${cid}`).emit("message:pin:update", {
         chatId: cid,
-        pinnedMessage: chat.pinnedMessage,
+        pinnedMessage: newPinned,
       });
     } catch (err) {
       console.error("[PIN MESSAGE ERROR]", err);
@@ -343,7 +372,17 @@ module.exports = (io, socket) => {
 
       if (!msg.deletedFor.includes(String(userId))) {
         msg.deletedFor.push(userId);
-        await chat.save();
+
+        await Chat.updateOne(
+          { _id: cid, "messages._id": mid },
+          {
+            $addToSet: {
+              "messages.$.deletedFor": userId
+            }
+          },
+          { runValidators: false }
+        );
+
       }
 
       // 🔁 ONLY ACK TO USER (no broadcast)
@@ -425,7 +464,16 @@ module.exports = (io, socket) => {
       msg.ciphertext = ciphertext;
       msg.editedAt = new Date();
 
-      await chat.save();
+      await Chat.updateOne(
+        { _id: cid, "messages._id": mid },
+        {
+          $set: {
+            "messages.$.ciphertext": ciphertext,
+            "messages.$.editedAt": new Date(),
+          }
+        },
+        { runValidators: false }
+      );
 
       io.to(`chat:${cid}`).emit('message:edited', {
         chatId: cid,
@@ -464,7 +512,7 @@ module.exports = (io, socket) => {
       );
 
       // 🔁 realtime update
-      socket.to(`chat:${chatId}`).emit("message:read:batch", {
+      io.to(`chat:${chatId}`).emit("message:read:batch", {
         chatId,
         messageIds,
         userId,

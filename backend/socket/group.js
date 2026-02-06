@@ -152,7 +152,11 @@ module.exports = (io, socket) => {
 
       if (!group?.chat) return;
 
-      const chat = await Chat.findById(group.chat);
+      const chat = await Chat.findOne({
+        _id: group.chat,
+        participants: userId
+      });
+
       if (!chat) return;
 
       const message = {
@@ -230,18 +234,12 @@ module.exports = (io, socket) => {
 
       msg.reactions = msg.reactions || [];
 
-      const hasReaction = msg.reactions.some(
-        (r) => String(r.user) === String(userId)
+      // always remove old reaction first
+      msg.reactions = msg.reactions.filter(
+        (r) => String(r.user) !== String(userId)
       );
 
-      // 🔁 REMOVE (same emoji OR explicit remove)
-      if (!cleanEmoji || hasReaction) {
-        msg.reactions = msg.reactions.filter(
-          (r) => String(r.user) !== String(userId)
-        );
-      }
-
-      // ➕ ADD (only if emoji exists)
+      // only add if emoji provided
       if (cleanEmoji) {
         msg.reactions.push({
           user: userId,
@@ -315,7 +313,7 @@ module.exports = (io, socket) => {
 
       await chat.save();
 
-      socket.to(`chat:${chatId}`).emit("group:read:batch", {
+      io.to(`chat:${chatId}`).emit("group:read:batch", {
         chatId,
         messageIds: updated,
         userId,

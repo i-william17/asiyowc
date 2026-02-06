@@ -22,7 +22,6 @@ import { decode as atob } from "base-64";
 
 import {
   fetchGroupConversation,
-  fetchGroupMessages,
   sendGroupMessage,
   updateMessageReactions,
   updatePinnedMessage,
@@ -32,6 +31,7 @@ import {
   deleteMessageForEveryone,
   leaveGroup,
   updateMessageReceipt,
+  clearSelectedChat,
 } from "../../store/slices/communitySlice";
 import ConfirmModal from "../../components/community/ConfirmModal";
 
@@ -64,6 +64,13 @@ export default function GroupChatInterface({ chatId }) {
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [inputHeight, setInputHeight] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  /* =====================================================
+     PAGINATION STATE
+  ===================================================== */
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [showOlderHint, setShowOlderHint] = useState(false);
 
   /* UI STATE */
   const [text, setText] = useState("");
@@ -399,11 +406,6 @@ export default function GroupChatInterface({ chatId }) {
     return uniqueUsers.size;
   };
 
-  const reactionModalMessage = useMemo(() => {
-    if (!reactionModalMessageId) return null;
-    return messages.find((m) => String(m._id) === String(reactionModalMessageId));
-  }, [reactionModalMessageId, messages]);
-
   const openReactionModal = (message) => {
     if (!message?._id || !message?.reactions?.length) return;
     setReactionModalMessageId(String(message._id));
@@ -450,9 +452,6 @@ export default function GroupChatInterface({ chatId }) {
     const showSubscription = Keyboard.addListener('keyboardDidShow', (e) => {
       keyboardHeightRef.current = e.endCoordinates.height;
       setKeyboardVisible(true);
-      setTimeout(() => {
-        listRef.current?.scrollToEnd({ animated: true });
-      }, 100);
     });
 
     const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
@@ -465,6 +464,41 @@ export default function GroupChatInterface({ chatId }) {
       hideSubscription.remove();
     };
   }, []);
+
+  /* =====================================================
+     LOAD OLDER MESSAGES (GROUP VERSION)
+  ===================================================== */
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || !hasMore || !selectedChat?._id) return;
+
+    const firstMessage = selectedChat?.messages?.[0];
+    if (!firstMessage?._id) return;
+
+    // ✅ show hint first
+    setShowOlderHint(true);
+
+    try {
+      setLoadingOlder(true);
+
+      const res = await dispatch(
+        fetchGroupConversation({
+          chatId: selectedChat._id,
+          before: firstMessage._id,
+          append: "prepend",
+          limit: 30,
+        })
+      ).unwrap();
+
+      if (!res?.chat?.messages?.length || res.chat.messages.length < 30) {
+        setHasMore(false);
+      }
+    } finally {
+      setLoadingOlder(false);
+
+      // hide hint after loading
+      setTimeout(() => setShowOlderHint(false), 1200);
+    }
+  }, [selectedChat, loadingOlder, hasMore, dispatch]);
 
   /* =====================================================
      TYPING EMITS
@@ -516,19 +550,26 @@ export default function GroupChatInterface({ chatId }) {
   /* =====================================================
      LOAD GROUP CHAT
   ===================================================== */
-  useEffect(() => {
-    if (chatId) dispatch(fetchGroupConversation(chatId));
-  }, [chatId]);
 
   useEffect(() => {
-    if (groupId && chatId) {
-      dispatch(fetchGroupMessages({ groupId, chatId }));
-    }
-  }, [groupId, chatId]);
+    if (!chatId) return;
+
+    // 🔥 prevents old messages flash
+    dispatch(clearSelectedChat());
+
+    dispatch(fetchGroupConversation({
+      chatId,
+      append: "replace",
+      limit: 30,
+    }));
+  }, [chatId]);
 
   useEffect(() => {
     hasAutoScrolledRef.current = false;
     readEmittedRef.current.clear();
+    // Reset pagination
+    setHasMore(true);
+    setLoadingOlder(false);
 
     return () => {
       readEmittedRef.current.clear();
@@ -556,10 +597,6 @@ export default function GroupChatInterface({ chatId }) {
     const onGroupMessage = ({ groupId: gid, message }) => {
       if (String(gid) === String(groupId)) {
         dispatch(pushIncomingMessage({ chatId, message }));
-
-        setTimeout(() => {
-          listRef.current?.scrollToEnd({ animated: true });
-        }, 100);
       }
     };
 
@@ -715,11 +752,6 @@ export default function GroupChatInterface({ chatId }) {
 
       readQueueRef.current.clear();
       clearTimeout(readFlushTimerRef.current);
-      // socket.disconnect();
-      // socketRef.current = null;
-      // readQueueRef.current.clear();
-      // readFlushTimerRef.current && clearTimeout(readFlushTimerRef.current);
-      // readFlushTimerRef.current = null;
     };
   }, [groupId, token, chatId, myId]);
 
@@ -808,6 +840,14 @@ export default function GroupChatInterface({ chatId }) {
 
     return result;
   }, [uniqueMessages]);
+
+const reactionModalMessage = useMemo(() => {
+  if (!reactionModalMessageId) return null;
+
+  return messages.find(
+    (m) => String(m._id) === String(reactionModalMessageId)
+  ) || null;
+}, [reactionModalMessageId, messages]);
 
   /* =====================================================
      HEADER STATUS TEXT
@@ -919,7 +959,7 @@ export default function GroupChatInterface({ chatId }) {
       : "This message was deleted from me";
 
     const senderName = getSenderNameFromMessage(item);
-    const senderAvatar = getSenderAvatarFromMessage(item) || getMemberAvatar(senderId) || null;
+    const senderAvatar = getSenderAvatarFromMessage(item);
 
     const replied =
       typeof item.replyTo === "object"
@@ -1184,11 +1224,7 @@ export default function GroupChatInterface({ chatId }) {
      MAIN UI RENDER
   ===================================================== */
   return (
-    <KeyboardAvoidingView
-      style={tw`flex-1 bg-gray-50`}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-    >
+    <View style={tw`flex-1`}>
       {/* ================= HEADER ================= */}
       <View
         style={{
@@ -1383,39 +1419,79 @@ export default function GroupChatInterface({ chatId }) {
       {/* ================= MESSAGES ================= */}
       <FlatList
         ref={listRef}
-        data={messagesWithDates}
-        keyExtractor={(item, index) => {
-          if (item.type === "date") {
-            return `date-${item.label}-${index}`;
-          }
-          return `msg-${item._id}`;
-        }}
+        data={[...messagesWithDates].reverse()}
+        keyExtractor={(item, index) =>
+          item.type === "date"
+            ? `date-${item.label}-${index}`
+            : `msg-${item._id}`
+        }
         renderItem={renderListItem}
+
+        /* ================= PAGINATION ================= */
+        inverted
+        maintainVisibleContentPosition={{
+          minIndexForVisible: 1
+        }}
+        onEndReached={loadOlder}
+        onEndReachedThreshold={0.2}
+        ListFooterComponent={
+          <>
+            {showOlderHint && !loadingOlder && hasMore && (
+              <View style={tw`py-3 items-center`}>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Medium",
+                    fontSize: 12,
+                    color: "#6B7280",
+                  }}
+                >
+                  ↑ Scroll up to see older messages
+                </Text>
+              </View>
+            )}
+
+            {loadingOlder && (
+              <View style={tw`py-3 items-center`}>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 12,
+                    color: "#6B7280",
+                  }}
+                >
+                  Loading older messages…
+                </Text>
+              </View>
+            )}
+          </>
+        }
+
+        /* ================= READ RECEIPTS ================= */
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         onMomentumScrollEnd={onMomentumScrollEnd}
+
+        /* ================= UX ================= */
         showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => {
-          if (!hasAutoScrolledRef.current) {
-            requestAnimationFrame(() => {
-              listRef.current?.scrollToEnd({ animated: false });
-              hasAutoScrolledRef.current = true;
-            });
-          }
-        }}
-        onLayout={() => {
-          setTimeout(() => {
-            listRef.current?.scrollToEnd({ animated: false });
-            hasAutoScrolledRef.current = true;
-          }, 100);
-        }}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        removeClippedSubviews
+        overScrollMode="never"
+        bounces={false}
+        initialNumToRender={25}
+        maxToRenderPerBatch={25}
+        windowSize={10}
+
+        /* ================= THE IMPORTANT PART ================= */
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingTop: 12,
-          paddingBottom: keyboardVisible ? keyboardHeightRef.current + inputHeight + 20 : inputHeight + 20,
+          paddingBottom:
+            (keyboardVisible ? keyboardHeightRef.current : 0) +
+            inputHeight +
+            insets.bottom +
+            16,
         }}
-        overScrollMode="never"
-        bounces={false}
       />
 
       {/* ================= DELETE FOR ME MODAL ================= */}
@@ -1697,7 +1773,10 @@ export default function GroupChatInterface({ chatId }) {
 
             {/* Reaction Categories */}
             <FlatList
+              style={tw`flex-1`}
               data={reactionModalMessage?.reactions || []}
+              extraData={reactionModalMessage?.reactions}
+
               keyExtractor={(item, index) => `reaction-${index}`}
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => {
@@ -1981,6 +2060,6 @@ export default function GroupChatInterface({ chatId }) {
         onCancel={() => setShowLeaveModal(false)}
         onConfirm={handleLeaveConfirmed}
       />
-    </KeyboardAvoidingView>
+    </View>
   );
 }

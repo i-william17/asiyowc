@@ -22,6 +22,138 @@ exports.getAllUsers = async (req, res) => {
     });
   }
 }
+
+/* =====================================================
+   DISCOVER USERS
+   interest based + randomized + paginated + efficient
+===================================================== */
+exports.getDiscoverUsers = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const limit = Math.min(parseInt(req.query.limit) || 10, 20);
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+
+    const me = await User.findById(userId).select("interests");
+
+    const myInterests = me?.interests || [];
+
+    /* --------------------------------------------
+       MATCH FILTER
+    -------------------------------------------- */
+    const match = {
+      _id: { $ne: userId },
+      isActive: true,
+    };
+
+    if (myInterests.length) {
+      match.interests = { $in: myInterests };
+    }
+
+    /* --------------------------------------------
+       COUNT FIRST
+    -------------------------------------------- */
+    const total = await User.countDocuments(match);
+
+    if (!total) {
+      return res.json({
+        success: true,
+        data: {
+          users: [],
+          page,
+          hasMore: false,
+          total: 0,
+        },
+      });
+    }
+
+    /* --------------------------------------------
+       RANDOM OFFSET
+    -------------------------------------------- */
+    const maxSkip = Math.max(total - limit, 0);
+    const randomBase = Math.floor(Math.random() * (maxSkip + 1));
+
+    const skip = randomBase + (page - 1) * limit;
+
+    /* --------------------------------------------
+       QUERY
+    -------------------------------------------- */
+    const users = await User.find(match)
+      .select("-password -twoFactorAuth.secret")
+      .skip(skip % total)
+      .limit(limit)
+      .lean();
+
+    return res.json({
+      success: true,
+      data: {
+        users,
+        page,
+        hasMore: skip + limit < total,
+        total,
+      },
+    });
+  } catch (error) {
+    console.error("❌ getDiscoverUsers error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
+
+/* =====================================================
+   ROULETTE USER
+   returns ONE random interest matched user
+===================================================== */
+exports.getRouletteUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const me = await User.findById(userId).select("interests");
+
+    const myInterests = me?.interests || [];
+
+    const match = {
+      _id: { $ne: userId },
+      isActive: true,
+    };
+
+    if (myInterests.length) {
+      match.interests = { $in: myInterests };
+    }
+
+    const total = await User.countDocuments(match);
+
+    if (!total) {
+      return res.json({
+        success: true,
+        data: { user: null },
+      });
+    }
+
+    const randomSkip = Math.floor(Math.random() * total);
+
+    const user = await User.findOne(match)
+      .select("-password -twoFactorAuth.secret")
+      .skip(randomSkip)
+      .lean();
+
+    return res.json({
+      success: true,
+      data: { user },
+    });
+  } catch (error) {
+    console.error("❌ getRouletteUser error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 /* =====================================================
    GET MY PROFILE (USER + STATS)
 ===================================================== */
@@ -129,8 +261,8 @@ exports.updateProfile = async (req, res) => {
       Array.isArray(interests)
         ? interests
         : Array.isArray(profile?.interests)
-        ? profile.interests
-        : null;
+          ? profile.interests
+          : null;
 
     if (resolvedInterests) {
       updates["interests"] = resolvedInterests
@@ -174,8 +306,8 @@ exports.updateProfile = async (req, res) => {
       Array.isArray(safety?.emergencyContacts)
         ? safety.emergencyContacts
         : Array.isArray(profile?.safety?.emergencyContacts)
-        ? profile.safety.emergencyContacts
-        : null;
+          ? profile.safety.emergencyContacts
+          : null;
 
     if (resolvedEmergencyContacts) {
       updates["safety.emergencyContacts"] =

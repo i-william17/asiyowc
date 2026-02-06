@@ -129,34 +129,18 @@ const CertificateScreen = () => {
     try {
       console.log("📤 DOWNLOAD CLICKED");
 
-      if (!token) {
-        throw new Error("User not authenticated");
-      }
+      if (!token) throw new Error("User not authenticated");
 
-      // ===========================
-      // 1️⃣ BUILD VERIFICATION URL
-      // ===========================
       const verificationUrl = `${server}/verify-certificate/${certificateId}`;
-
-      console.log("🔗 VERIFICATION URL:", verificationUrl);
-
-      // ===========================
-      // 2️⃣ API URL
-      // ===========================
       const url = `${server}/programs/${id}/certificate/download`;
-      console.log("🌍 REQUEST URL:", url);
 
-      // ===========================
-      // 3️⃣ REQUEST PDF FROM BACKEND
-      // ===========================
       const response = await axios.post(
         url,
-        { verificationUrl }, // ✅ ONLY THIS IS SENT
+        { verificationUrl },
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          responseType: Platform.OS === "web" ? "blob" : "arraybuffer",
+          headers: { Authorization: `Bearer ${token}` },
+          // 🔥 CRITICAL CHANGE
+          responseType: Platform.OS === "web" ? "blob" : "base64",
           timeout: 60000,
         }
       );
@@ -164,56 +148,40 @@ const CertificateScreen = () => {
       console.log("✅ BACKEND RESPONSE:", response.status);
 
       // ===========================
-      // 4️⃣ WEB DOWNLOAD
+      // 🌐 WEB (unchanged)
       // ===========================
       if (Platform.OS === "web") {
-        const blob = new Blob([response.data], {
-          type: "application/pdf",
-        });
+        const blob = new Blob([response.data], { type: "application/pdf" });
 
         const blobUrl = window.URL.createObjectURL(blob);
         const link = document.createElement("a");
 
         link.href = blobUrl;
         link.download = `certificate-${certificateId}.pdf`;
-        document.body.appendChild(link);
         link.click();
 
-        link.remove();
         window.URL.revokeObjectURL(blobUrl);
-
-        console.log("🌐 WEB PDF DOWNLOAD TRIGGERED");
         return;
       }
 
       // ===========================
-      // 5️⃣ MOBILE SAVE & SHARE
+      // 📱 MOBILE (NO BUFFER)
       // ===========================
       const fileUri =
         FileSystem.documentDirectory + `certificate-${certificateId}.pdf`;
 
-      const base64 = Buffer
-        .from(response.data, "binary")
-        .toString("base64");
-
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      await FileSystem.writeAsStringAsync(
+        fileUri,
+        response.data,
+        { encoding: "base64" }
+      );
 
       console.log("📱 PDF SAVED:", fileUri);
 
       await Sharing.shareAsync(fileUri);
 
-      console.log("📤 SHARE SHEET OPENED");
     } catch (err) {
-      console.error("❌ CERTIFICATE DOWNLOAD FAILED");
-
-      if (axios.isAxiosError(err)) {
-        console.error("STATUS:", err.response?.status);
-        console.error("DATA:", err.response?.data);
-      } else {
-        console.error(err);
-      }
+      console.error("❌ CERTIFICATE DOWNLOAD FAILED", err);
     }
   };
 

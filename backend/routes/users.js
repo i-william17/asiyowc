@@ -4,33 +4,37 @@ const express = require('express');
 const {
    // users
    getAllUsers,
+
+   // profile
+   getProfile,
+   updateProfile,
+
+   // stats
+   getUserStats,
+
+   // avatar
+   uploadAvatar,
+   deleteAvatar,
+
+   // cover photo
+   uploadCoverPhoto,
+   deleteCoverPhoto,
+
+   // programs
+   getEnrolledPrograms,
+   getCompletedPrograms,
+
+   // password
+   changePassword,
+   resetPassword,
+
+   // discover & roulette
+   getDiscoverUsers,
+   getRouletteUser,
    
-  // profile
-  getProfile,
-  updateProfile,
-
-  // stats
-  getUserStats,
-
-  // avatar
-  uploadAvatar,
-  deleteAvatar,
-
-  // cover photo
-  uploadCoverPhoto,
-  deleteCoverPhoto,
-
-  // programs
-  getEnrolledPrograms,
-  getCompletedPrograms,
-
-  // password
-  changePassword,
-  resetPassword,
-
-  // safety / sos
-  addEmergencyContact,
-  triggerSOS
+   // safety / sos
+   addEmergencyContact,
+   triggerSOS
 } = require('../controllers/userController');
 
 /* ================= MIDDLEWARE ================= */
@@ -63,9 +67,9 @@ router.get('/stats', getUserStats);
    🖼️ AVATAR
 ===================================================== */
 router.post(
-  '/avatar',
-  upload.single('avatar'),   // expects FormData key: avatar
-  uploadAvatar
+   '/avatar',
+   upload.single('avatar'),   // expects FormData key: avatar
+   uploadAvatar
 );
 
 router.delete('/avatar', deleteAvatar);
@@ -74,9 +78,9 @@ router.delete('/avatar', deleteAvatar);
    🖼️ COVER PHOTO
 ===================================================== */
 router.post(
-  '/cover-photo',
-  upload.single('cover'),    // expects FormData key: cover
-  uploadCoverPhoto
+   '/cover-photo',
+   upload.single('cover'),    // expects FormData key: cover
+   uploadCoverPhoto
 );
 
 router.delete('/cover-photo', deleteCoverPhoto);
@@ -99,6 +103,16 @@ router.post('/change-password', changePassword);
  * Otherwise, move it to /auth routes.
  */
 router.post('/reset-password', resetPassword);
+
+/* =====================================================
+   🔍 DISCOVER (INTEREST BASED + RANDOM + PAGINATED)
+===================================================== */
+router.get('/discover', getDiscoverUsers);
+
+/* =====================================================
+   🎯 ROULETTE (SINGLE RANDOM USER)
+===================================================== */
+router.get('/roulette', getRouletteUser);
 
 /* =====================================================
    🚨 SAFETY / SOS

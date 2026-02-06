@@ -17,6 +17,7 @@ import {
   // If you don’t yet, I’ll give you exact reducers next.
   updateMessageReactions,
   markMessageDeleted,
+  updatePinnedMessage,
 } from "../store/slices/communitySlice";
 
 /* ============================================================

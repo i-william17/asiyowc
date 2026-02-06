@@ -96,24 +96,42 @@ export const communityService = {
    * ✅ USED BY fetchGroupConversation(chatId)
    * Backend returns: { group, chat }
    */
-  getGroupConversationByChatId: (chatId, token) => {
-    const id = normalizeId(chatId);
-    if (!id) throw new Error("Invalid chat id");
 
-    return fetch(`${server}/community/groups/chat/${id}`, {
+  /* ============================================================
+   🔥 GROUP CONVERSATION (groupId → chatId + group)
+   FIRST CALL WHEN OPENING GROUP
+============================================================ */
+  getGroupConversation: (groupId, token) => {
+    const id = normalizeId(groupId);
+    if (!id) throw new Error("Invalid group id");
+
+    return fetch(`${server}/community/groups/${id}/conversation`, {
       headers: headers(token),
     }).then(json);
   },
 
-  getGroupMessages: (groupId, chatId, token, page = 1, limit = 20) => {
-    const gid = normalizeId(groupId);
-    const cid = normalizeId(chatId);
-    if (!gid || !cid) throw new Error("Invalid group/chat id");
+  /* ============================================================
+     🔥 GROUP CHAT MESSAGES (chatId → messages)
+     Used AFTER chatId is known
+  ============================================================ */
+  getGroupConversationByChatId: (chatId, token, params = {}) => {
+    const id = normalizeId(chatId);
+    if (!id) throw new Error("Invalid chat id");
 
-    return fetch(
-      `${server}/community/groups/${gid}/chat/${cid}/messages?page=${page}&limit=${limit}`,
-      { headers: headers(token) }
-    ).then(json);
+    const { before, limit } = params;
+
+    const qs = new URLSearchParams();
+    if (before) qs.set("before", String(before));
+    if (limit) qs.set("limit", String(limit));
+
+    const url =
+      qs.toString().length > 0
+        ? `${server}/community/groups/chat/${id}?${qs}`
+        : `${server}/community/groups/chat/${id}`;
+
+    return fetch(url, {
+      headers: headers(token),
+    }).then(json);
   },
 
   sendGroupMessage: (groupId, chatId, payload, token) => {
@@ -194,11 +212,22 @@ export const communityService = {
       headers: headers(token),
     }).then(json),
 
-  getChatById: (chatId, token) => {
+  getChatById: (chatId, token, params = {}) => {
     const id = normalizeId(chatId);
     if (!id) throw new Error("Invalid chat id");
 
-    return fetch(`${server}/community/chats/${id}`, {
+    const { before, limit } = params || {};
+
+    const qs = new URLSearchParams();
+    if (before) qs.set("before", String(before));
+    if (limit) qs.set("limit", String(limit));
+
+    const url =
+      qs.toString().length > 0
+        ? `${server}/community/chats/${id}?${qs.toString()}`
+        : `${server}/community/chats/${id}`;
+
+    return fetch(url, {
       headers: headers(token),
     }).then(json);
   },

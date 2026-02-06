@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
 
 const eventSchema = new mongoose.Schema({
   title: {
@@ -204,4 +204,4 @@ eventSchema.methods.isUserRegistered = function(userId) {
 
 const Event = mongoose.model('Event', eventSchema);
 
-export default Event;
+module.exports = Event;

@@ -5,7 +5,6 @@ import {
   FlatList,
   TextInput,
   TouchableOpacity,
-  KeyboardAvoidingView,
   Platform,
   Image,
   Pressable,
@@ -30,6 +29,7 @@ import {
   deleteMessageForMe,
   deleteMessageForEveryone,
   updateMessageReceipt,
+  clearSelectedChat,
 } from "../../store/slices/communitySlice";
 
 import { connectSocket } from "../../services/socket";
@@ -136,6 +136,10 @@ export default function ChatInterface({ chatId }) {
 
   const myId = getUserIdFromToken(token);
 
+  /* ================= PAGINATION STATE ================= */
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+
   /* ================= VIEWABILITY CONFIG ================= */
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60, // WhatsApp-like behavior
@@ -149,7 +153,6 @@ export default function ChatInterface({ chatId }) {
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
   const [inputHeight, setInputHeight] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const hasAutoScrolledRef = useRef(false);
 
   /* Presence & typing */
   const [typing, setTyping] = useState(false);
@@ -164,6 +167,38 @@ export default function ChatInterface({ chatId }) {
 
   /* ================= REACTION MODAL ================= */
   const [reactionModalMessageId, setReactionModalMessageId] = useState(null);
+
+  /* =====================================================
+     LOAD OLDER MESSAGES (WHATSAPP-STYLE PAGINATION)
+  ===================================================== */
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || !hasMore) return;
+
+    const firstMessage = selectedChat?.messages?.[0];
+    if (!firstMessage?._id) return;
+
+    try {
+      setLoadingOlder(true);
+
+      const res = await dispatch(
+        fetchChatDetail({
+          chatId,
+          before: firstMessage._id, // 🔥 cursor
+          append: "prepend", // 🔥 Important: tells Redux to prepend
+          limit: 30,
+        })
+      ).unwrap();
+
+      // If we get fewer than 30 messages, we've reached the beginning
+      if (!res?.length || res.length < 30) {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.warn("Failed to load older messages:", error);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [selectedChat?.messages, loadingOlder, hasMore, chatId, dispatch]);
 
   /* =====================================================
      VIEWABILITY HANDLER FOR READ RECEIPTS
@@ -244,11 +279,22 @@ export default function ChatInterface({ chatId }) {
   };
 
   /* =====================================================
-     FETCH CHAT
+     FETCH CHAT - WITH PAGINATION SUPPORT
   ===================================================== */
   useEffect(() => {
-    if (chatId) dispatch(fetchChatDetail(chatId));
+    if (!chatId) return;
+
+    // ✅ reset pagination
+    setHasMore(true);
+    setLoadingOlder(false);
+
+    // 🔥🔥🔥 THIS FIXES FLICKER
+    dispatch(clearSelectedChat());
+
+    // fetch fresh chat
+    dispatch(fetchChatDetail({ chatId, limit: 30 }));
   }, [chatId]);
+
 
   /* =====================================================
      CLEAN UP READ EMITTED REF WHEN CHAT CHANGES
@@ -280,9 +326,14 @@ export default function ChatInterface({ chatId }) {
       const messageId = String(msg._id);
       const isMine = String(normalizeId(msg.sender)) === String(myId);
 
-      if (!isMine && msg.readBy?.some(id => String(id) === String(myId))) {
+      if (
+        !isMine &&
+        Array.isArray(msg.readBy) &&
+        msg.readBy.some(r => String(r.user || r) === String(myId))
+      ) {
         readEmittedRef.current.add(messageId);
       }
+
     });
   }, [selectedChat?.messages, myId]);
 
@@ -359,25 +410,13 @@ export default function ChatInterface({ chatId }) {
         })
       );
 
-      // AUTO SCROLL TO BOTTOM FOR NEW MESSAGES (WHATSAPP STYLE)
-      setTimeout(() => {
-        listRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      // 🔥 REMOVED: No auto-scroll on new messages
+      // User stays where they are (WhatsApp behavior)
     };
 
     socket.on("message:new", onMessage);
 
     /* ================= REACTIONS ================= */
-    const onReaction = ({ chatId: id, messageId, reactions }) => {
-      if (String(id) !== String(chatId)) return;
-
-      dispatch(
-        updateMessageReactions({
-          messageId,
-          reactions,
-        })
-      );
-    };
 
     socket.on("message:reaction:update", ({ chatId: id, message }) => {
       if (String(id) !== String(chatId)) return;
@@ -406,16 +445,7 @@ export default function ChatInterface({ chatId }) {
     /* ================= DELETE ================= */
     const onDelete = ({ chatId: id, messageId }) => {
       if (String(id) !== String(chatId)) return;
-
-      // dispatch(
-      //   deleteMessageForEveryone({
-      //     messageId,
-      //     message: {
-      //       isDeletedForEveryone: true,
-      //       ciphertext: "",
-      //     },
-      //   })
-      // );
+      // Removed code
     };
 
     socket.on("message:delete:everyone:update", ({ chatId: id, messageId }) => {
@@ -496,7 +526,6 @@ export default function ChatInterface({ chatId }) {
       socket.emit("chat:leave", { chatId });
 
       socket.off("message:new", onMessage);
-      socket.off("message:reaction:update", onReaction);
       socket.off("message:deleted", onDelete);
       socket.off("typing:start");
       socket.off("typing:stop");
@@ -516,16 +545,16 @@ export default function ChatInterface({ chatId }) {
   }, [chatId, token, receiverId, myId]);
 
   /* =====================================================
-     KEYBOARD HANDLING
+     KEYBOARD HANDLING (MANUAL - PROFESSIONAL APPROACH)
   ===================================================== */
   useEffect(() => {
     const showSubscription = Keyboard.addListener('keyboardDidShow', (e) => {
-      keyboardHeightRef.current = e.endCoordinates.height;
+      const keyboardHeight = e.endCoordinates.height;
+      keyboardHeightRef.current = keyboardHeight;
       setKeyboardVisible(true);
-      // Scroll to bottom when keyboard appears
-      setTimeout(() => {
-        listRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+
+      // 🔥 REMOVED: No auto-scroll on keyboard show
+      // User stays where they are
     });
 
     const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
@@ -596,55 +625,110 @@ export default function ChatInterface({ chatId }) {
   }, [selectedChat?.pinnedMessage, selectedChat?.messages]);
 
   /* =====================================================
-     REACTIONS
+     REACTIONS — GROUP STYLE (per-user rows, identical to group chat)
   ===================================================== */
-  const toggleReaction = (message, emoji = null) => {
+
+  const toggleReaction = (message, emoji) => {
     if (!message?._id || !socketRef.current) return;
+
+    const alreadyReacted = message?.reactions?.some((r) => {
+      const uid = normalizeId(r.user);
+      return uid === myId && r.emoji === emoji;
+    });
 
     socketRef.current.emit("message:reaction", {
       chatId,
       messageId: message._id,
-      emoji, // null = remove
+      emoji: alreadyReacted ? null : emoji, // ⭐ critical fix
     });
   };
 
+  /* ================= SUMMARY =================
+     Convert:
+     [{user, emoji}, {user, emoji}]
+     → [{emoji, count}]
+  ============================================ */
   const getReactionSummary = (message) => {
     if (!Array.isArray(message?.reactions)) return [];
 
     const map = {};
 
     message.reactions.forEach((r) => {
+      if (!r?.emoji) return;
+
       if (!map[r.emoji]) map[r.emoji] = new Set();
-      map[r.emoji].add(String(r.user?._id || r.user));
+
+      const uid = normalizeId(r.user);
+      if (uid) map[r.emoji].add(uid);
     });
 
-    return Object.entries(map).map(([emoji, users]) => ({
+    return Object.entries(map).map(([emoji, set]) => ({
       emoji,
-      count: users.size,
+      count: set.size,
     }));
   };
 
-  // NEW: Get total reaction count
-  const getTotalReactionCount = (message) => {
-    if (!Array.isArray(message?.reactions)) return 0;
-    const uniqueUsers = new Set(message.reactions.map(r => String(r.user?._id || r.user)));
-    return uniqueUsers.size;
-  };
 
+  /* ================= TOTAL ================= */
+  const getTotalReactionCount = (message) =>
+    Array.isArray(message?.reactions)
+      ? message.reactions.length
+      : 0;
+
+
+  /* ================= MODAL MESSAGE ================= */
   const reactionModalMessage = useMemo(() => {
     if (!reactionModalMessageId) return null;
+
     return selectedChat?.messages?.find(
       (m) => String(m._id) === String(reactionModalMessageId)
     );
   }, [reactionModalMessageId, selectedChat?.messages]);
 
+
   const openReactionModal = (message) => {
-    if (!message?._id || !message?.reactions?.length) return;
+    if (!message?.reactions?.length) return;
     setReactionModalMessageId(String(message._id));
   };
 
   const closeReactionModal = () => {
     setReactionModalMessageId(null);
+  };
+
+
+  /* =====================================================
+     LONG PRESS MENU ACTIONS - FIXED: moved before usage
+  ===================================================== */
+  const openContextMenu = (msg) => {
+    setContextMessage(msg);
+    setContextMenuVisible(true);
+  };
+
+  const closeContextMenu = () => {
+    setContextMenuVisible(false);
+  };
+
+  const doReply = () => {
+    if (!contextMessage) return;
+    setReplyTo(contextMessage);
+    closeContextMenu();
+  };
+
+  const doPin = () => {
+    if (!contextMessage?._id || !socketRef.current) return;
+
+    socketRef.current.emit("message:pin", {
+      chatId,
+      messageId: contextMessage._id,
+    });
+
+    closeContextMenu();
+  };
+
+  const doCopy = async () => {
+    if (!contextMessage) return;
+    await copyToClipboard(contextMessage?.ciphertext);
+    closeContextMenu();
   };
 
   /* =====================================================
@@ -658,7 +742,7 @@ export default function ChatInterface({ chatId }) {
       : [];
 
     const isRead = readBy.some(
-      (r) => String(r.user) !== String(myId)
+      (r) => String(r.user || r) === String(receiverId)
     );
 
     if (isRead) {
@@ -712,41 +796,6 @@ export default function ChatInterface({ chatId }) {
 
     return result;
   }, [uniqueMessages, myId]);
-
-  /* =====================================================
-     LONG PRESS MENU ACTIONS
-  ===================================================== */
-  const openContextMenu = (msg) => {
-    setContextMessage(msg);
-    setContextMenuVisible(true);
-  };
-
-  const closeContextMenu = () => {
-    setContextMenuVisible(false);
-  };
-
-  const doReply = () => {
-    if (!contextMessage) return;
-    setReplyTo(contextMessage);
-    closeContextMenu();
-  };
-
-  const doPin = () => {
-    if (!contextMessage?._id || !socketRef.current) return;
-
-    socketRef.current.emit("message:pin", {
-      chatId,
-      messageId: contextMessage._id,
-    });
-
-    closeContextMenu();
-  };
-
-  const doCopy = async () => {
-    if (!contextMessage) return;
-    await copyToClipboard(contextMessage?.ciphertext);
-    closeContextMenu();
-  };
 
   /* =====================================================
      MESSAGE ROW WITH ALL FEATURES
@@ -1003,10 +1052,6 @@ export default function ChatInterface({ chatId }) {
   /* =====================================================
      LOADING STATE
   ===================================================== */
-  useEffect(() => {
-    hasAutoScrolledRef.current = false;
-  }, [chatId]);
-
   if (loadingDetail || !selectedChat) {
     return (
       <View style={tw`flex-1 bg-gray-50`}>
@@ -1032,11 +1077,8 @@ export default function ChatInterface({ chatId }) {
      UI
   ===================================================== */
   return (
-    <KeyboardAvoidingView
-      style={tw`flex-1 bg-gray-50`}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
-    >
+    // 🔥 CHANGED: Replaced KeyboardAvoidingView with simple View
+    <View style={tw`flex-1 bg-gray-50`}>
       {/* ================= HEADER ================= */}
       <View
         style={{
@@ -1220,43 +1262,64 @@ export default function ChatInterface({ chatId }) {
       {/* ================= MESSAGES ================= */}
       <FlatList
         ref={listRef}
-        data={messagesWithDates}
-        keyExtractor={(item, index) => {
-          if (item.type === "date") {
-            return `date-${item.label}-${index}`;
-          }
-          return `msg-${item._id}`;
-        }}
+        data={[...messagesWithDates].reverse()} // 🔥 REVERSE for inverted
         renderItem={renderListItem}
-        // Viewability props for read receipts
+        keyExtractor={(item, index) =>
+          item.type === "date"
+            ? `date-${item.label}-${index}`
+            : `msg-${item._id}`
+        }
+
+        /* ================= WHATSAPP-STYLE SCROLLING ================= */
+        inverted // 🔥 KEY CHANGE: Uses native inversion
+
+        /* ================= READ RECEIPTS ================= */
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
-        // FIX #2: Add momentum scroll end handler
         onMomentumScrollEnd={onMomentumScrollEnd}
+
+        /* ================= PAGINATION ================= */
+        onEndReached={loadOlder}
+        onEndReachedThreshold={0.2}
+        maintainVisibleContentPosition={{
+          minIndexForVisible: 1,
+        }}
+
+        ListHeaderComponent={
+          loadingOlder ? (
+            <View style={tw`py-4 items-center`}>
+              <Text style={{ fontFamily: "Poppins-Regular", color: "#6B7280" }}>
+                Loading older messages…
+              </Text>
+            </View>
+          ) : null
+        }
+
+        /* ================= CHAT UX ================= */
         showsVerticalScrollIndicator={false}
-        onContentSizeChange={() => {
-          if (!hasAutoScrolledRef.current) {
-            requestAnimationFrame(() => {
-              listRef.current?.scrollToEnd({ animated: false });
-              hasAutoScrolledRef.current = true;
-            });
-          }
-        }}
-        onLayout={() => {
-          // Scroll to bottom on initial layout
-          setTimeout(() => {
-            listRef.current?.scrollToEnd({ animated: false });
-            hasAutoScrolledRef.current = true;
-          }, 100);
-        }}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        overScrollMode="never"
+        bounces={false}
+
+        /* ================= PERFORMANCE ================= */
+        initialNumToRender={25}
+        maxToRenderPerBatch={25}
+        windowSize={10}
+        removeClippedSubviews
+
+        /* =================================================
+           Keyboard safe padding (manual KAV replacement)
+        ================================================= */
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingTop: 12,
-          paddingBottom: keyboardVisible ? keyboardHeightRef.current + inputHeight + 20 : inputHeight + 20,
+          paddingBottom:
+            (keyboardVisible ? keyboardHeightRef.current : 0) +
+            inputHeight +
+            insets.bottom +
+            16,
         }}
-        overScrollMode="never"
-        bounces={false}
-        inverted={false} // Keep false for WhatsApp-style (latest at bottom)
       />
 
       {/* ================= DELETE FOR ME MODAL ================= */}
@@ -1524,7 +1587,7 @@ export default function ChatInterface({ chatId }) {
         </Pressable>
       </Modal>
 
-      {/* ================= REACTION DETAILS MODAL - ENHANCED ================= */}
+      {/* ================= REACTION DETAILS MODAL - REVERTED TO GROUPED STRUCTURE ================= */}
       <Modal
         visible={!!reactionModalMessage}
         transparent
@@ -1557,10 +1620,12 @@ export default function ChatInterface({ chatId }) {
               </TouchableOpacity>
             </View>
 
-            {/* Reaction Categories */}
+            {/* ✅ REVERTED: FlatMap grouped users */}
             <FlatList
               data={reactionModalMessage?.reactions || []}
-              keyExtractor={(item, index) => `reaction-${index}`}
+
+              keyExtractor={(item, index) => `reaction-${index}-${normalizeId(item.user) || index}`}
+
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => {
                 const uid = normalizeId(item.user);
@@ -1570,81 +1635,44 @@ export default function ChatInterface({ chatId }) {
                   <Pressable
                     onPress={() => {
                       if (isMine) {
-                        toggleReaction(reactionModalMessage, null);
+                        toggleReaction(reactionModalMessage, item.emoji);
                         closeReactionModal();
                       }
                     }}
                     style={tw`flex-row items-center justify-between py-3 border-b border-gray-100`}
                   >
                     <View style={tw`flex-row items-center flex-1`}>
-                      <Text style={tw`text-2xl mr-4`}>
-                        {item.emoji}
+                      <Text style={tw`text-2xl mr-4`}>{item.emoji}</Text>
+
+                      <Image
+                        source={
+                          getUserAvatar(item.user)
+                            ? { uri: getUserAvatar(item.user) }
+                            : require("../../assets/images/image-placeholder.png")
+                        }
+                        style={tw`w-12 h-12 rounded-full mr-4`}
+                      />
+
+                      <Text
+                        style={{
+                          fontFamily: "Poppins-SemiBold",
+                          fontSize: 16,
+                          color: "#111827",
+                        }}
+                      >
+                        {getUserName(item.user)}
                       </Text>
-
-                      <View style={tw`flex-row items-center flex-1`}>
-                        <Image
-                          source={
-                            getUserAvatar(item.user)
-                              ? { uri: getUserAvatar(item.user) }
-                              : require("../../assets/images/image-placeholder.png")
-                          }
-                          style={tw`w-12 h-12 rounded-full mr-4 bg-gray-200`}
-                        />
-
-                        <View style={tw`flex-1`}>
-                          <Text
-                            style={{
-                              fontFamily: "Poppins-SemiBold",
-                              fontSize: 16,
-                              color: "#111827",
-                            }}
-                          >
-                            {getUserName(item.user)}
-                          </Text>
-
-                          {!!item.createdAt && (
-                            <Text
-                              style={{
-                                fontFamily: "Poppins-Regular",
-                                fontSize: 13,
-                                color: "#6B7280",
-                                marginTop: 2,
-                              }}
-                            >
-                              {new Date(item.createdAt).toLocaleDateString(undefined, {
-                                weekday: 'short',
-                                month: 'short',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
-                            </Text>
-                          )}
-                        </View>
-                      </View>
                     </View>
 
                     {isMine && (
-                      <TouchableOpacity
-                        onPress={() => {
-                          toggleReaction(reactionModalMessage, null);
-                          closeReactionModal();
-                        }}
-                      >
-                        <Text
-                          style={{
-                            fontFamily: "Poppins-Medium",
-                            fontSize: 14,
-                            color: "#DC2626",
-                          }}
-                        >
-                          Remove
-                        </Text>
-                      </TouchableOpacity>
+                      <Text style={{ color: "#DC2626", fontFamily: "Poppins-Medium" }}>
+                        Remove
+                      </Text>
                     )}
                   </Pressable>
                 );
               }}
+
               ListEmptyComponent={
                 <View style={tw`py-8 items-center`}>
                   <Text
@@ -1670,6 +1698,7 @@ export default function ChatInterface({ chatId }) {
           style={[
             tw`absolute left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 flex-row items-center`,
             {
+              // 🔥 FIXED: Position above input based on keyboard state
               bottom: keyboardVisible
                 ? keyboardHeightRef.current + inputHeight
                 : inputHeight,
@@ -1735,6 +1764,6 @@ export default function ChatInterface({ chatId }) {
           <Ionicons name="send" size={18} color="white" />
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }

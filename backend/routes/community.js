@@ -54,12 +54,6 @@ router.get(
    GROUP CHAT (USES SHARED CHAT ENGINE)
 ===================================================== */
 
-// Get group messages
-router.get(
-  '/groups/:groupId/chat/:chatId/messages',
-    communityController.getGroupMessages
-);
-
 // Send group message
 router.post(
   '/groups/:groupId/chat/:chatId/messages',

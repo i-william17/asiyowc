@@ -128,9 +128,23 @@ export const fetchHubDetail = createAsyncThunk(
 
 export const fetchChatDetail = createAsyncThunk(
   "community/fetchChatDetail",
-  async (id, { getState, rejectWithValue }) => {
+  async (
+    { chatId, before = null, limit = 30, append = "replace" },
+    { getState, rejectWithValue }
+  ) => {
     try {
-      return await communityService.getChatById(id, getState().auth.token);
+      const token = getState().auth.token;
+
+      const res = await communityService.getChatById(
+        chatId,
+        token,
+        { before, limit } // pass to backend
+      );
+
+      return {
+        chat: res.data,
+        append,
+      };
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to load chat");
     }
@@ -237,30 +251,27 @@ export const sendChatMessage = createAsyncThunk(
 =========================== */
 export const fetchGroupConversation = createAsyncThunk(
   "community/fetchGroupConversation",
-  async (chatId, { getState, rejectWithValue }) => {
+  async (
+    { chatId, before = null, limit = 30, append = "replace" },
+    { getState, rejectWithValue }
+  ) => {
     try {
+      const token = getState().auth.token;
+
       const res = await communityService.getGroupConversationByChatId(
         chatId,
-        getState().auth.token
+        token,
+        { before, limit }
       );
-      return res.data;
+
+      return {
+        chat: res.data.chat,     // 🔥 correct
+        group: res.data.group,  // 🔥 include group
+        append,
+      };
+
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to load group conversation");
-    }
-  }
-);
-
-export const fetchGroupMessages = createAsyncThunk(
-  "community/fetchGroupMessages",
-  async ({ groupId, chatId }, { getState, rejectWithValue }) => {
-    try {
-      return await communityService.getGroupMessages(
-        groupId,
-        chatId,
-        getState().auth.token
-      );
-    } catch (e) {
-      return rejectWithValue(e.message);
     }
   }
 );
@@ -732,6 +743,10 @@ const communitySlice = createSlice({
       state.voiceErrors = null;
     },
 
+    clearSelectedChat: (state) => {
+      state.selectedChat = null;
+    },
+
   },
 
   extraReducers: (builder) => {
@@ -772,18 +787,69 @@ const communitySlice = createSlice({
       })
 
       .addCase(fetchChatDetail.fulfilled, (s, a) => {
-        s.selectedChat = {
-          ...a.payload.data,
-          chatType: "dm",
-        };
+        const { chat, append } = a.payload;
+
+        if (!s.selectedChat || append === "replace") {
+          // 🔥 first load
+          s.selectedChat = {
+            ...chat,
+            chatType: "dm",
+          };
+          return;
+        }
+
+        if (append === "prepend") {
+          // 🔥 load older
+          const existingIds = new Set(
+            s.selectedChat.messages.map(m => String(m._id))
+          );
+
+          const newMsgs = chat.messages.filter(
+            m => !existingIds.has(String(m._id))
+          );
+
+          s.selectedChat.messages = [
+            ...newMsgs,
+            ...s.selectedChat.messages,
+          ];
+        }
+
+        if (append === "append") {
+          // (optional future)
+          s.selectedChat.messages.push(...chat.messages);
+        }
       })
 
       .addCase(fetchGroupConversation.fulfilled, (s, a) => {
-        s.selectedChat = {
-          ...a.payload.chat,
-          group: a.payload.group,
-          chatType: "group",
-        };
+        const { chat, group, append } = a.payload;
+
+        if (!s.selectedChat || append === "replace") {
+          s.selectedChat = {
+            ...chat,
+            group,
+            chatType: "group",
+          };
+          return;
+        }
+
+        const existingIds = new Set(
+          s.selectedChat.messages.map(m => String(m._id))
+        );
+
+        const unique = chat.messages.filter(
+          m => !existingIds.has(String(m._id))
+        );
+
+        if (append === "prepend") {
+          s.selectedChat.messages = [
+            ...unique,
+            ...s.selectedChat.messages
+          ];
+        }
+
+        if (append === "append") {
+          s.selectedChat.messages.push(...unique);
+        }
       })
 
       .addCase(sendChatMessage.fulfilled, (s, a) => {
@@ -904,6 +970,7 @@ export const {
   deleteMessageForMe,
   deleteMessageForEveryone,
   updateEditedMessage,
+  clearSelectedChat,
 
   /* VOICE */
   voiceJoined,

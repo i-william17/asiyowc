@@ -9,6 +9,13 @@ import postReducer from './slices/postSlice';
 import uiReducer from './slices/uiSlice';
 import presenceReducer from './slices/presenceSlice';
 import legacyReducer from './slices/legacySlice';
+import eventReducer from './slices/eventSlice';
+import mentorshipReducer from './slices/mentorshipSlice';
+import wellnessReducer from './slices/wellnessSlice';
+
+/* =====================================================
+   STORE CONFIGURATION
+===================================================== */
 
 export const store = configureStore({
   reducer: {
@@ -21,7 +28,10 @@ export const store = configureStore({
     posts: postReducer,
     ui: uiReducer,
     presence: presenceReducer,
-    legacy: legacyReducer
+    legacy: legacyReducer,
+    events: eventReducer,
+    mentorship: mentorshipReducer,
+    wellness: wellnessReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

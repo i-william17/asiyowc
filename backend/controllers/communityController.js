@@ -518,55 +518,35 @@ exports.deleteGroup = async (req, res) => {
 };
 
 /* =====================================================
-   GROUP CONVERSATION (Chat type = 'group')
-   send message, get messages, delete message
+   GET GROUP CONVERSATION (groupId → chatId)
+   Used when opening group
 ===================================================== */
-
-// 5. Get group conversation info (chat id + basic)
 exports.getGroupConversation = async (req, res) => {
   try {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
     const { groupId } = req.params;
-    if (!ensureObjectIdParam(res, groupId, 'groupId')) return;
 
-    const group = await Group.findOne({ _id: groupId, isRemoved: false });
-    const vis = await ensureGroupVisibility(group, user.id);
-    if (!vis.ok) {
-      return vis.code === 403 ? forbidden(res, vis.message) : notFound(res, vis.message);
+    if (!mongoose.Types.ObjectId.isValid(groupId)) {
+      return bad(res, "Invalid groupId");
     }
 
-    const chat = await ensureGroupChatExistsAndSynced(group);
-    return ok(res, { chatId: chat._id, groupId: group._id });
-  } catch (error) {
-    return serverError(res, error);
-  }
-};
-
-/* =====================================================
-   GROUP CONVERSATION BY CHAT ID (🔥 REQUIRED)
-===================================================== */
-
-exports.getGroupConversationByChatId = async (req, res) => {
-  try {
-    const user = ensureAuthUser(req, res);
-    if (!user) return;
-
-    const { chatId } = req.params;
-    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
-
-    // 1️⃣ Find group by chatId
+    /* =============================
+       1️⃣ LOAD GROUP
+    ============================== */
     const group = await Group.findOne({
-      chat: chatId,
-      isRemoved: false
-    }).lean();
+      _id: groupId,
+      isRemoved: false,
+    })
+      .populate("members.user", "profile.fullName profile.avatar")
+      .populate("admins", "profile.fullName profile.avatar");
 
-    if (!group) {
-      return notFound(res, 'Group not found for this chat');
-    }
+    if (!group) return notFound(res, "Group not found");
 
-    // 2️⃣ Visibility check
+    /* =============================
+       2️⃣ ACCESS CHECK
+    ============================== */
     const vis = await ensureGroupVisibility(group, user.id);
     if (!vis.ok) {
       return vis.code === 403
@@ -574,65 +554,132 @@ exports.getGroupConversationByChatId = async (req, res) => {
         : notFound(res, vis.message);
     }
 
-    // 3️⃣ Load chat with populated messages
-    const chat = await Chat.findOne({
-      _id: chatId,
-      type: 'group',
-      isRemoved: false
-    }).populate('messages.sender', 'profile.fullName profile.avatar');
+    /* =============================
+       3️⃣ ENSURE CHAT EXISTS
+    ============================== */
+    const chat = await ensureGroupChatExistsAndSynced(group);
 
-    if (!chat) {
-      return notFound(res, 'Chat not found');
-    }
-
+    /* =============================
+       4️⃣ RETURN AS UNIT
+    ============================== */
     return ok(res, {
       group,
-      chat
+      chatId: chat._id,
     });
   } catch (error) {
-    console.error('[getGroupConversationByChatId]', error);
+    console.error("[getGroupConversation]", error);
     return serverError(res, error);
   }
 };
 
-
-// 5. Get messages (paginated)
-exports.getGroupMessages = async (req, res) => {
+/* =====================================================
+   GROUP CONVERSATION BY CHAT ID
+   🔥 RETURNS: group + chat + messages (UNIT)
+===================================================== */
+exports.getGroupConversationByChatId = async (req, res) => {
   try {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
     const { chatId } = req.params;
-    const { page, limit, skip } = parsePage(req);
+    const { before, limit = 30 } = req.query;
 
-    const chat = await Chat.findOne(
-      { _id: chatId, participants: user.id, isRemoved: false },
-      { messages: { $slice: [skip, limit] } }
-    )
-      .populate({
-        path: 'messages.sender',
-        select: 'profile.fullName profile.avatar'
-      })
-      .populate({
-        path: 'messages.replyTo',
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return bad(res, "Invalid chatId");
+    }
+
+    /* =============================
+       1️⃣ LOAD CHAT
+    ============================== */
+    const chat = await Chat.findOne({
+      _id: chatId,
+      type: "group",
+      participants: user.id,
+      isRemoved: false,
+    });
+
+    if (!chat) return notFound(res, "Chat not found");
+
+    let messages = chat.messages || [];
+
+    /* =============================
+       2️⃣ SORT NEWEST FIRST
+    ============================== */
+    messages.sort((a, b) => b.createdAt - a.createdAt);
+
+    /* =============================
+       3️⃣ CURSOR PAGINATION
+    ============================== */
+    if (before) {
+      const index = messages.findIndex(
+        (m) => String(m._id) === String(before)
+      );
+
+      if (index !== -1) {
+        messages = messages.slice(index + 1);
+      }
+    }
+
+    /* =============================
+       4️⃣ LIMIT
+    ============================== */
+    messages = messages.slice(0, Number(limit));
+
+    /* =============================
+       5️⃣ RETURN OLDEST → NEWEST
+    ============================== */
+    messages.reverse();
+
+    /* =============================
+       6️⃣ POPULATE MESSAGES
+    ============================== */
+    const populatedMessages = await Chat.populate(messages, [
+      {
+        path: "sender",
+        select: "profile.fullName profile.avatar",
+      },
+      {
+        path: "replyTo",
         populate: {
-          path: 'sender',
-          select: 'profile.fullName profile.avatar'
-        }
-      })
-      .populate({
-        path: 'messages.reactions.user',
-        select: 'profile.fullName profile.avatar'
-      });
+          path: "sender",
+          select: "profile.fullName profile.avatar",
+        },
+      },
+      {
+        path: "reactions.user",
+        select: "profile.fullName profile.avatar",
+      },
+    ]);
 
-    if (!chat) return notFound(res, 'Chat not found');
+    /* =============================
+       🔥 7️⃣ FIND GROUP USING CHAT ID
+       (CRITICAL FIX FOR YOUR SCHEMA)
+    ============================== */
+    const group = await Group.findOne({
+      chat: chat._id,
+      isRemoved: false,
+    })
+      .populate("members.user", "profile.fullName profile.avatar")
+      .populate("admins", "profile.fullName profile.avatar");
 
-    return ok(res, chat.messages);
-  } catch (e) {
-    return serverError(res, e);
+    if (!group) return notFound(res, "Group not found");
+
+    /* =============================
+       8️⃣ FINAL RESPONSE (UNIT)
+    ============================== */
+    return ok(res, {
+      group,
+      chat: {
+        _id: chat._id,
+        pinnedMessage: chat.pinnedMessage || null,
+        messages: populatedMessages,
+      },
+    });
+  } catch (err) {
+    console.error("[getGroupConversationByChatId]", err);
+    return serverError(res, err);
   }
 };
-
 
 // 5. Send message in group chat
 exports.sendGroupMessage = async (req, res) => {
@@ -1342,7 +1389,7 @@ exports.deleteHub = async (req, res) => {
   }
 };
 
- //Toggle Hub Reactions
+//Toggle Hub Reactions
 exports.toggleHubReaction = async (req, res) => {
   try {
     const user = ensureAuthUser(req, res);
@@ -1605,37 +1652,45 @@ exports.getMessages = async (req, res) => {
     if (!user) return;
 
     const { chatId } = req.params;
-    if (!isValidObjectId(chatId)) return bad(res, 'Invalid chatId');
+    const limit = Math.min(50, parseInt(req.query.limit || 30));
+    const before = req.query.before;
 
-    const { page, limit, skip } = parsePage(req);
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: user.id,
+      isRemoved: false
+    });
 
-    const chat = await Chat.findOne(
-      { _id: chatId, participants: user.id, isRemoved: false },
-      { messages: { $slice: [skip, limit] } }
-    )
-      .populate({
-        path: 'messages.sender',
-        select: 'profile.fullName profile.avatar'
-      })
-      .populate({
-        path: 'messages.replyTo',
-        populate: {
-          path: 'sender',
-          select: 'profile.fullName profile.avatar'
-        }
-      })
-      .populate({
-        path: 'messages.reactions.user',
-        select: 'profile.fullName profile.avatar'
-      });
+    if (!chat) return notFound(res, "Chat not found");
 
-    if (!chat) return notFound(res, 'Chat not found');
+    let messages = chat.messages || [];
 
-    return ok(res, chat.messages);
+    // 🔥 newest
+    if (!before) {
+      messages = messages.slice(-limit);
+    }
+    // 🔥 older
+    else {
+      const index = messages.findIndex(
+        (m) => String(m._id) === String(before)
+      );
+
+      if (index === -1) {
+        messages = messages.slice(-limit);
+      } else {
+        messages = messages.slice(
+          Math.max(0, index - limit),
+          index
+        );
+      }
+    }
+
+    return ok(res, messages);
   } catch (e) {
     return serverError(res, e);
   }
 };
+
 
 // 7. Get message by Id
 exports.getMessageById = async (req, res) => {

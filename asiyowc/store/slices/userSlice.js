@@ -1,6 +1,8 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { authService } from '../../services/auth';
 import { secureStore } from '../../services/storage';
+import axios from 'axios';
+import { server } from '../../server';
 
 /* ============================================================
    FETCH USER PROFILE (/users/profile)
@@ -22,6 +24,49 @@ export const fetchUserProfile = createAsyncThunk(
       return rejectWithValue(
         error.response?.data || { message: error.message }
       );
+    }
+  }
+);
+
+/* =====================================================
+   DISCOVER USERS (PAGINATED)
+===================================================== */
+export const fetchDiscoverUsers = createAsyncThunk(
+  "users/fetchDiscoverUsers",
+  async ({ page = 1, limit = 10 }, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+
+      const res = await axios.get(
+        `${server}/users/discover?limit=${limit}&page=${page}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      return res.data.data;
+    } catch (err) {
+      return rejectWithValue(err.response?.data || err.message);
+    }
+  }
+);
+
+/* =====================================================
+   ROULETTE USER
+===================================================== */
+export const fetchRouletteUser = createAsyncThunk(
+  "users/fetchRouletteUser",
+  async (_, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+
+      const res = await axios.get(`${server}/users/roulette`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      return res.data.data.user;
+    } catch (err) {
+      return rejectWithValue(err.response?.data || err.message);
     }
   }
 );
@@ -200,8 +245,18 @@ const userSlice = createSlice({
     enrolledPrograms: [],
     completedPrograms: [],
     loading: false,
+    loadingMore: false,
+    rouletteLoading: false,
+
     error: null,
-    message: null
+    message: null,
+
+    discoverUsers: [],
+    rouletteUser: null,
+
+    page: 1,
+    hasMore: true,
+
   },
 
   reducers: {
@@ -225,7 +280,13 @@ const userSlice = createSlice({
       if (action.payload.email !== undefined) {
         state.user.email = action.payload.email;
       }
-    }
+    },
+
+    resetDiscoverUsers: (state) => {
+      state.discoverUsers = [];
+      state.page = 1;
+      state.hasMore = true;
+    },
   },
 
   extraReducers: (builder) => {
@@ -328,13 +389,63 @@ const userSlice = createSlice({
       .addCase(updatePassword.fulfilled, (state) => {
         state.loading = false;
         state.message = 'Password updated successfully';
-      });
+      })
+
+      /* ================= DISCOVER ================= */
+
+      .addCase(fetchDiscoverUsers.pending, (state, action) => {
+        if (action.meta.arg.page === 1) {
+          state.loading = true;
+        } else {
+          state.loadingMore = true;
+        }
+      })
+
+      .addCase(fetchDiscoverUsers.fulfilled, (state, action) => {
+        const { users, page, hasMore } = action.payload;
+
+        if (page === 1) {
+          state.discoverUsers = users;
+        } else {
+          state.discoverUsers.push(...users);
+        }
+
+        state.page = page;
+        state.hasMore = hasMore;
+
+        state.loading = false;
+        state.loadingMore = false;
+      })
+
+      .addCase(fetchDiscoverUsers.rejected, (state, action) => {
+        state.loading = false;
+        state.loadingMore = false;
+        state.error = action.payload;
+      })
+
+
+      /* ================= ROULETTE ================= */
+
+      .addCase(fetchRouletteUser.pending, (state) => {
+        state.rouletteLoading = true;
+      })
+
+      .addCase(fetchRouletteUser.fulfilled, (state, action) => {
+        state.rouletteUser = action.payload;
+        state.rouletteLoading = false;
+      })
+
+      .addCase(fetchRouletteUser.rejected, (state, action) => {
+        state.rouletteLoading = false;
+        state.error = action.payload;
+      })
   }
 });
 
 export const {
   clearUser,
-  updateProfileOptimistic
+  updateProfileOptimistic,
+  resetDiscoverUsers
 } = userSlice.actions;
 
 export default userSlice.reducer;

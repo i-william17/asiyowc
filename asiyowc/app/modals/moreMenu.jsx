@@ -22,8 +22,8 @@ export default function MoreMenu() {
       route: "/more/mentorship",
     },
     {
-      title: "Wellness & Travel",
-      subtitle: "Retreats, wellbeing, and travel experiences",
+      title: "Wellness & Retreats",
+      subtitle: "Retreats, wellbeing, and calming experiences",
       icon: "leaf",
       route: "/more/wellness",
     },

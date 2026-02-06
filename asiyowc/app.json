@@ -18,6 +18,7 @@
       "bundleIdentifier": "com.anonymous.asiyowc"
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/asiyo-nobg.png",
         "backgroundColor": "#ffffff"

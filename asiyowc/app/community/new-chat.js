@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,22 +7,25 @@ import {
   TouchableOpacity,
   Image,
 } from "react-native";
-import axios from "axios";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { Shuffle } from "lucide-react-native";
 
-import { server } from "../../server";
 import tw from "../../utils/tw";
 import ConfirmModal from "../../components/community/ConfirmModal";
 import ShimmerLoader from "../../components/ui/ShimmerLoader";
 import { createOrGetDMChat } from "../../store/slices/communitySlice";
+import {
+  fetchDiscoverUsers,
+  fetchRouletteUser
+} from "../../store/slices/userSlice";
 
 /* =====================================================
-   HELPERS (AUTHORITATIVE & SAFE)
+   HELPERS (SAFE + AUTHORITATIVE)
 ===================================================== */
 
-// ✅ Extract userId from JWT token (SOURCE OF TRUTH)
 const getUserIdFromToken = (token) => {
   try {
     if (!token) return null;
@@ -34,7 +37,6 @@ const getUserIdFromToken = (token) => {
   }
 };
 
-// ✅ Normalize ANY backend user shape
 const normalizeId = (u) => {
   if (!u) return null;
   if (typeof u === "string") return String(u);
@@ -45,7 +47,58 @@ const normalizeId = (u) => {
 };
 
 /* =====================================================
-   NEW DIRECT MESSAGE CHAT SCREEN (FINAL)
+   NETWORKING ROULETTE (MEMOIZED + SAFE)
+===================================================== */
+
+const NetworkingRoulette = React.memo(({ onMatch, loading }) => {
+  return (
+    <LinearGradient
+      colors={["#7C3AED", "#6D28D9"]}
+      style={tw`rounded-2xl p-6 mt-6 mx-6 shadow-lg`}
+    >
+      <View style={tw`flex-row items-center justify-between mb-4`}>
+        <View>
+          <Text
+            style={[
+              tw`text-white text-xl`,
+              { fontFamily: "Poppins-Bold" },
+            ]}
+          >
+            Networking Roulette
+          </Text>
+          <Text
+            style={[
+              tw`text-white/90 text-sm`,
+              { fontFamily: "Poppins-Regular" },
+            ]}
+          >
+            Connect with a random sister globally
+          </Text>
+        </View>
+
+        <Shuffle size={28} color="#FFFFFF" />
+      </View>
+
+      <TouchableOpacity
+        style={tw`bg-white rounded-full py-3 items-center`}
+        onPress={loading ? null : onMatch}
+        activeOpacity={0.85}
+      >
+        <Text
+          style={[
+            tw`text-purple-700`,
+            { fontFamily: "Poppins-SemiBold" },
+          ]}
+        >
+          {loading ? "Finding match..." : "Find a Match"}
+        </Text>
+      </TouchableOpacity>
+    </LinearGradient>
+  );
+});
+
+/* =====================================================
+   NEW DIRECT MESSAGE SCREEN
 ===================================================== */
 
 export default function NewChatScreen() {
@@ -54,80 +107,55 @@ export default function NewChatScreen() {
 
   const { token } = useSelector((s) => s.auth);
 
-  // 🔒 ONLY SOURCE OF TRUTH
   const myId = getUserIdFromToken(token);
-
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [chatSource, setChatSource] = useState("list");
 
   const [selectedUser, setSelectedUser] = useState(null);
   const [confirmVisible, setConfirmVisible] = useState(false);
+  const {
+    discoverUsers,
+    loading,
+    loadingMore,
+    page,
+    hasMore,
+    rouletteLoading
+  } = useSelector((s) => s.user);
 
   /* =====================================================
      FETCH USERS
   ===================================================== */
   useEffect(() => {
-    let mounted = true;
+    dispatch(fetchDiscoverUsers({ page: 1 }));
+  }, [dispatch]);
 
-    const loadUsers = async () => {
-      try {
-        const res = await axios.get(`${server}/users/all`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+  const loadMore = () => {
+    if (!hasMore || loadingMore) return;
 
-        if (!mounted) return;
-
-        const payload = res.data;
-
-        const list =
-          Array.isArray(payload)
-            ? payload
-            : Array.isArray(payload?.data)
-            ? payload.data
-            : Array.isArray(payload?.data?.users)
-            ? payload.data.users
-            : Array.isArray(payload?.users)
-            ? payload.users
-            : [];
-
-        setUsers(list);
-      } catch (err) {
-        console.error("[NewChat] ❌ Failed to fetch users", err);
-        setUsers([]);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    if (token) loadUsers();
-
-    return () => {
-      mounted = false;
-    };
-  }, [token]);
+    dispatch(fetchDiscoverUsers({ page: page + 1 }));
+  };
 
   /* =====================================================
-     FILTER USERS (TOKEN-BASED SELF EXCLUSION)
+     FILTER USERS
   ===================================================== */
+
   const filteredUsers = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    return (Array.isArray(users) ? users : [])
+    return (discoverUsers || [])
       .map((u) => ({ ...u, __uid: normalizeId(u) }))
-      .filter((u) => u.__uid)          // valid ID only
-      .filter((u) => u.__uid !== myId) // ❗ exclude SELF (JWT)
+      .filter((u) => u.__uid && u.__uid !== myId)
       .filter((u) => {
         if (!q) return true;
         return (u.profile?.fullName || "")
           .toLowerCase()
           .includes(q);
       });
-  }, [users, query, myId]);
-
+  }, [discoverUsers, query, myId]);
   /* =====================================================
-     START / CREATE DM CHAT
+     START CHAT (NORMAL)
   ===================================================== */
+
   const startChat = async () => {
     try {
       const pid = normalizeId(selectedUser);
@@ -142,17 +170,39 @@ export default function NewChatScreen() {
 
       router.replace(`/community/chat/${chat._id}`);
     } catch (err) {
-      console.error("[NewChat] ❌ Failed to start chat", err);
+      console.error(err);
     }
   };
 
   /* =====================================================
-     USER ITEM
+     ROULETTE MATCH
   ===================================================== */
+
+  const startRandomChat = useCallback(async () => {
+    try {
+      const user = await dispatch(fetchRouletteUser()).unwrap();
+
+      if (!user) return;
+
+      setSelectedUser(user);
+      setChatSource("roulette");   // ✅ add
+      setConfirmVisible(true);
+
+    } catch (err) {
+      console.error(err);
+    }
+  }, [dispatch]);
+
+
+  /* =====================================================
+     USER ROW
+  ===================================================== */
+
   const renderUser = ({ item }) => (
     <TouchableOpacity
       onPress={() => {
         setSelectedUser(item);
+        setChatSource("list");
         setConfirmVisible(true);
       }}
       style={tw`flex-row items-center bg-white p-4 rounded-2xl mb-3 border border-gray-200`}
@@ -170,6 +220,7 @@ export default function NewChatScreen() {
         <Text style={{ fontFamily: "Poppins-SemiBold", fontSize: 15 }}>
           {item.profile?.fullName || "User"}
         </Text>
+
         <Text
           style={{
             fontFamily: "Poppins-Regular",
@@ -181,13 +232,14 @@ export default function NewChatScreen() {
         </Text>
       </View>
 
-      <Ionicons name="chatbubble-outline" size={20} color="#6A1B9A" />
+      <Ionicons name="chatbubble-outline" size={20} color="#FFD700" />
     </TouchableOpacity>
   );
 
   /* =====================================================
      LOADING
   ===================================================== */
+
   if (loading) {
     return (
       <View style={tw`flex-1 bg-gray-50 px-6 pt-6`}>
@@ -199,10 +251,16 @@ export default function NewChatScreen() {
   /* =====================================================
      UI
   ===================================================== */
+
   return (
     <View style={tw`flex-1 bg-gray-50`}>
       {/* HEADER */}
-      <View style={tw`px-6 pt-14 pb-6 bg-purple-700 rounded-b-3xl`}>
+      <View
+        style={[
+          tw`px-6 pt-14 pb-6 rounded-b-3xl`,
+          { backgroundColor: "#6A1B9A" },
+        ]}
+      >
         <View style={tw`flex-row items-center`}>
           <TouchableOpacity onPress={() => router.back()} style={tw`mr-4`}>
             <Ionicons name="arrow-back" size={22} color="#fff" />
@@ -232,22 +290,45 @@ export default function NewChatScreen() {
         </View>
       </View>
 
+      {/* ROULETTE */}
+      <NetworkingRoulette
+        onMatch={startRandomChat}
+        loading={rouletteLoading} />
+
       {/* USERS */}
       <FlatList
         data={filteredUsers}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
+
         keyExtractor={(item) => item.__uid}
         renderItem={renderUser}
         contentContainerStyle={tw`px-6 pt-6 pb-10`}
         showsVerticalScrollIndicator={false}
+        ListFooterComponent={
+          loadingMore ? (
+            <View style={tw`py-6`}>
+              <ShimmerLoader />
+            </View>
+          ) : null
+        }
       />
 
-      {/* CONFIRM MODAL */}
+      {/* CONFIRM */}
       <ConfirmModal
         visible={confirmVisible}
-        title="Start chat?"
-        message={`Start a conversation with ${
-          selectedUser?.profile?.fullName || "this user"
-        }?`}
+        title={
+          chatSource === "roulette"
+            ? "New Match Found!"
+            : "Start chat?"
+        }
+
+        message={
+          chatSource === "roulette"
+            ? `We found ${selectedUser?.profile?.fullName || "someone"} for you. Want to connect and start chatting?`
+            : `Start a conversation with ${selectedUser?.profile?.fullName || "this user"}?`
+        }
+
         confirmText="Start Chat"
         cancelText="Cancel"
         onCancel={() => {

@@ -23,9 +23,10 @@ const paymentRoutes = require('./routes/payments.js');
 const communityRoutes = require('./routes/community.js');
 const aiRoutes = require("./routes/ai.js");
 const legacyRoutes = require('./routes/legacy.js');
-// const eventRoutes = require('./routes/events.js');
+const eventRoutes = require('./routes/events.js');
+const wellnessRoutes = require('./routes/wellness.js');
 // const marketplaceRoutes = require('./routes/marketplace.js');
-// const mentorshipRoutes = require('./routes/mentorship.js');
+const mentorRoutes = require('./routes/mentorship.js');
 // const moderationRoutes = require('./routes/moderation.js');
 // const uploadRoutes = require('./routes/upload.js');
 
@@ -175,10 +176,10 @@ app.use('/api/payments', paymentRoutes);
 app.use("/api/ai", aiRoutes);
 app.use('/api/community', communityRoutes);
 app.use('/api/legacy', legacyRoutes);
-// app.use('/api/chat', chatRoutes);
-// app.use('/api/events', eventRoutes);
+app.use('/api/events', eventRoutes);
+app.use('/api/wellness', wellnessRoutes);
 // app.use('/api/marketplace', marketplaceRoutes);
-// app.use('/api/mentorship', mentorshipRoutes);
+app.use('/api/mentors', mentorRoutes);
 // app.use('/api/moderation', moderationRoutes);
 // app.use('/api/upload', uploadRoutes);
 
