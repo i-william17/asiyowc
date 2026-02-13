@@ -4,6 +4,7 @@ const router = express.Router();
 
 const communityController = require('../controllers/communityController');
 const { auth, isModerator } = require('../middleware/auth');
+const { upload } = require('../middleware/upload');
 
 /* =====================================================
    GLOBAL MIDDLEWARE
@@ -57,13 +58,13 @@ router.get(
 // Send group message
 router.post(
   '/groups/:groupId/chat/:chatId/messages',
-    communityController.sendGroupMessage
+  communityController.sendGroupMessage
 );
 
 // Delete group message
 router.delete(
   '/groups/:groupId/chat/:chatId/messages/:messageId',
-    communityController.deleteGroupMessage
+  communityController.deleteGroupMessage
 );
 
 /* =====================================================
@@ -92,6 +93,31 @@ router.put('/hubs/:id', isModerator, communityController.updateHub);
 router.delete('/hubs/:id', isModerator, communityController.deleteHub);
 
 /* =====================================================
+   HUB UPDATES
+===================================================== */
+
+router.get("/hubs/:hubId/updates", auth, communityController.getHubUpdates);
+
+router.post(
+  "/hubs/:hubId/updates",
+  auth,
+  upload.single("media"),
+  communityController.createHubUpdate
+);
+
+router.delete(
+  "/hubs/:hubId/updates/:updateId",
+  auth,
+  communityController.deleteHubUpdate
+);
+
+router.post(
+  "/hubs/:hubId/updates/:updateId/react",
+  auth,
+  communityController.reactToHubUpdate
+);
+
+/* =====================================================
    CHAT ROUTES (DM + GROUP — SAME SCHEMA)
 ===================================================== */
 
@@ -104,43 +130,43 @@ router.get('/chats', communityController.getChats);
 // Get chat by ID
 router.get(
   '/chats/:chatId',
-    communityController.getChatById
+  communityController.getChatById
 );
 
 // Get messages
 router.get(
   '/chats/:chatId/messages',
-    communityController.getMessages
+  communityController.getMessages
 );
 
 // Get message by ID
 router.get(
   '/chats/:chatId/messages/:messageId',
-    communityController.getMessageById
+  communityController.getMessageById
 );
 
 // Send message
 router.post(
   '/chats/:chatId/messages',
-    communityController.sendMessage
+  communityController.sendMessage
 );
 
 // Edit message
 router.patch(
   '/chats/:chatId/messages/:messageId',
-    communityController.editMessageById
+  communityController.editMessageById
 );
 
 // Delete message
 router.delete(
   '/chats/:chatId/messages/:messageId',
-    communityController.deleteMessageById
+  communityController.deleteMessageById
 );
 
 // Share post in chat
 router.post(
   '/chats/:chatId/share',
-    communityController.sharePostInChat
+  communityController.sharePostInChat
 );
 
 // React to message

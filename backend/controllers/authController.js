@@ -426,3 +426,113 @@ exports.resetPassword = async (req, res) => {
     });
   }
 };
+
+/* ==========================================================
+   ADMIN LOGIN
+========================================================== */
+exports.adminLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    console.log("Request body:", req.body);
+
+    const user = await User.findOne({ email }).select('+password');
+
+    if (!user || !(await user.correctPassword(password, user.password))) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password',
+      });
+    }
+
+    // ⭐ ONLY ADMINS
+    if (!user.isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin access only',
+      });
+    }
+
+    if (!user.isVerified?.email) {
+      return res.status(403).json({
+        success: false,
+        message: 'Please verify your email first',
+      });
+    }
+
+    const token = generateToken(user._id);
+
+    return res.json({
+      success: true,
+      data: {
+        token,
+        user: {
+          id: user._id,
+          email: user.email,
+          profile: user.profile,
+          isAdmin: true,
+        },
+      },
+    });
+
+  } catch (error) {
+    console.error('❌ adminLogin error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ==========================================================
+   MAKE ADMIN (PROMOTE USER)
+========================================================== */
+exports.makeAdmin = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    user.isAdmin = true;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'User promoted to admin',
+    });
+
+  } catch (error) {
+    console.error('❌ makeAdmin error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/* ==========================================================
+   REMOVE ADMIN (DEMOTE)
+========================================================== */
+exports.removeAdmin = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found',
+      });
+    }
+
+    user.isAdmin = false;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Admin privileges removed',
+    });
+
+  } catch (error) {
+    console.error('❌ removeAdmin error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+

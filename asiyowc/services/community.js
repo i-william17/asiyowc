@@ -397,6 +397,69 @@ export const communityService = {
   },
 
   /* ============================================================
+   HUB UPDATES (ANNOUNCEMENTS)
+   🔥 MATCHES EXISTING FETCH STYLE
+============================================================ */
+
+  getHubUpdates: (hubId, token) => {
+    const id = normalizeId(hubId);
+    if (!id) throw new Error("Invalid hub id");
+
+    return fetch(`${server}/community/hubs/${id}/updates`, {
+      headers: headers(token),
+    }).then(json);
+  },
+
+  createHubUpdate: (hubId, formData, token) => {
+    const id = normalizeId(hubId);
+    if (!id) throw new Error("Invalid hub id");
+
+    if (!(formData instanceof FormData)) {
+      throw new Error("FormData required for media upload");
+    }
+
+    return fetch(`${server}/community/hubs/${id}/updates`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`, // ❌ no JSON header for multipart
+      },
+      body: formData,
+    }).then(json);
+  },
+
+  deleteHubUpdate: (hubId, updateId, token) => {
+    const hid = normalizeId(hubId);
+    const uid = normalizeId(updateId);
+
+    if (!hid || !uid) throw new Error("Invalid ids");
+
+    return fetch(
+      `${server}/community/hubs/${hid}/updates/${uid}`,
+      {
+        method: "DELETE",
+        headers: headers(token),
+      }
+    ).then(json);
+  },
+
+  reactHubUpdate: (hubId, updateId, emoji, token) => {
+    const hid = normalizeId(hubId);
+    const uid = normalizeId(updateId);
+
+    if (!hid || !uid) throw new Error("Invalid ids");
+    if (!emoji) throw new Error("Emoji required");
+
+    return fetch(
+      `${server}/community/hubs/${hid}/updates/${uid}/react`,
+      {
+        method: "POST",
+        headers: headers(token),
+        body: JSON.stringify({ emoji }),
+      }
+    ).then(json);
+  },
+
+  /* ============================================================
      VOICE
   ============================================================ */
 

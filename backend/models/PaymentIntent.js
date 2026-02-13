@@ -7,7 +7,7 @@ const paymentIntentSchema = new mongoose.Schema(
 
     purpose: {
       type: String,
-      enum: ["SAVINGS_CONTRIBUTION", "WITHDRAWAL_PAYOUT", "WITHDRAWAL_REFUND"],
+      enum: ["SAVINGS_CONTRIBUTION", "WITHDRAWAL_PAYOUT", "WITHDRAWAL_REFUND", "PRODUCT_PURCHASE", "PROGRAM_FEE", "EVENT_FEE", "OTHER"],
       required: true,
     },
 

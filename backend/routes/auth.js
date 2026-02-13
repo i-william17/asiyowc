@@ -9,10 +9,13 @@ const {
   forgotPassword,
   resetPassword,
   verifyResetToken,
-  getMe 
+  getMe,
+  adminLogin,
+  makeAdmin,
+  removeAdmin, 
 } = require('../controllers/authController');
 
-const { auth } = require('../middleware/auth');
+const { auth, isAdmin } = require('../middleware/auth');
 
 const {
   registerValidation,
@@ -38,5 +41,19 @@ router.post('/reset-password', resetPassword);
 // 2FA routes
 router.post('/2fa/setup', auth, setup2FA);
 router.post('/2fa/verify', auth, verify2FA);
+
+/* ==========================================================
+   ADMIN ROUTES
+========================================================== */
+
+// Admin login (public)
+router.post('/admin/login', authLimiter, loginValidation, handleValidationErrors, adminLogin);
+
+// Promote user → admin
+router.patch('/admin/users/:id/make-admin', auth, isAdmin, makeAdmin);
+
+// Demote admin → user
+router.patch('/admin/users/:id/remove-admin', auth, isAdmin, removeAdmin);
+
 
 module.exports = router;

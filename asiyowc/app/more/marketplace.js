@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   TextInput,
-  Image,
-} from 'react-native';
+  Modal,
+  Alert,
+} from "react-native";
 import {
   Search,
   ShoppingBag,
@@ -17,575 +17,971 @@ import {
   Star,
   MapPin,
   Plus,
-} from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+  X,
+  Filter,
+  ArrowUpDown,
+  Check,
+  Send,
+  Users,
+  Calendar,
+  Clock,
+  Globe,
+  BadgeCheck,
+  Sparkles,
+  ShoppingCart,
+  Package,
+} from "lucide-react-native";
 import tw from "../../utils/tw";
+import { useRouter } from "expo-router";
+import { ChevronLeft } from "lucide-react-native";
+import CartModal from "../../components/marketplace/CartModal";
+import CheckoutScreen from "../../components/marketplace/CheckoutScreen";
 
-// Tab Components
-const TabButton = React.memo(({ label, value, activeTab, onPress }) => {
-  const isActive = activeTab === value;
-  
+// Import the tab components
+import ProductsTab from "../../components/marketplace/ProductsTab";
+import JobsTab from "../../components/marketplace/JobsTab";
+import FundingTab from "../../components/marketplace/FundingTab";
+import SkillsTab from "../../components/marketplace/SkillsTab";
+
+// Import shared components
+import ModalShell from "../../components/marketplace/ModalShell";
+import FilterModal from "../../components/marketplace/FilterModal";
+import ListModal from "../../components/marketplace/ListModal";
+import DetailModals from "../../components/marketplace/DetailModals";
+import OrderModal from "../../components/marketplace/OrderModal";
+
+import { useDispatch, useSelector } from "react-redux";
+import { addToCart } from "../../store/slices/cartSlice";
+import {
+  fetchProducts,
+  fetchJobs,
+  fetchFunding,
+  fetchSkills,
+  createProduct,
+  createJob,
+  createFunding,
+  createSkill,
+} from "../../store/slices/marketplaceSlice";
+
+import ShimmerLoader from "../../components/ui/ShimmerLoader";
+
+/* ============================================================
+   THEME
+============================================================ */
+const PRIMARY = "#6A1B9A";
+const BG = "#F7F5FB";
+const SURFACE = "#FFFFFF";
+const BORDER = "#EEEAF6";
+const TEXT = "#111827";
+const MUTED = "#6B7280";
+const SOFT = "#EFE9F7";
+
+/* ============================================================
+   HELPERS
+============================================================ */
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function safeString(v) {
+  return (v ?? "").toString();
+}
+
+function includesCI(hay, needle) {
+  const a = safeString(hay).toLowerCase();
+  const b = safeString(needle).toLowerCase();
+  return a.includes(b);
+}
+
+/* ============================================================
+   UI PRIMITIVES
+============================================================ */
+const Pill = React.memo(({ label, icon: Icon, active, onPress }) => (
+  <TouchableOpacity
+    onPress={onPress}
+    activeOpacity={0.8}
+    style={[
+      tw`px-3 py-2 rounded-full mr-2 flex-row items-center`,
+      {
+        backgroundColor: active ? PRIMARY : SOFT,
+      },
+    ]}
+  >
+    {!!Icon && (
+      <Icon size={14} color={active ? "#FFFFFF" : PRIMARY} style={tw`mr-2`} />
+    )}
+    <Text
+      style={[
+        tw`text-xs`,
+        { fontFamily: "Poppins-SemiBold" },
+        active ? tw`text-white` : { color: PRIMARY },
+      ]}
+    >
+      {label}
+    </Text>
+  </TouchableOpacity>
+));
+
+const TabButton = React.memo(({ label, value, activeTab, onPress, count }) => {
+  const active = activeTab === value;
+
   return (
     <TouchableOpacity
-      style={[
-        tw`flex-1 px-3 py-2 rounded-full`,
-        isActive && tw`bg-white`,
-      ]}
       onPress={() => onPress(value)}
+      activeOpacity={0.85}
+      style={[
+        tw`flex-1 py-3 rounded-full items-center`,
+        { backgroundColor: active ? PRIMARY : "transparent" },
+      ]}
     >
-      <Text style={[
-        tw`text-center text-xs`, 
-        { fontFamily: 'Poppins-Regular' },
-        isActive ? tw`text-purple-600` : tw`text-gray-600`
-      ]}>
+      <Text
+        style={[
+          { fontFamily: "Poppins-SemiBold" },
+          active ? tw`text-white` : { color: MUTED },
+        ]}
+      >
         {label}
       </Text>
     </TouchableOpacity>
   );
 });
 
-// Product Card Component
-const ProductCard = React.memo(({ product }) => (
-  <Animated.View 
-    entering={FadeInDown}
-    style={tw`bg-white rounded-xl shadow-sm mb-4`}
-  >
-    <View style={tw`flex-row p-4`}>
-      <View style={[tw`w-24 h-24 rounded-lg overflow-hidden bg-purple-100`, { flexShrink: 0 }]}>
-        <Image
-          source={{ uri: product.image }}
-          style={tw`w-full h-full`}
-        />
-      </View>
-      <View style={[tw`flex-1 ml-3`, { minWidth: 0 }]}>
-        <Text style={[tw`text-purple-900 mb-1`, { fontFamily: 'Poppins-SemiBold' }]}>
-          {product.name}
-        </Text>
-        <Text style={[tw`text-gray-600 text-sm mb-2`, { fontFamily: 'Poppins-Regular' }]}>
-          {product.seller}
-        </Text>
-        <View style={tw`flex-row items-center mb-2`}>
-          <View style={tw`flex-row items-center mr-2`}>
-            <Star size={16} color="#F59E0B" fill="#F59E0B" />
-            <Text style={[tw`text-sm ml-1`, { fontFamily: 'Poppins-SemiBold' }]}>
-              {product.rating}
-            </Text>
-          </View>
-          <Text style={[tw`text-gray-500 text-xs`, { fontFamily: 'Poppins-Regular' }]}>
-            ({product.reviews} reviews)
-          </Text>
-        </View>
-        <View style={tw`flex-row items-center justify-between`}>
-          <Text style={[tw`text-purple-600 text-xl`, { fontFamily: 'Poppins-Bold' }]}>
-            Ksh {product.price}
-          </Text>
-          <TouchableOpacity
-            style={tw`w-8 h-8 border border-gray-300 rounded-full items-center justify-center`}
-            activeOpacity={0.7}
-          >
-            <Heart size={16} color="#6B7280" />
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-    <View style={tw`px-4 pb-4`}>
-      <TouchableOpacity
-        style={tw`rounded-full overflow-hidden shadow-sm`}
-        activeOpacity={0.8}
-      >
-        <LinearGradient
-          colors={['#7C3AED', '#F59E0B']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={tw`py-3 items-center`}
-        >
-          <Text style={[tw`text-white`, { fontFamily: 'Poppins-SemiBold' }]}>
-            View Details
-          </Text>
-        </LinearGradient>
-      </TouchableOpacity>
-    </View>
-  </Animated.View>
-));
-
-// Job Card Component
-const JobCard = React.memo(({ job }) => (
-  <Animated.View 
-    entering={FadeInDown}
-    style={tw`bg-white rounded-xl p-4 shadow-sm mb-3`}
-  >
-    <View style={tw`flex-row items-start justify-between mb-3`}>
-      <View>
-        <Text style={[tw`text-purple-900 mb-1`, { fontFamily: 'Poppins-SemiBold' }]}>
-          {job.title}
-        </Text>
-        <Text style={[tw`text-gray-600 text-sm mb-2`, { fontFamily: 'Poppins-Regular' }]}>
-          {job.company}
-        </Text>
-      </View>
-      <View style={tw`bg-purple-100 px-3 py-1 rounded-full`}>
-        <Text style={[tw`text-purple-700 text-xs`, { fontFamily: 'Poppins-SemiBold' }]}>
-          {job.type}
-        </Text>
-      </View>
-    </View>
-    
-    <View style={tw`mb-4`}>
-      <View style={tw`flex-row items-center mb-2`}>
-        <MapPin size={16} color="#6B7280" />
-        <Text style={[tw`text-gray-600 text-sm ml-2`, { fontFamily: 'Poppins-Regular' }]}>
-          {job.location}
-        </Text>
-      </View>
-      <View style={tw`flex-row items-center mb-2`}>
-        <DollarSign size={16} color="#6B7280" />
-        <Text style={[tw`text-gray-600 text-sm ml-2`, { fontFamily: 'Poppins-Regular' }]}>
-          {job.salary}
-        </Text>
-      </View>
-      <Text style={[tw`text-gray-500 text-xs`, { fontFamily: 'Poppins-Regular' }]}>
-        Posted {job.posted}
-      </Text>
-    </View>
-
-    <TouchableOpacity
-      style={tw`bg-purple-600 rounded-full py-3 items-center`}
-      activeOpacity={0.8}
-    >
-      <Text style={[tw`text-white`, { fontFamily: 'Poppins-SemiBold' }]}>
-        Apply Now
-      </Text>
-    </TouchableOpacity>
-  </Animated.View>
-));
-
-// Funding Card Component
-const FundingCard = React.memo(({ fund }) => (
-  <Animated.View 
-    entering={FadeInDown}
-    style={tw`bg-white rounded-xl p-4 shadow-sm mb-3`}
-  >
-    <View style={tw`items-start justify-between mb-3`}>
-      <View style={tw`flex-row items-start justify-between w-full`}>
-        <View style={tw`flex-1`}>
-          <Text style={[tw`text-purple-900 mb-1`, { fontFamily: 'Poppins-SemiBold' }]}>
-            {fund.title}
-          </Text>
-          <Text style={[tw`text-gray-600 text-sm mb-2`, { fontFamily: 'Poppins-Regular' }]}>
-            {fund.provider}
-          </Text>
-        </View>
-      </View>
-    </View>
-    
-    <LinearGradient
-      colors={['#F0FDF4', '#FFFFFF']}
-      style={tw`rounded-xl p-3 mb-3`}
-    >
-      <Text style={[tw`text-gray-600 text-sm mb-1`, { fontFamily: 'Poppins-Regular' }]}>
-        Funding Amount
-      </Text>
-      <Text style={[tw`text-green-700 text-xl`, { fontFamily: 'Poppins-Bold' }]}>
-        {fund.amount}
-      </Text>
-    </LinearGradient>
-
-    <View style={tw`flex-row items-center justify-between mb-3`}>
-      <Text style={[tw`text-gray-600 text-sm`, { fontFamily: 'Poppins-Regular' }]}>
-        Deadline: {fund.deadline}
-      </Text>
-      <Text style={[tw`text-gray-600 text-sm`, { fontFamily: 'Poppins-Regular' }]}>
-        {fund.applicants} applicants
-      </Text>
-    </View>
-
-    <TouchableOpacity
-      style={tw`rounded-full overflow-hidden shadow-sm`}
-      activeOpacity={0.8}
-    >
-      <LinearGradient
-        colors={['#7C3AED', '#F59E0B']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={tw`py-3 items-center`}
-      >
-        <Text style={[tw`text-white`, { fontFamily: 'Poppins-SemiBold' }]}>
-          Learn More
-        </Text>
-      </LinearGradient>
-    </TouchableOpacity>
-  </Animated.View>
-));
-
-// Skill Swap Card Component
-const SkillSwapCard = React.memo(({ person }) => (
-  <Animated.View 
-    entering={FadeInDown}
-    style={tw`bg-white rounded-xl p-4 shadow-sm mb-3`}
-  >
-    <View style={tw`flex-row items-start mb-3`}>
-      <View style={[tw`w-12 h-12 rounded-full overflow-hidden bg-purple-100`, { flexShrink: 0 }]}>
-        <Image
-          source={{ uri: person.avatar }}
-          style={tw`w-full h-full`}
-        />
-      </View>
-      <View style={tw`flex-1 ml-3`}>
-        <Text style={[tw`text-purple-900 mb-1`, { fontFamily: 'Poppins-SemiBold' }]}>
-          {person.name}
-        </Text>
-        <View style={tw`bg-purple-100 px-3 py-1 rounded-full self-start`}>
-          <Text style={[tw`text-purple-700 text-xs`, { fontFamily: 'Poppins-SemiBold' }]}>
-            {person.skill}
-          </Text>
-        </View>
-      </View>
-    </View>
-
-    <View style={tw`mb-4`}>
-      <LinearGradient
-        colors={['#F5F3FF', '#FFFFFF']}
-        style={tw`rounded-xl p-3 mb-2`}
-      >
-        <Text style={[tw`text-gray-600 text-xs mb-1`, { fontFamily: 'Poppins-Regular' }]}>
-          Offering
-        </Text>
-        <Text style={[tw`text-sm text-purple-900`, { fontFamily: 'Poppins-Regular' }]}>
-          {person.offer}
-        </Text>
-      </LinearGradient>
-      <LinearGradient
-        colors={['#FFFBEB', '#FFFFFF']}
-        style={tw`rounded-xl p-3`}
-      >
-        <Text style={[tw`text-gray-600 text-xs mb-1`, { fontFamily: 'Poppins-Regular' }]}>
-          Looking for
-        </Text>
-        <Text style={[tw`text-sm text-amber-900`, { fontFamily: 'Poppins-Regular' }]}>
-          {person.exchange}
-        </Text>
-      </LinearGradient>
-    </View>
-
-    <TouchableOpacity
-      style={tw`bg-purple-600 rounded-full py-3 items-center`}
-      activeOpacity={0.8}
-    >
-      <Text style={[tw`text-white`, { fontFamily: 'Poppins-SemiBold' }]}>
-        Connect & Swap
-      </Text>
-    </TouchableOpacity>
-  </Animated.View>
-));
-
+/* ============================================================
+   MAIN SCREEN
+============================================================ */
 export default function MarketplaceScreen() {
-  const [activeTab, setActiveTab] = useState('products');
-  const [searchText, setSearchText] = useState('');
+  // ============================================================
+  // ALL HOOKS MUST BE DECLARED FIRST - BEFORE ANY CONDITIONAL RETURNS
+  // ============================================================
 
-  const products = [
-    {
-      id: 1,
-      name: "Handcrafted Jewelry Set",
-      seller: "Amina's Crafts",
-      price: 45,
-      location: "Nairobi, Kenya",
-      image: "https://images.unsplash.com/photo-1573496267526-08a69e46a409?w=400",
-      rating: 4.8,
-      reviews: 124
-    },
-    {
-      id: 2,
-      name: "Organic Skincare Bundle",
-      seller: "Wellness Sisters Co.",
-      price: 35,
-      location: "Lagos, Nigeria",
-      image: "https://images.unsplash.com/photo-1758274539654-23fa349cc090?w=400",
-      rating: 4.9,
-      reviews: 89
+  // Router & Redux hooks
+  const router = useRouter();
+  const dispatch = useDispatch();
+  const cartCount = useSelector(s => s.cart?.items?.length || 0);
+
+  // Data from Redux store
+  const {
+    products = [],
+    jobs = [],
+    funding = [],
+    skills = [],
+    loading = { products: false, jobs: false, funding: false, skills: false },
+    error = { products: null, jobs: null, funding: null, skills: null },
+    productsPagination = { page: 1, totalPages: 1 },
+    jobsPagination = { page: 1, totalPages: 1 },
+    fundingPagination = { page: 1, totalPages: 1 },
+    skillsPagination = { page: 1, totalPages: 1 }
+  } = useSelector(s => s.marketplace || {});
+
+  // UI State - ALL useState hooks declared upfront
+  const [cartOpen, setCartOpen] = useState(false);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+
+  // Tabs
+  const [activeTab, setActiveTab] = useState("products");
+
+  // Search + filters
+  const [searchText, setSearchText] = useState("");
+  const [sortMode, setSortMode] = useState("relevance");
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  // Product filters
+  const [productCategory, setProductCategory] = useState("all");
+  const [onlyFavorites, setOnlyFavorites] = useState(false);
+
+  // Jobs filters
+  const [jobType, setJobType] = useState("all");
+  const [jobLocation, setJobLocation] = useState("all");
+
+  // Funding filters
+  const [fundStatus, setFundStatus] = useState("open");
+
+  // Skills filters
+  const [skillTag, setSkillTag] = useState("all");
+
+  // Favorites state
+  const [favIds, setFavIds] = useState(() => new Set());
+
+  // Detail modals
+  const [productDetails, setProductDetails] = useState(null);
+  const [jobDetails, setJobDetails] = useState(null);
+  const [fundDetails, setFundDetails] = useState(null);
+  const [skillDetails, setSkillDetails] = useState(null);
+
+  // "List Item" flow
+  const [listOpen, setListOpen] = useState(false);
+  const [listType, setListType] = useState("product");
+  const [listTitle, setListTitle] = useState("");
+  const [listSubtitle, setListSubtitle] = useState("");
+  const [listPriceOrAmount, setListPriceOrAmount] = useState("");
+  const [listLocationOrDeadline, setListLocationOrDeadline] = useState("");
+  const [listNotes, setListNotes] = useState("");
+  
+  /* ============================================================
+     LISTING FORM STATE (REQUIRED FOR NEW LISTMODAL)
+  ============================================================ */
+  
+  /* shared */
+  const [listCategory, setListCategory] = useState("");
+  const [listTags, setListTags] = useState([]);
+  const [listImages, setListImages] = useState([]);
+  
+  /* product */
+  const [listCondition, setListCondition] = useState("");
+  const [listQuantity, setListQuantity] = useState("");
+  
+  /* job */
+  const [listTypeValue, setListTypeValue] = useState("");
+  const [listRequirements, setListRequirements] = useState([]);
+  const [listSkills, setListSkills] = useState([]);
+  
+  /* funding */
+  const [listEligibility, setListEligibility] = useState("");
+  const [listFocusAreas, setListFocusAreas] = useState([]);
+  
+  /* skill */
+  const [listProficiency, setListProficiency] = useState("");
+
+  //orders
+  const [ordersOpen, setOrdersOpen] = useState(false);
+
+  // ============================================================
+  // useEffect hooks - still hooks, declared after useState
+  // ============================================================
+
+  // Initial data fetch with page=1, limit=10
+  useEffect(() => {
+    dispatch(fetchProducts({ params: { page: 1, limit: 10 } }));
+    dispatch(fetchJobs({ params: { page: 1, limit: 10 } }));
+    dispatch(fetchFunding({ params: { page: 1, limit: 10 } }));
+    dispatch(fetchSkills({ params: { page: 1, limit: 10 } }));
+  }, [dispatch]);
+
+  // ============================================================
+  // Event Handlers & Callbacks
+  // ============================================================
+
+  const handleAddToCart = useCallback((product) => {
+    dispatch(
+      addToCart({
+        productId: product._id,
+        title: product.name,
+        price: product.price,
+        image: product.image,
+      })
+    );
+  }, [dispatch]);
+
+  const toggleFav = useCallback((id) => {
+    setFavIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const openFilter = useCallback(() => setFilterOpen(true), []);
+  const closeFilter = useCallback(() => setFilterOpen(false), []);
+
+  const onTabChange = useCallback((tab) => {
+    setActiveTab(tab);
+  }, []);
+
+  // loadMore with proper loading guard to prevent multiple rapid calls
+  const loadMore = useCallback(() => {
+    // Get current pagination state for active tab
+    const pg =
+      activeTab === "products" ? productsPagination :
+        activeTab === "jobs" ? jobsPagination :
+          activeTab === "funding" ? fundingPagination :
+            skillsPagination;
+
+    // Get loading state for active tab
+    const isLoading =
+      activeTab === "products" ? loading.products :
+        activeTab === "jobs" ? loading.jobs :
+          activeTab === "funding" ? loading.funding :
+            loading.skills;
+
+    // STOP if already loading OR no more pages
+    if (isLoading || !pg || pg.page >= pg.totalPages) {
+      return;
     }
-  ];
 
-  const jobs = [
-    {
-      id: 1,
-      title: "Community Manager",
-      company: "Women Tech Hub",
-      type: "Full-time",
-      location: "Remote",
-      salary: "Ksh 4M - Ksh 6M",
-      posted: "2 days ago"
-    },
-    {
-      id: 2,
-      title: "Financial Advisor",
-      company: "Sisterhood Finance",
-      type: "Part-time",
-      location: "Nairobi, Kenya",
-      salary: "Ksh 3M - Ksh 4.5M",
-      posted: "1 week ago"
+    const next = pg.page + 1;
+    const params = { page: next, limit: 10 };
+
+    // Dispatch fetch for next page
+    if (activeTab === "products") dispatch(fetchProducts({ params }));
+    if (activeTab === "jobs") dispatch(fetchJobs({ params }));
+    if (activeTab === "funding") dispatch(fetchFunding({ params }));
+    if (activeTab === "skills") dispatch(fetchSkills({ params }));
+  }, [activeTab, dispatch, productsPagination, jobsPagination, fundingPagination, skillsPagination, loading]);
+
+  const resetFilters = useCallback(() => {
+    setSortMode("relevance");
+    setProductCategory("all");
+    setOnlyFavorites(false);
+    setJobType("all");
+    setJobLocation("all");
+    setFundStatus("open");
+    setSkillTag("all");
+  }, []);
+
+  const openListModal = useCallback(() => {
+    setListOpen(true);
+    setListType(activeTab === "products" ? "product" : activeTab === "jobs" ? "job" : activeTab === "funding" ? "funding" : "skill");
+    // Reset form fields when opening
+    setListTitle("");
+    setListSubtitle("");
+    setListPriceOrAmount("");
+    setListLocationOrDeadline("");
+    setListNotes("");
+    setListCategory("");
+    setListTags([]);
+    setListImages([]);
+    setListCondition("");
+    setListQuantity("");
+    setListTypeValue("");
+    setListRequirements([]);
+    setListSkills([]);
+    setListEligibility("");
+    setListFocusAreas([]);
+    setListProficiency("");
+  }, [activeTab]);
+
+  const closeListModal = useCallback(() => {
+    setListOpen(false);
+    // Reset all form fields
+    setListTitle("");
+    setListSubtitle("");
+    setListPriceOrAmount("");
+    setListLocationOrDeadline("");
+    setListNotes("");
+    setListCategory("");
+    setListTags([]);
+    setListImages([]);
+    setListCondition("");
+    setListQuantity("");
+    setListTypeValue("");
+    setListRequirements([]);
+    setListSkills([]);
+    setListEligibility("");
+    setListFocusAreas([]);
+    setListProficiency("");
+  }, []);
+
+  const currentUser = useSelector(s => s.auth.user);
+
+  // FINAL submitList (ALL FIELDS, EXACT MATCH TO MODELS)
+  const submitList = useCallback(async () => {
+    try {
+      if (!currentUser?._id) {
+        Alert.alert("Please log in to create a listing");
+        return;
+      }
+
+      let payload = {};
+      let thunk;
+
+      /* =========================================================
+         PRODUCT  (matches productSchema 1:1)
+      ========================================================= */
+      if (listType === "product") {
+        // Validate required fields
+        if (!listTitle || !listPriceOrAmount || !listCategory || !listCondition || !listQuantity) {
+          Alert.alert("Please fill in all required fields");
+          return;
+        }
+
+        payload = {
+          title: listTitle,
+          description: listNotes,
+          price: Number(listPriceOrAmount),
+          category: listCategory,
+          images: listImages,
+          location: listLocationOrDeadline,
+          condition: listCondition,
+          quantity: Number(listQuantity),
+          tags: listTags,
+          seller: currentUser._id,
+          sellerName: currentUser.profile?.fullName,
+        };
+
+        thunk = createProduct(payload);
+      }
+
+      /* =========================================================
+         JOB  (matches jobSchema 1:1)
+      ========================================================= */
+      if (listType === "job") {
+        // Validate required fields
+        if (!listTitle || !listSubtitle || !listTypeValue || !listCategory) {
+          Alert.alert("Please fill in all required fields");
+          return;
+        }
+
+        payload = {
+          title: listTitle,
+          company: listSubtitle,
+          description: listNotes,
+          type: listTypeValue,
+          location: listLocationOrDeadline,
+          salary: listPriceOrAmount,
+          requirements: listRequirements,
+          skills: listSkills,
+          category: listCategory,
+          contactEmail: currentUser.email,
+          companyId: currentUser._id,
+          postedBy: currentUser._id,
+        };
+
+        thunk = createJob(payload);
+      }
+
+      /* =========================================================
+         FUNDING  (matches fundingSchema 1:1)
+      ========================================================= */
+      if (listType === "funding") {
+        // Validate required fields
+        if (!listTitle || !listSubtitle || !listCategory) {
+          Alert.alert("Please fill in all required fields");
+          return;
+        }
+
+        payload = {
+          title: listTitle,
+          provider: listSubtitle,
+          description: listNotes,
+          amount: listPriceOrAmount,
+          type: listTypeValue,
+          category: listCategory,
+          eligibility: listEligibility,
+          focusAreas: listFocusAreas,
+          deadline: listLocationOrDeadline,
+          contactEmail: currentUser.email,
+          providerId: currentUser._id,
+        };
+
+        thunk = createFunding(payload);
+      }
+
+      /* =========================================================
+         SKILL  (matches skillSchema 1:1)
+      ========================================================= */
+      if (listType === "skill") {
+        // Validate required fields
+        if (!listTitle || !listCategory || !listProficiency) {
+          Alert.alert("Please fill in all required fields");
+          return;
+        }
+
+        payload = {
+          skill: listTitle,
+          category: listCategory,
+          proficiency: listProficiency,
+          offer: listSubtitle,
+          exchangeFor: listNotes,
+          location: listLocationOrDeadline,
+          tags: listTags,
+          user: currentUser._id,
+          userName: currentUser.profile?.fullName,
+          avatar: currentUser.profile?.avatar?.url,
+        };
+
+        thunk = createSkill(payload);
+      }
+
+      if (thunk) {
+        await dispatch(thunk);
+        Alert.alert("Success", "Your listing has been created!");
+        closeListModal();
+      }
+
+    } catch (err) {
+      console.error(err);
+      Alert.alert("Failed to create listing", err.message || "Something went wrong");
     }
-  ];
+  }, [
+    currentUser,
+    listType,
+    listTitle,
+    listSubtitle,
+    listNotes,
+    listPriceOrAmount,
+    listLocationOrDeadline,
+    listCategory,
+    listImages,
+    listCondition,
+    listQuantity,
+    listTags,
+    listTypeValue,
+    listRequirements,
+    listSkills,
+    listEligibility,
+    listFocusAreas,
+    listProficiency,
+    dispatch,
+    closeListModal
+  ]);
 
-  const funding = [
-    {
-      id: 1,
-      title: "Women Entrepreneurs Grant 2026",
-      provider: "Asiyo Foundation",
-      amount: "Up to Ksh 1,000,000",
-      deadline: "Jan 31, 2026",
-      applicants: 234
-    },
-    {
-      id: 2,
-      title: "Tech Innovation Fund",
-      provider: "Global Women Network",
-      amount: "Up to Ksh 2,500,000",
-      deadline: "Feb 15, 2026",
-      applicants: 156
+  // ============================================================
+  // Memoized Values
+  // ============================================================
+
+  const counts = useMemo(() => {
+    return {
+      products: products?.length || 0,
+      jobs: jobs?.length || 0,
+      funding: funding?.length || 0,
+      skills: skills?.length || 0,
+    };
+  }, [products?.length, jobs?.length, funding?.length, skills?.length]);
+
+  const filteredProducts = useMemo(() => {
+    let list = products || [];
+
+    if (onlyFavorites) {
+      list = list.filter((p) => favIds.has(p._id));
     }
-  ];
 
-  const skills = [
-    {
-      id: 1,
-      name: "Sarah Johnson",
-      skill: "Graphic Design",
-      offer: "Logo design & branding",
-      exchange: "Business mentorship",
-      avatar: "https://images.unsplash.com/flagged/photo-1570562119798-a4b2a542fe3b?w=100"
-    },
-    {
-      id: 2,
-      name: "Grace Mutua",
-      skill: "Digital Marketing",
-      offer: "Social media strategy",
-      exchange: "Web development basics",
-      avatar: "https://images.unsplash.com/photo-1562071707-7249ab429b2a?w=100"
+    if (productCategory !== "all") {
+      list = list.filter((p) => p.category === productCategory);
     }
-  ];
 
-  const renderProductsTab = () => (
-    <>
-      <LinearGradient
-        colors={['#7C3AED', '#6D28D9']}
-        style={tw`rounded-2xl p-4 mb-4 shadow-lg`}
-      >
-        <View style={tw`flex-row items-center`}>
-          <ShoppingBag size={32} color="#FFFFFF" />
-          <View style={tw`ml-3`}>
-            <Text style={[tw`text-white mb-1`, { fontFamily: 'Poppins-Bold' }]}>
-              Women-Owned Businesses
-            </Text>
-            <Text style={[tw`text-white/90 text-sm`, { fontFamily: 'Poppins-Regular' }]}>
-              Support sisters worldwide
-            </Text>
-          </View>
-        </View>
-      </LinearGradient>
+    if (searchText.trim()) {
+      const q = searchText.trim();
+      list = list.filter((p) => {
+        return (
+          includesCI(p.name, q) ||
+          includesCI(p.seller, q) ||
+          includesCI(p.location, q) ||
+          p.tags?.some((t) => includesCI(t, q))
+        );
+      });
+    }
 
-      <View>
-        {products.map((product, index) => (
-          <View key={`product-${product.id}`} style={index > 0 && tw`mt-4`}>
-            <ProductCard product={product} />
-          </View>
-        ))}
+    if (sortMode === "price_low") {
+      list = [...list].sort((a, b) => (a.price || 0) - (b.price || 0));
+    } else if (sortMode === "price_high") {
+      list = [...list].sort((a, b) => (b.price || 0) - (a.price || 0));
+    }
+
+    return list;
+  }, [products, searchText, sortMode, productCategory, onlyFavorites, favIds]);
+
+  const filteredJobs = useMemo(() => {
+    let list = jobs || [];
+
+    if (jobType !== "all") {
+      if (jobType === "remote") list = list.filter((j) => includesCI(j.location, "remote"));
+      else list = list.filter((j) => includesCI(j.type, jobType.replace("-", " ")));
+    }
+
+    if (jobLocation !== "all") {
+      if (jobLocation === "remote") list = list.filter((j) => includesCI(j.location, "remote"));
+      else list = list.filter((j) => includesCI(j.location, jobLocation));
+    }
+
+    if (searchText.trim()) {
+      const q = searchText.trim();
+      list = list.filter((j) => {
+        return (
+          includesCI(j.title, q) ||
+          includesCI(j.company, q) ||
+          includesCI(j.location, q) ||
+          includesCI(j.type, q)
+        );
+      });
+    }
+
+    return list;
+  }, [jobs, searchText, sortMode, jobType, jobLocation]);
+
+  const filteredFunding = useMemo(() => {
+    let list = funding || [];
+
+    if (fundStatus !== "all") {
+      list = list.filter((f) => f.status === "open");
+    }
+
+    if (searchText.trim()) {
+      const q = searchText.trim();
+      list = list.filter((f) => {
+        return (
+          includesCI(f.title, q) ||
+          includesCI(f.provider, q) ||
+          includesCI(f.amount, q) ||
+          includesCI(f.focus, q)
+        );
+      });
+    }
+
+    return list;
+  }, [funding, searchText, fundStatus]);
+
+  const filteredSkills = useMemo(() => {
+    let list = skills || [];
+
+    if (skillTag !== "all") {
+      list = list.filter((s) => s.tags?.includes(skillTag));
+    }
+
+    if (searchText.trim()) {
+      const q = searchText.trim();
+      list = list.filter((s) => {
+        return (
+          includesCI(s.name, q) ||
+          includesCI(s.skill, q) ||
+          includesCI(s.offer, q) ||
+          includesCI(s.exchange, q)
+        );
+      });
+    }
+
+    return list;
+  }, [skills, searchText, skillTag]);
+
+  const headerIcon = useMemo(() => {
+    if (activeTab === "products") return ShoppingBag;
+    if (activeTab === "jobs") return Briefcase;
+    if (activeTab === "funding") return TrendingUp;
+    return Star;
+  }, [activeTab]);
+
+  const headerTitle = useMemo(() => {
+    if (activeTab === "products") return "Marketplace";
+    if (activeTab === "jobs") return "Jobs";
+    if (activeTab === "funding") return "Funding";
+    return "Skill Swap";
+  }, [activeTab]);
+
+  const headerSubtitle = useMemo(() => {
+    if (activeTab === "products") return "Support women-owned businesses";
+    if (activeTab === "jobs") return "Find opportunities built for growth";
+    if (activeTab === "funding") return "Grants and investment opportunities";
+    return "Exchange skills and learn together";
+  }, [activeTab]);
+
+  const ActiveHeaderIcon = headerIcon;
+
+  // Only show shimmer on initial load, not during pagination
+  const isInitialLoading =
+    products.length === 0 &&
+    jobs.length === 0 &&
+    funding.length === 0 &&
+    skills.length === 0 &&
+    (loading.products || loading.jobs || loading.funding || loading.skills);
+
+  if (isInitialLoading) {
+    return (
+      <View style={tw`flex-1 items-center justify-center`}>
+        <ShimmerLoader />
       </View>
-    </>
-  );
+    );
+  }
 
-  const renderJobsTab = () => (
-    <>
-      <LinearGradient
-        colors={['#F59E0B', '#D97706']}
-        style={tw`rounded-2xl p-4 mb-4 shadow-lg`}
-      >
-        <View style={tw`flex-row items-center`}>
-          <Briefcase size={32} color="#FFFFFF" />
-          <View style={tw`ml-3`}>
-            <Text style={[tw`text-white mb-1`, { fontFamily: 'Poppins-Bold' }]}>
-              Job Board
-            </Text>
-            <Text style={[tw`text-white/90 text-sm`, { fontFamily: 'Poppins-Regular' }]}>
-              Opportunities for women
-            </Text>
-          </View>
-        </View>
-      </LinearGradient>
-
-      <View>
-        {jobs.map((job, index) => (
-          <View key={`job-${job.id}`} style={index > 0 && tw`mt-3`}>
-            <JobCard job={job} />
-          </View>
-        ))}
+  // Check error states - using granular error flags
+  if (error?.products || error?.jobs || error?.funding || error?.skills) {
+    const errorMessage = error?.products || error?.jobs || error?.funding || error?.skills;
+    return (
+      <View style={tw`flex-1 items-center justify-center px-6`}>
+        <Text style={[tw`text-lg`, { fontFamily: "Poppins-Bold", color: TEXT }]}>
+          Failed to load
+        </Text>
+        <Text style={[tw`text-center mt-2`, { fontFamily: "Poppins-Regular", color: MUTED }]}>
+          {errorMessage?.toString() || "Something went wrong"}
+        </Text>
+        <TouchableOpacity
+          onPress={() => {
+            dispatch(fetchProducts({ params: { page: 1, limit: 10 } }));
+            dispatch(fetchJobs({ params: { page: 1, limit: 10 } }));
+            dispatch(fetchFunding({ params: { page: 1, limit: 10 } }));
+            dispatch(fetchSkills({ params: { page: 1, limit: 10 } }));
+          }}
+          style={[tw`mt-6 px-6 py-3 rounded-full`, { backgroundColor: PRIMARY }]}
+        >
+          <Text style={[tw`text-white`, { fontFamily: "Poppins-SemiBold" }]}>
+            Try Again
+          </Text>
+        </TouchableOpacity>
       </View>
-    </>
-  );
+    );
+  }
 
-  const renderFundingTab = () => (
-    <>
-      <LinearGradient
-        colors={['#10B981', '#059669']}
-        style={tw`rounded-2xl p-4 mb-4 shadow-lg`}
-      >
-        <View style={tw`flex-row items-center`}>
-          <TrendingUp size={32} color="#FFFFFF" />
-          <View style={tw`ml-3`}>
-            <Text style={[tw`text-white mb-1`, { fontFamily: 'Poppins-Bold' }]}>
-              Funding Opportunities
-            </Text>
-            <Text style={[tw`text-white/90 text-sm`, { fontFamily: 'Poppins-Regular' }]}>
-              Grants & investments
-            </Text>
-          </View>
-        </View>
-      </LinearGradient>
-
-      <View>
-        {funding.map((fund, index) => (
-          <View key={`fund-${fund.id}`} style={index > 0 && tw`mt-3`}>
-            <FundingCard fund={fund} />
-          </View>
-        ))}
-      </View>
-    </>
-  );
-
-  const renderSkillsTab = () => (
-    <>
-      <LinearGradient
-        colors={['#3B82F6', '#2563EB']}
-        style={tw`rounded-2xl p-4 mb-4 shadow-lg`}
-      >
-        <View style={tw`flex-row items-center`}>
-          <Star size={32} color="#FFFFFF" />
-          <View style={tw`ml-3`}>
-            <Text style={[tw`text-white mb-1`, { fontFamily: 'Poppins-Bold' }]}>
-              Skill Swap
-            </Text>
-            <Text style={[tw`text-white/90 text-sm`, { fontFamily: 'Poppins-Regular' }]}>
-              Exchange skills & knowledge
-            </Text>
-          </View>
-        </View>
-      </LinearGradient>
-
-      <View>
-        {skills.map((person, index) => (
-          <View key={`skill-${person.id}`} style={index > 0 && tw`mt-3`}>
-            <SkillSwapCard person={person} />
-          </View>
-        ))}
-      </View>
-    </>
-  );
-
+  // ============================================================
+  // MAIN RENDER
+  // ============================================================
   return (
-    <LinearGradient
-      colors={['#F5F3FF', '#FFFFFF', '#FFFBEB']}
-      style={tw`flex-1`}
-    >
-      {/* Header with curved bottom */}
-      <LinearGradient
-        colors={['#4C1D95', '#5B21B6']}
-        style={tw`pt-12 pb-5 px-4 rounded-b-[40px] shadow-lg`}
+    <View style={[tw`flex-1`, { backgroundColor: BG }]}>
+      {/* HEADER */}
+      <View
+        style={[
+          tw`pt-14 pb-6 px-4`,
+          {
+            backgroundColor: PRIMARY,
+            borderBottomLeftRadius: 32,
+            borderBottomRightRadius: 32,
+          },
+        ]}
       >
-        <View style={tw`flex-row items-center justify-between mb-4`}>
-          <View>
-            <Text style={[tw`text-white text-2xl`, { fontFamily: 'Poppins-Bold' }]}>
-              Marketplace
-            </Text>
-            <Text style={[tw`text-purple-200 text-sm`, { fontFamily: 'Poppins-Regular' }]}>
-              Opportunities & Offerings
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={tw`rounded-full overflow-hidden shadow-lg`}
-            activeOpacity={0.8}
-          >
-            <LinearGradient
-              colors={['#7C3AED', '#F59E0B']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={tw`px-4 py-2 flex-row items-center`}
+        {/* Top Row */}
+        <View style={tw`flex-row items-center justify-between`}>
+          <View style={tw`flex-row items-center flex-1`}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              activeOpacity={0.7}
+              style={tw`w-10 h-10 rounded-full bg-white/20 items-center justify-center`}
             >
-              <Plus size={16} color="#FFFFFF" />
-              <Text style={[tw`text-white ml-1 text-sm`, { fontFamily: 'Poppins-SemiBold' }]}>
-                List Item
+              <ChevronLeft size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={tw`ml-3`}>
+              <Text
+                style={[
+                  tw`text-white text-xl`,
+                  { fontFamily: "Poppins-Bold" },
+                ]}
+              >
+                {headerTitle}
               </Text>
-            </LinearGradient>
-          </TouchableOpacity>
+
+              <Text
+                style={[
+                  tw`text-white/80 text-sm`,
+                  { fontFamily: "Poppins-Regular" },
+                ]}
+              >
+                {headerSubtitle}
+              </Text>
+            </View>
+          </View>
+
+          <View style={tw`flex-row items-center mr-4`}>
+            {/* Orders */}
+            <TouchableOpacity
+              onPress={() => setOrdersOpen(true)}
+              style={tw`mr-6`}
+            >
+              <Package size={26} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            {/* Cart */}
+            <TouchableOpacity onPress={() => setCartOpen(true)}>
+              <View>
+                <ShoppingCart size={26} color="#FFFFFF" />
+                {cartCount > 0 && (
+                  <View
+                    style={[
+                      tw`absolute -top-2 -right-2 w-5 h-5 rounded-full items-center justify-center`,
+                      { backgroundColor: "#FF5252" },
+                    ]}
+                  >
+                    <Text style={[tw`text-xs text-white`, { fontFamily: "Poppins-Bold" }]}>
+                      {cartCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        <View style={tw`relative`}>
-          <Search 
-            size={16} 
-            color="#9CA3AF" 
-            style={{
-              position: 'absolute',
-              left: 12,
-              top: '50%',
-              marginTop: -8,
-            }}
-          />
+        {/* Search Row */}
+        <View
+          style={[
+            tw`mt-5 rounded-2xl px-4 py-3 flex-row items-center`,
+            { backgroundColor: "rgba(255,255,255,0.15)" },
+          ]}
+        >
+          <Search size={16} color="#FFFFFF" />
+
           <TextInput
-            style={[
-              tw`bg-white rounded-full pl-10 pr-4 py-3 text-gray-800`,
-              { fontFamily: 'Poppins-Regular' }
-            ]}
-            placeholder="Search marketplace..."
-            placeholderTextColor="#9CA3AF"
             value={searchText}
             onChangeText={setSearchText}
+            placeholder="Search products, jobs, funding, skills…"
+            placeholderTextColor="rgba(255,255,255,0.7)"
+            style={[
+              tw`ml-2 flex-1 text-white`,
+              { fontFamily: "Poppins-Regular" },
+            ]}
           />
-        </View>
-      </LinearGradient>
 
-      {/* Tab Navigation */}
-      <LinearGradient
-        colors={['#F5F3FF', '#FFFFFF']}
-        style={tw`mx-4 mt-4 rounded-full p-1 shadow-sm`}
-      >
+          <TouchableOpacity
+            onPress={openFilter}
+            style={tw`w-9 h-9 rounded-full bg-white/20 items-center justify-center`}
+          >
+            <Filter size={16} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* TABS */}
+      <View style={[tw`mx-4 mt-4 rounded-full p-1`, { backgroundColor: SOFT, borderWidth: 1, borderColor: BORDER }]}>
         <View style={tw`flex-row`}>
-          <TabButton
-            label="Products"
-            value="products"
-            activeTab={activeTab}
-            onPress={setActiveTab}
-          />
-          <TabButton
-            label="Jobs"
-            value="jobs"
-            activeTab={activeTab}
-            onPress={setActiveTab}
-          />
-          <TabButton
-            label="Funding"
-            value="funding"
-            activeTab={activeTab}
-            onPress={setActiveTab}
-          />
-          <TabButton
-            label="Skills"
-            value="skills"
-            activeTab={activeTab}
-            onPress={setActiveTab}
-          />
+          <TabButton label="Products" value="products" activeTab={activeTab} onPress={onTabChange} count={counts.products} />
+          <TabButton label="Jobs" value="jobs" activeTab={activeTab} onPress={onTabChange} count={counts.jobs} />
+          <TabButton label="Funding" value="funding" activeTab={activeTab} onPress={onTabChange} count={counts.funding} />
+          <TabButton label="Skills" value="skills" activeTab={activeTab} onPress={onTabChange} count={counts.skills} />
         </View>
-      </LinearGradient>
+      </View>
 
-      <ScrollView
-        style={tw`flex-1`}
-        showsVerticalScrollIndicator={false}
+      {/* CONTENT - FlatList via tab components */}
+      <View style={tw`flex-1 px-4 pt-4`}>
+        {activeTab === "products" && (
+          <ProductsTab
+            filteredProducts={filteredProducts}
+            favIds={favIds}
+            toggleFav={toggleFav}
+            onOpenProductDetails={setProductDetails}
+            resetFilters={resetFilters}
+            loadMore={loadMore}
+            loading={loading}
+          />
+        )}
+
+        {activeTab === "jobs" && (
+          <JobsTab
+            filteredJobs={filteredJobs}
+            onOpenJobDetails={setJobDetails}
+            resetFilters={resetFilters}
+            loadMore={loadMore}
+            loading={loading}
+          />
+        )}
+
+        {activeTab === "funding" && (
+          <FundingTab
+            filteredFunding={filteredFunding}
+            onOpenFundingDetails={setFundDetails}
+            resetFilters={resetFilters}
+            loadMore={loadMore}
+            loading={loading}
+          />
+        )}
+
+        {activeTab === "skills" && (
+          <SkillsTab
+            filteredSkills={filteredSkills}
+            onOpenSkillDetails={setSkillDetails}
+            resetFilters={resetFilters}
+            loadMore={loadMore}
+            loading={loading}
+          />
+        )}
+      </View>
+
+      {/* Floating Action Button */}
+      <TouchableOpacity
+        onPress={openListModal}
+        activeOpacity={0.85}
+        style={[
+          tw`absolute right-4 bottom-6 w-14 h-14 rounded-full items-center justify-center`,
+          { backgroundColor: PRIMARY },
+        ]}
       >
-        <View style={tw`px-4 pb-8 pt-4`}>
-          {activeTab === 'products' && renderProductsTab()}
-          {activeTab === 'jobs' && renderJobsTab()}
-          {activeTab === 'funding' && renderFundingTab()}
-          {activeTab === 'skills' && renderSkillsTab()}
-        </View>
-      </ScrollView>
-    </LinearGradient>
+        <Plus size={22} color="#FFFFFF" />
+      </TouchableOpacity>
+
+      {/* MODALS */}
+      <FilterModal
+        visible={filterOpen}
+        onClose={closeFilter}
+        activeTab={activeTab}
+        sortMode={sortMode}
+        setSortMode={setSortMode}
+        productCategory={productCategory}
+        setProductCategory={setProductCategory}
+        onlyFavorites={onlyFavorites}
+        setOnlyFavorites={setOnlyFavorites}
+        jobType={jobType}
+        setJobType={setJobType}
+        jobLocation={jobLocation}
+        setJobLocation={setJobLocation}
+        fundStatus={fundStatus}
+        setFundStatus={setFundStatus}
+        skillTag={skillTag}
+        setSkillTag={setSkillTag}
+        resetFilters={resetFilters}
+      />
+
+      <DetailModals
+        productDetails={productDetails}
+        setProductDetails={setProductDetails}
+        jobDetails={jobDetails}
+        setJobDetails={setJobDetails}
+        fundDetails={fundDetails}
+        setFundDetails={setFundDetails}
+        skillDetails={skillDetails}
+        setSkillDetails={setSkillDetails}
+        favIds={favIds}
+        toggleFav={toggleFav}
+      />
+
+      <ListModal
+        listOpen={listOpen}
+        closeListModal={closeListModal}
+        listType={listType}
+        setListType={setListType}
+        listTitle={listTitle}
+        setListTitle={setListTitle}
+        listSubtitle={listSubtitle}
+        setListSubtitle={setListSubtitle}
+        listPriceOrAmount={listPriceOrAmount}
+        setListPriceOrAmount={setListPriceOrAmount}
+        listLocationOrDeadline={listLocationOrDeadline}
+        setListLocationOrDeadline={setListLocationOrDeadline}
+        listNotes={listNotes}
+        setListNotes={setListNotes}
+        /* shared */
+        listCategory={listCategory}
+        setListCategory={setListCategory}
+        listTags={listTags}
+        setListTags={setListTags}
+        listImages={listImages}
+        setListImages={setListImages}
+        /* product */
+        listCondition={listCondition}
+        setListCondition={setListCondition}
+        listQuantity={listQuantity}
+        setListQuantity={setListQuantity}
+        /* job */
+        listTypeValue={listTypeValue}
+        setListTypeValue={setListTypeValue}
+        listRequirements={listRequirements}
+        setListRequirements={setListRequirements}
+        listSkills={listSkills}
+        setListSkills={setListSkills}
+        /* funding */
+        listEligibility={listEligibility}
+        setListEligibility={setListEligibility}
+        listFocusAreas={listFocusAreas}
+        setListFocusAreas={setListFocusAreas}
+        /* skill */
+        listProficiency={listProficiency}
+        setListProficiency={setListProficiency}
+        currentUser={currentUser}
+        submitList={submitList}
+      />
+
+      <CartModal
+        visible={cartOpen}
+        onClose={() => setCartOpen(false)}
+        onCheckout={() => {
+          setCartOpen(false);
+          setCheckoutOpen(true);
+        }}
+      />
+
+      <OrderModal
+        visible={ordersOpen}
+        onClose={() => setOrdersOpen(false)}
+      />
+
+      <Modal visible={checkoutOpen} animationType="slide">
+        <CheckoutScreen onClose={() => setCheckoutOpen(false)} />
+      </Modal>
+    </View>
   );
 }

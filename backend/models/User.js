@@ -174,6 +174,13 @@ const userSchema = new mongoose.Schema(
       default: true,
     },
 
+    /* ================= ADMIN ================= */
+    isAdmin: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+
     hasRegistered: {
       type: Boolean,
       default: false,

@@ -2,7 +2,8 @@
 import React, { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { Provider, useDispatch, useSelector } from "react-redux";
-import { store } from "../store/store";
+import { store, persistor } from "../store/store";
+import { PersistGate } from "redux-persist/integration/react";
 
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -133,13 +134,15 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <Provider store={store}>
-          <ThemeProvider>
-            <AnimationProvider>
-              <AuthProvider>
-                <AppShell />
-              </AuthProvider>
-            </AnimationProvider>
-          </ThemeProvider>
+          <PersistGate loading={null} persistor={persistor}>
+            <ThemeProvider>
+              <AnimationProvider>
+                <AuthProvider>
+                  <AppShell />
+                </AuthProvider>
+              </AnimationProvider>
+            </ThemeProvider>
+          </PersistGate>
         </Provider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

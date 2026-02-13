@@ -3,6 +3,7 @@ const registerPresence = require('./presence');
 const registerChat = require('./chat');
 const registerGroup = require('./group');
 const registerVoice = require('./voice');
+const registerHub = require('./hub');
 
 /* =====================================================
    SOCKET INITIALIZER (AUTHORITATIVE)
@@ -114,6 +115,7 @@ module.exports = function initSocket(io) {
       registerChat(io, socket);
       registerGroup(io, socket);
       registerVoice(io, socket);
+      registerHub(io, socket);
     } catch (err) {
       console.error('❌ Socket module registration failed:', err);
       socket.disconnect(true);

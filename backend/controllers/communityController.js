@@ -9,6 +9,9 @@ const Voice = require('../models/Voice');
 const Report = require('../models/Report');
 const Post = require('../models/Post');
 
+const { deleteFromCloudinary } = require("../middleware/upload");
+
+
 /* =====================================================
    HELPERS
 ===================================================== */
@@ -1486,6 +1489,190 @@ exports.toggleHubReaction = async (req, res) => {
     console.error('[toggleHubReaction]', error);
     return serverError(res, error);
   }
+};
+
+/* =====================================================
+   HUB: GET UPDATES
+===================================================== */
+/* =====================================================
+   HUB: GET UPDATES
+===================================================== */
+exports.getHubUpdates = async (req, res) => {
+  try {
+    const { hubId } = req.params;
+
+    const hub = await Hub.findById(hubId).populate(
+      "updates.author",
+      "profile.fullName profile.avatar"
+    );
+
+    if (!hub) return notFound(res, "Hub not found");
+
+    const updates = (hub.updates || []).sort(
+      (a, b) => b.createdAt - a.createdAt
+    );
+
+    return ok(res, updates);
+  } catch (err) {
+    return serverError(res, err);
+  }
+};
+
+/* =====================================================
+   HUB: CREATE UPDATE (MODERATOR ONLY + CLOUDINARY)
+===================================================== */
+/* =====================================================
+   HUB: CREATE UPDATE
+   multipart/form-data safe
+   text OR media OR both
+===================================================== */
+exports.createHubUpdate = async (req, res) => {
+  try {
+    const user = ensureAuthUser(req, res);
+    if (!user) return;
+
+    const { hubId } = req.params;
+    if (!ensureObjectIdParam(res, hubId, "hubId")) return;
+
+    const hub = await Hub.findById(hubId);
+    if (!hub) return notFound(res, "Hub not found");
+
+    const isModerator = hub.moderators.some(
+      (m) => String(m) === String(user.id)
+    );
+
+    if (!isModerator) {
+      return forbidden(res, "Only moderators can post updates");
+    }
+
+    const content = req.body.content || "";
+
+    let media = null;
+
+    if (req.file) {
+      media = {
+        url: req.file.path,
+        publicId: req.file.filename,
+        type: req.file.mimetype,
+      };
+    }
+
+    hub.updates.unshift({
+      author: user.id,
+      content,
+      media,
+      reactions: [],
+    });
+
+    await hub.save();
+
+    /* ✅ CORRECT POPULATE (parent doc only) */
+    await hub.populate({
+      path: "updates.author",
+      select: "profile.fullName profile.avatar",
+    });
+
+    const update = hub.updates[0];
+
+    req.io.to(`hub:${hubId}`).emit("hub:update:new", {
+      hubId,
+      update,
+    });
+
+    return ok(res, update, "Update created");
+  } catch (err) {
+    console.error("[createHubUpdate]", err);
+    return serverError(res, err);
+  }
+};
+
+/* =====================================================
+   HUB: DELETE UPDATE (MODERATOR ONLY)
+===================================================== */
+/* =====================================================
+   HUB: DELETE UPDATE
+===================================================== */
+exports.deleteHubUpdate = async (req, res) => {
+  try {
+    const user = ensureAuthUser(req, res);
+    if (!user) return;
+
+    const { hubId, updateId } = req.params;
+
+    const hub = await Hub.findById(hubId);
+    if (!hub) return notFound(res, "Hub not found");
+
+    const isModerator = hub.moderators.some(
+      (m) => String(m) === String(user.id)
+    );
+
+    if (!isModerator) {
+      return forbidden(res, "Only moderators can delete updates");
+    }
+
+    const update = hub.updates.id(updateId);
+    if (!update) return notFound(res, "Update not found");
+
+    /* 🔥 delete cloudinary */
+    if (update.media?.publicId) {
+      await deleteFromCloudinary(update.media.publicId);
+    }
+
+    update.deleteOne();
+    await hub.save();
+
+    req.io.to(`hub:${hubId}`).emit("hub:update:delete", {
+      hubId,
+      updateId,
+    });
+
+    return ok(res, null, "Update deleted");
+  } catch (err) {
+    return serverError(res, err);
+  }
+};
+
+/* =====================================================
+   HUB: TOGGLE REACTION
+===================================================== */
+exports.reactToHubUpdate = async (req, res) => {
+  const { hubId, updateId } = req.params;
+  const { emoji } = req.body;
+
+  const hub = await Hub.findById(hubId);
+  if (!hub) return res.status(404).json({ message: "Hub not found" });
+
+  const update = hub.updates.id(updateId);
+  if (!update) return res.status(404).json({ message: "Update not found" });
+
+  let reaction = update.reactions.find((r) => r.emoji === emoji);
+
+  if (!reaction) {
+    reaction = { emoji, users: [], count: 0 };
+    update.reactions.push(reaction);
+  }
+
+  const uid = req.user._id;
+
+  const exists = reaction.users.some((u) => u.equals(uid));
+
+  if (exists) {
+    reaction.users = reaction.users.filter((u) => !u.equals(uid));
+    reaction.count--;
+  } else {
+    reaction.users.push(uid);
+    reaction.count++;
+  }
+
+  await hub.save();
+
+  req.io.to(`hub:${hubId}`).emit("hub:update:reaction", {
+    hubId,
+    updateId,
+    reactions: update.reactions,
+  });
+
+  res.json({ success: true, data: update.reactions });
 };
 
 /* =====================================================

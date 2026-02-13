@@ -44,9 +44,10 @@ export default function SafetyHubScreen() {
   const [pendingCall, setPendingCall] = useState(null);
 
   const router = useRouter();
+  
   const onBackPress = () => {
-    router.push("/modals/moreMenu");
-  }
+    router.back();
+  };
 
   /* ================= INLINE SNACKBAR ================= */
   const [snackbar, setSnackbar] = useState({

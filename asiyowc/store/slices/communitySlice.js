@@ -320,6 +320,77 @@ export const toggleHubReaction = createAsyncThunk(
   }
 );
 
+/* ===========================
+   HUB UPDATES (ANNOUNCEMENTS)
+=========================== */
+
+export const fetchHubUpdates = createAsyncThunk(
+  "community/fetchHubUpdates",
+  async (hubId, { getState, rejectWithValue }) => {
+    try {
+      return await communityService.getHubUpdates(
+        hubId,
+        getState().auth.token
+      );
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to load updates");
+    }
+  }
+);
+
+export const createHubUpdate = createAsyncThunk(
+  "community/createHubUpdate",
+  async ({ hubId, formData }, { getState, rejectWithValue }) => {
+    try {
+      return await communityService.createHubUpdate(
+        hubId,
+        formData,
+        getState().auth.token
+      );
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to create update");
+    }
+  }
+);
+
+export const deleteHubUpdate = createAsyncThunk(
+  "community/deleteHubUpdate",
+  async ({ hubId, updateId }, { getState, rejectWithValue }) => {
+    try {
+      await communityService.deleteHubUpdate(
+        hubId,
+        updateId,
+        getState().auth.token
+      );
+      return { updateId };
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to delete update");
+    }
+  }
+);
+
+export const reactHubUpdate = createAsyncThunk(
+  "community/reactHubUpdate",
+  async ({ hubId, updateId, emoji }, { getState, rejectWithValue }) => {
+    try {
+      const res = await communityService.reactHubUpdate(
+        hubId,
+        updateId,
+        emoji,
+        getState().auth.token
+      );
+
+      return {
+        updateId,
+        reactions: res.data,
+      };
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to react");
+    }
+  }
+);
+
+
 /* ============================================================
    SLICE
 ============================================================ */
@@ -344,6 +415,12 @@ const communitySlice = createSlice({
     pinnedMessages: {},
 
     /* =====================
+   HUB UPDATES
+===================== */
+    hubUpdates: [],
+    hubUpdatesLoading: false,
+
+    /* =====================
        VOICE (🔥 REQUIRED)
     ===================== */
     room: null,
@@ -357,6 +434,7 @@ const communitySlice = createSlice({
     speakingUsers: {},
     voiceRequests: [],
     lastHeartbeat: null,
+    voiceChatMessages: [],
   },
 
   reducers: {
@@ -507,29 +585,66 @@ const communitySlice = createSlice({
       }
     },
 
+    // /* =====================================================
+    //    HUB REACTIONS (SAFE + REALTIME)
+    // ===================================================== */
+    // updateHubReactions: (state, action) => {
+    //   const { hubId, reactions } = action.payload || {};
+    //   if (!hubId || !Array.isArray(reactions)) return;
+
+    //   // 1️⃣ Update selectedHub (detail screen)
+    //   if (
+    //     state.selectedHub &&
+    //     String(state.selectedHub._id) === String(hubId)
+    //   ) {
+    //     state.selectedHub.reactions = reactions;
+    //   }
+
+    //   // 2️⃣ Update hubs list (optional badge/preview)
+    //   const hub = state.hubs.find(
+    //     (h) => String(h._id) === String(hubId)
+    //   );
+
+    //   if (hub) {
+    //     hub.reactions = reactions;
+    //   }
+    // },
+
     /* =====================================================
-       HUB REACTIONS (SAFE + REALTIME)
-    ===================================================== */
-    updateHubReactions: (state, action) => {
-      const { hubId, reactions } = action.payload || {};
-      if (!hubId || !Array.isArray(reactions)) return;
+   HUB UPDATES (REALTIME SAFE)
+===================================================== */
 
-      // 1️⃣ Update selectedHub (detail screen)
-      if (
-        state.selectedHub &&
-        String(state.selectedHub._id) === String(hubId)
-      ) {
-        state.selectedHub.reactions = reactions;
-      }
+    addHubUpdate: (state, action) => {
+      const update = action.payload;
+      if (!update) return;
 
-      // 2️⃣ Update hubs list (optional badge/preview)
-      const hub = state.hubs.find(
-        (h) => String(h._id) === String(hubId)
+      const exists = state.hubUpdates.some(
+        (u) => String(u._id) === String(update._id)
       );
 
-      if (hub) {
-        hub.reactions = reactions;
+      if (!exists) {
+        state.hubUpdates.unshift(update);
       }
+    },
+
+  updateHubUpdateReactions: (state, action) => {
+      const { updateId, reactions } = action.payload || {};
+      if (!updateId) return;
+
+      const item = state.hubUpdates.find(
+        (u) => String(u._id) === String(updateId)
+      );
+
+      if (item) {
+        item.reactions = reactions;
+      }
+    },
+
+    removeHubUpdate: (state, action) => {
+      const id = action.payload;
+      state.hubUpdates = state.hubUpdates.filter(
+        (u) => String(u._id) !== String(id)
+      );
     },
 
     /* =====================================================
@@ -955,7 +1070,46 @@ const communitySlice = createSlice({
         state.loadingDetail = false;
         state.selectedHub = null;
         state.error = action.payload || "Failed to load hub";
-      });
+      })
+
+      /* =====================================================
+   HUB UPDATES
+===================================================== */
+
+      .addCase(fetchHubUpdates.pending, (s) => {
+        s.hubUpdatesLoading = true;
+      })
+
+      .addCase(fetchHubUpdates.fulfilled, (s, a) => {
+        s.hubUpdatesLoading = false;
+        s.hubUpdates = a.payload?.data || [];
+      })
+
+      .addCase(fetchHubUpdates.rejected, (s) => {
+        s.hubUpdatesLoading = false;
+      })
+
+      .addCase(createHubUpdate.fulfilled, (s, a) => {
+        if (a.payload?.data) {
+          s.hubUpdates.unshift(a.payload.data);
+        }
+      })
+
+      .addCase(deleteHubUpdate.fulfilled, (s, a) => {
+        s.hubUpdates = s.hubUpdates.filter(
+          (u) => String(u._id) !== String(a.payload.updateId)
+        );
+      })
+
+      .addCase(reactHubUpdate.fulfilled, (s, a) => {
+        const item = s.hubUpdates.find(
+          (u) => String(u._id) === String(a.payload.updateId)
+        );
+
+        if (item) {
+          item.reactions = a.payload.reactions;
+        }
+      })
 
   },
 });
@@ -966,7 +1120,7 @@ export const {
   updateMessageReceipt,
   updateMessageReactions,
   updatePinnedMessage,
-  updateHubReactions,
+
   deleteMessageForMe,
   deleteMessageForEveryone,
   updateEditedMessage,
@@ -992,6 +1146,12 @@ export const {
   voiceChatUserMuted,
   voiceChatUserUnmuted,
   voiceHeartbeat,
+
+    /* HUB UPDATES */
+  addHubUpdate,
+updateHubReactions,
+  removeHubUpdate,
+  
 } = communitySlice.actions;
 
 export default communitySlice.reducer;

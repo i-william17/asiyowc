@@ -53,6 +53,7 @@ console.log("AUTH HIT:", req.method, req.originalUrl);
       id: currentUser._id.toString(),
       _id: currentUser._id.toString(),
       role: currentUser.role,
+      isAdmin: currentUser.isAdmin,
       isActive: currentUser.isActive,
       profile: currentUser.profile
     };
@@ -94,6 +95,7 @@ const optionalAuth = async (req, res, next) => {
         id: currentUser._id.toString(),
         _id: currentUser._id.toString(),
         role: currentUser.role,
+        isAdmin: currentUser.isAdmin,
         isActive: currentUser.isActive,
         profile: currentUser.profile
       };
@@ -124,7 +126,17 @@ const restrictTo = (...roles) => {
 };
 
 const isModerator = restrictTo('moderator', 'admin');
-const isAdmin = restrictTo('admin');
+
+const isAdmin = (req, res, next) => {
+  if (!req.user?.isAdmin) {
+    return res.status(403).json({
+      success: false,
+      message: 'Admin access required',
+    });
+  }
+  next();
+};
+
 
 
 /* ==========================================================

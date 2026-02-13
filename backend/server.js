@@ -25,8 +25,9 @@ const aiRoutes = require("./routes/ai.js");
 const legacyRoutes = require('./routes/legacy.js');
 const eventRoutes = require('./routes/events.js');
 const wellnessRoutes = require('./routes/wellness.js');
-// const marketplaceRoutes = require('./routes/marketplace.js');
+const marketplaceRoutes = require('./routes/marketplace.js');
 const mentorRoutes = require('./routes/mentorship.js');
+const adminRoutes = require('./routes/admin.js');
 // const moderationRoutes = require('./routes/moderation.js');
 // const uploadRoutes = require('./routes/upload.js');
 
@@ -71,7 +72,8 @@ initSocket(io);
    ALLOWED ORIGINS (VERY IMPORTANT)
 ===================================================== */
 const allowedOrigins = [
-  "http://localhost:19000",
+  "http://localhost:3000",
+  "http://localhost:3001",
   "http://localhost:8081",
   "http://192.168.1.112:5000",
   "http://192.168.1.112:8081",
@@ -178,8 +180,11 @@ app.use('/api/community', communityRoutes);
 app.use('/api/legacy', legacyRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/wellness', wellnessRoutes);
-// app.use('/api/marketplace', marketplaceRoutes);
+app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/mentors', mentorRoutes);
+app.use('/api/admin', adminRoutes);
+// app.use('/api/moderation', moderationRoutes);
+// app.use('/api/upload', uploadRoutes);
 // app.use('/api/moderation', moderationRoutes);
 // app.use('/api/upload', uploadRoutes);
 
