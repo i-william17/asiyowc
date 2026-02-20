@@ -11,7 +11,7 @@ const reportSchema = new mongoose.Schema(
 
     targetType: {
       type: String,
-      enum: ['post', 'comment', 'chat'],
+      enum: ['post', 'comment', 'chat', 'user', 'voice', 'group', 'hub'],
       required: true
     },
 

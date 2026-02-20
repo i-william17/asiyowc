@@ -4,7 +4,7 @@ const router = express.Router();
 
 const communityController = require('../controllers/communityController');
 const { auth, isModerator } = require('../middleware/auth');
-const { upload } = require('../middleware/upload');
+const { upload, normalizePostPayload } = require('../middleware/upload');
 
 /* =====================================================
    GLOBAL MIDDLEWARE
@@ -101,7 +101,8 @@ router.get("/hubs/:hubId/updates", auth, communityController.getHubUpdates);
 router.post(
   "/hubs/:hubId/updates",
   auth,
-  upload.single("media"),
+  upload.single("file"),
+  normalizePostPayload,
   communityController.createHubUpdate
 );
 
@@ -228,24 +229,26 @@ router.post(
   "/voice/instance/:instanceId/join",
   communityController.joinVoice
 );
-router.post('/voice/:InstanceId/leave', communityController.leaveVoice);
+router.post('/voice/:instanceId/leave', communityController.leaveVoice);
 
 /* =====================================================
    REPORTS & MODERATION
 ===================================================== */
 
+// Submit report
 router.post('/report', communityController.reportContent);
 
+// Get moderation queue
 router.get(
   '/moderation-queue',
-  isModerator,
   communityController.getModerationQueue
 );
 
+// Resolve report
 router.patch(
-  '/reports/:id/resolve',
-  isModerator,
+  '/reports/:reportId/resolve',
   communityController.resolveReport
 );
+
 
 module.exports = router;

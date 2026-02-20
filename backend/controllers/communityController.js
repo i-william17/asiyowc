@@ -910,35 +910,47 @@ exports.softDeleteMessage = async (req, res) => {
   }
 };
 
-
 exports.markMessageAsRead = async (req, res) => {
-  const user = ensureAuthUser(req, res);
-  if (!user) return;
+  try {
+    const user = ensureAuthUser(req, res);
+    if (!user) return;
 
-  const { chatId, messageId } = req.params;
+    const { chatId, messageId } = req.params;
 
-  const chat = await Chat.findOne({
-    _id: chatId,
-    participants: user.id,
-    'messages._id': messageId
-  });
+    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
+    if (!ensureObjectIdParam(res, messageId, 'messageId')) return;
 
-  if (!chat) return notFound(res, 'Message not found');
+    const chat = await Chat.findOneAndUpdate(
+      {
+        _id: chatId,
+        participants: user.id,
+        'messages._id': messageId
+      },
+      {
+        $addToSet: {
+          'messages.$.readBy': { user: user.id }
+        }
+      },
+      { new: true }
+    );
 
-  const msg = chat.messages.id(messageId);
+    if (!chat) return notFound(res, 'Message not found');
 
-  const alreadyRead = msg.readBy.some(
-    (r) => String(r.user) === String(user.id)
-  );
+    const msg = chat.messages.id(messageId);
 
-  if (!alreadyRead) {
-    msg.readBy.push({ user: user.id });
-    await chat.save();
+    // 🔥 Emit realtime read receipt
+    req.io.to(`chat:${chatId}`).emit('message:read', {
+      chatId,
+      messageId,
+      userId: user.id,
+      readBy: msg.readBy
+    });
+
+    return ok(res, msg.readBy, 'Message marked as read');
+  } catch (e) {
+    return serverError(res, e);
   }
-
-  return ok(res, msg.readBy, 'Message marked as read');
 };
-
 
 /* =====================================================
    HUBS
@@ -1072,14 +1084,8 @@ exports.getHubById = async (req, res) => {
       _id: hubId,
       isRemoved: false
     })
-      .populate(
-        'moderators',
-        'profile.fullName profile.avatar'
-      )
-      .populate(
-        'members',
-        'profile.fullName profile.avatar'
-      );
+      .populate('moderators', 'profile.fullName profile.avatar')
+      .populate('members', 'profile.fullName profile.avatar');
 
     if (!hub) return notFound(res, 'Hub not found');
 
@@ -1090,6 +1096,29 @@ exports.getHubById = async (req, res) => {
     );
 
     const isModerator = isHubModeratorOrAdmin(hub, user);
+
+    /* ==========================================
+       🔥 RESOLVE PINNED UPDATE MANUALLY
+    ========================================== */
+    let pinnedUpdateFull = null;
+
+    if (hub.pinnedUpdate) {
+      const populatedHub = await Hub.findById(hubId)
+        .populate({
+          path: "updates.author",
+          select: "profile.fullName profile.avatar",
+        })
+        .populate({
+          path: "updates.reactions.users",
+          select: "profile.fullName profile.avatar",
+        });
+
+      const update = populatedHub.updates.id(hub.pinnedUpdate);
+
+      if (update) {
+        pinnedUpdateFull = update;
+      }
+    }
 
     return ok(res, {
       _id: hub._id,
@@ -1102,13 +1131,18 @@ exports.getHubById = async (req, res) => {
       moderators: hub.moderators,
       members,
 
-      membersCount: members.length, // 🔒 explicit, no reliance on virtual
+      membersCount: members.length,
       isMember,
       isModerator,
+
+      /* 🔥 THIS IS THE FIX */
+      pinnedUpdate: hub.pinnedUpdate,
+      pinnedUpdateFull,
 
       createdAt: hub.createdAt,
       updatedAt: hub.updatedAt
     });
+
   } catch (error) {
     console.error('[getHubById]', error);
     return serverError(res, error);
@@ -1121,27 +1155,22 @@ exports.joinHub = async (req, res) => {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
-    const { hubId } = req.params;
+    const { id: hubId } = req.params;
     if (!ensureObjectIdParam(res, hubId, 'hubId')) return;
 
-    /* =====================
-       ATOMIC ADD (NO DUPES)
-    ===================== */
     const hub = await Hub.findOneAndUpdate(
       {
         _id: hubId,
         isRemoved: false,
-        members: { $ne: user.id } // prevent duplicates
+        members: { $ne: user.id }
       },
       {
         $addToSet: { members: user.id }
       },
       { new: true }
-    ).select('members name');
+    ).select('members');
 
-    /* =====================
-       ALREADY A MEMBER
-    ===================== */
+    // Already member
     if (!hub) {
       const existing = await Hub.findOne({
         _id: hubId,
@@ -1150,29 +1179,19 @@ exports.joinHub = async (req, res) => {
 
       if (!existing) return notFound(res, 'Hub not found');
 
-      return ok(
-        res,
-        {
-          _id: hubId,
-          isMember: true,
-          membersCount: existing.members.length
-        },
-        'Already a member'
-      );
+      return ok(res, {
+        _id: hubId,
+        isMember: true,
+        membersCount: existing.members.length
+      }, 'Already a member');
     }
 
-    /* =====================
-       SUCCESS RESPONSE
-    ===================== */
-    return ok(
-      res,
-      {
-        _id: hub._id,
-        isMember: true,
-        membersCount: hub.members.length
-      },
-      'Joined hub'
-    );
+    return ok(res, {
+      _id: hub._id,
+      isMember: true,
+      membersCount: hub.members.length
+    }, 'Joined hub');
+
   } catch (error) {
     console.error('[joinHub]', error);
     return serverError(res, error);
@@ -1182,87 +1201,42 @@ exports.joinHub = async (req, res) => {
 // 5. Leave hub
 exports.leaveHub = async (req, res) => {
   try {
-    const user = ensureAuthUser(req, res);
-    if (!user) return;
+    const { id: hubId } = req.params;
+    const userId = req.user.id;
 
-    const { hubId } = req.params;
-    if (!ensureObjectIdParam(res, hubId, 'hubId')) return;
-
-    /* =====================
-       LOAD HUB (LIGHT)
-    ===================== */
     const hub = await Hub.findOne({
       _id: hubId,
-      isRemoved: false
-    }).select('members moderators');
+      isRemoved: false,
+      members: userId, // only require member
+    });
 
-    if (!hub) return notFound(res, 'Hub not found');
-
-    const isMember = (hub.members || []).some(
-      (m) => String(m) === String(user.id)
-    );
-
-    if (!isMember) {
-      return ok(
-        res,
-        {
-          _id: hubId,
-          isMember: false,
-          membersCount: hub.members.length
-        },
-        'Already not a member'
-      );
+    if (!hub) {
+      return res.status(404).json({
+        message: "Hub not found or not a member",
+      });
     }
 
-    /* =====================
-       MODERATOR SAFETY CHECK
-    ===================== */
-    const isModerator = hub.moderators.some(
-      (m) => String(m) === String(user.id)
-    );
-
-    if (isModerator && !hasRole(user, ['admin'])) {
-      const remainingMods = hub.moderators.filter(
-        (m) => String(m) !== String(user.id)
-      );
-
-      if (remainingMods.length === 0) {
-        return bad(
-          res,
-          'Last moderator cannot leave hub. Assign another moderator first.'
-        );
-      }
+    // 🚫 Prevent moderators from leaving
+    if (hub.moderators.some(m => String(m) === String(userId))) {
+      return res.status(400).json({
+        message: "Moderators cannot leave the hub",
+      });
     }
 
-    /* =====================
-       ATOMIC REMOVE
-    ===================== */
-    const updated = await Hub.findOneAndUpdate(
-      { _id: hubId, isRemoved: false },
-      {
-        $pull: {
-          members: user.id,
-          moderators: user.id
-        }
-      },
-      { new: true }
-    ).select('members');
-
-    /* =====================
-       RESPONSE
-    ===================== */
-    return ok(
-      res,
-      {
-        _id: hubId,
-        isMember: false,
-        membersCount: updated.members.length
-      },
-      'Left hub'
+    hub.members = hub.members.filter(
+      m => String(m) !== String(userId)
     );
-  } catch (error) {
-    console.error('[leaveHub]', error);
-    return serverError(res, error);
+
+    await hub.save();
+
+    return res.json({
+      _id: hub._id,
+      membersCount: hub.members.length,
+      isMember: false,
+    });
+
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
   }
 };
 
@@ -1360,9 +1334,6 @@ exports.deleteHub = async (req, res) => {
     const { hubId } = req.params;
     if (!ensureObjectIdParam(res, hubId, 'hubId')) return;
 
-    /* =====================
-       FIND HUB (LIGHT)
-    ===================== */
     const hub = await Hub.findOne({
       _id: hubId,
       isRemoved: false
@@ -1370,22 +1341,21 @@ exports.deleteHub = async (req, res) => {
 
     if (!hub) return notFound(res, 'Hub not found');
 
-    /* =====================
-       PERMISSION
-    ===================== */
-    if (!isHubModeratorOrAdmin(hub, user)) {
-      return forbidden(res, 'Only moderators can delete hubs');
+    const isModerator = hub.moderators.some(
+      (m) => String(m) === String(user.id)
+    );
+
+    if (!isModerator && !hasRole(user, ['admin'])) {
+      return forbidden(res, 'Only moderators or admin can delete hubs');
     }
 
-    /* =====================
-       SOFT DELETE
-    ===================== */
     await Hub.updateOne(
       { _id: hubId },
       { $set: { isRemoved: true, updatedAt: new Date() } }
     );
 
     return ok(res, null, 'Hub deleted');
+
   } catch (error) {
     console.error('[deleteHub]', error);
     return serverError(res, error);
@@ -1497,23 +1467,60 @@ exports.toggleHubReaction = async (req, res) => {
 /* =====================================================
    HUB: GET UPDATES
 ===================================================== */
+/* =====================================================
+   HUB: GET UPDATES (PAGINATED)
+===================================================== */
 exports.getHubUpdates = async (req, res) => {
   try {
     const { hubId } = req.params;
 
-    const hub = await Hub.findById(hubId).populate(
-      "updates.author",
-      "profile.fullName profile.avatar"
-    );
+    if (!mongoose.Types.ObjectId.isValid(hubId)) {
+      return bad(res, "Invalid hubId");
+    }
+
+    const page = Math.max(1, parseInt(req.query.page || "1", 10));
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit || "20", 10)));
+
+    const hub = await Hub.findOne({
+      _id: hubId,
+      isRemoved: false,
+    })
+      .populate({
+        path: "updates.author",
+        select: "profile.fullName profile.avatar",
+      })
+      .populate({
+        path: "updates.reactions.users",
+        select: "profile.fullName profile.avatar",
+      });
 
     if (!hub) return notFound(res, "Hub not found");
 
-    const updates = (hub.updates || []).sort(
+    /* =============================
+       1️⃣ SORT NEWEST FIRST
+    ============================== */
+    const sorted = (hub.updates || []).sort(
       (a, b) => b.createdAt - a.createdAt
     );
 
-    return ok(res, updates);
+    /* =============================
+       2️⃣ PAGINATION SLICE
+    ============================== */
+    const start = (page - 1) * limit;
+    const end = start + limit;
+
+    const paginated = sorted.slice(start, end);
+
+    const hasMore = end < sorted.length;
+
+    return ok(res, {
+      updates: paginated,
+      page,
+      hasMore,
+      total: sorted.length,
+    });
   } catch (err) {
+    console.error("[getHubUpdates]", err);
     return serverError(res, err);
   }
 };
@@ -1545,31 +1552,43 @@ exports.createHubUpdate = async (req, res) => {
       return forbidden(res, "Only moderators can post updates");
     }
 
-    const content = req.body.content || "";
+    const { text, caption, type, content } = req.body;
 
-    let media = null;
+    let updateData = {
+      author: user.id,
+      type: type || "text",
+      content: {},
+      reactions: [],
+    };
 
-    if (req.file) {
-      media = {
-        url: req.file.path,
-        publicId: req.file.filename,
-        type: req.file.mimetype,
+    /* ================= MEDIA UPDATE ================= */
+    if (type === "image" || type === "video") {
+      if (!content) {
+        return bad(res, "Media content missing");
+      }
+
+      updateData.type = type;
+      updateData.content = {
+        ...content,
+        caption: caption || content.caption || "",
       };
+    } else {
+      /* ================= TEXT UPDATE ================= */
+      if (!text || !text.trim()) {
+        return bad(res, "Text content is required");
+      }
+
+      updateData.type = "text";
+      updateData.content.text = text.trim();
     }
 
-    hub.updates.unshift({
-      author: user.id,
-      content,
-      media,
-      reactions: [],
-    });
+    hub.updates.unshift(updateData);
 
     await hub.save();
 
-    /* ✅ CORRECT POPULATE (parent doc only) */
     await hub.populate({
       path: "updates.author",
-      select: "profile.fullName profile.avatar",
+      select: "profile.fullName profile.avatar.url profile.avatar.publicId"
     });
 
     const update = hub.updates[0];
@@ -1636,43 +1655,86 @@ exports.deleteHubUpdate = async (req, res) => {
    HUB: TOGGLE REACTION
 ===================================================== */
 exports.reactToHubUpdate = async (req, res) => {
-  const { hubId, updateId } = req.params;
-  const { emoji } = req.body;
+  try {
+    const user = ensureAuthUser(req, res);
+    if (!user) return;
 
-  const hub = await Hub.findById(hubId);
-  if (!hub) return res.status(404).json({ message: "Hub not found" });
+    const { hubId, updateId } = req.params;
+    const { emoji } = req.body;
 
-  const update = hub.updates.id(updateId);
-  if (!update) return res.status(404).json({ message: "Update not found" });
+    const hub = await Hub.findById(hubId);
+    if (!hub) return notFound(res, "Hub not found");
 
-  let reaction = update.reactions.find((r) => r.emoji === emoji);
+    const update = hub.updates.id(updateId);
+    if (!update) return notFound(res, "Update not found");
 
-  if (!reaction) {
-    reaction = { emoji, users: [], count: 0 };
-    update.reactions.push(reaction);
+    const userId = new mongoose.Types.ObjectId(user.id);
+
+    update.reactions = update.reactions || [];
+
+    /* ===============================
+       1️⃣ REMOVE USER FROM ALL EMOJIS
+    =============================== */
+    update.reactions.forEach((reaction) => {
+      reaction.users = reaction.users.filter(
+        (u) => String(u._id || u) !== String(userId)
+      );
+    });
+
+    /* ===============================
+       2️⃣ CLEAN EMPTY BUCKETS
+    =============================== */
+    update.reactions = update.reactions.filter(
+      (r) => r.users && r.users.length > 0
+    );
+
+    /* ===============================
+       3️⃣ ADD NEW EMOJI (IF PROVIDED)
+    =============================== */
+    if (emoji) {
+      let reaction = update.reactions.find(
+        (r) => r.emoji === emoji
+      );
+
+      if (!reaction) {
+        update.reactions.push({
+          emoji,
+          users: [userId],
+          count: 1
+        });
+      } else {
+        reaction.users.push(userId);
+        reaction.count = reaction.users.length;
+      }
+    }
+
+    /* ===============================
+       4️⃣ RECOMPUTE COUNTS
+    =============================== */
+    update.reactions.forEach((r) => {
+      r.count = r.users.length;
+    });
+
+    await hub.save();
+
+    const populatedHub = await Hub.findById(hubId).populate({
+      path: "updates.reactions.users",
+      select: "profile.fullName profile.avatar",
+    });
+
+    const populatedUpdate = populatedHub.updates.id(updateId);
+
+    req.io.to(`hub:${hubId}`).emit("hub:update:reaction", {
+      hubId,
+      updateId,
+      reactions: populatedUpdate.reactions,
+    });
+
+    return ok(res, populatedUpdate.reactions, "Reaction updated");
+  } catch (err) {
+    console.error("[reactToHubUpdate]", err);
+    return serverError(res, err);
   }
-
-  const uid = req.user._id;
-
-  const exists = reaction.users.some((u) => u.equals(uid));
-
-  if (exists) {
-    reaction.users = reaction.users.filter((u) => !u.equals(uid));
-    reaction.count--;
-  } else {
-    reaction.users.push(uid);
-    reaction.count++;
-  }
-
-  await hub.save();
-
-  req.io.to(`hub:${hubId}`).emit("hub:update:reaction", {
-    hubId,
-    updateId,
-    reactions: update.reactions,
-  });
-
-  res.json({ success: true, data: update.reactions });
 };
 
 /* =====================================================
@@ -1801,7 +1863,13 @@ exports.getChatById = async (req, res) => {
       _id: chatId,
       isRemoved: false
     })
-      .populate('participants', 'profile.fullName profile.avatar')
+      /* ================= PARTICIPANTS (UPDATED) ================= */
+      .populate(
+        'participants',
+        'profile.fullName profile.avatar profile.bio profile.location profile.coverPhoto'
+      )
+
+      /* ================= UNCHANGED ================= */
       .populate({
         path: 'messages.sender',
         select: 'profile.fullName profile.avatar'
@@ -2685,40 +2753,82 @@ exports.reportContent = async (req, res) => {
 
     const { targetType, targetId, reason } = req.body;
 
-    if (!['post', 'comment', 'chat'].includes(targetType)) {
+    console.log("Report content:", req.body);
+
+    const allowedTypes = [
+      'post',
+      'comment',
+      'chat',
+      'user',
+      'voice',
+      'group',
+      'hub'
+    ];
+
+    if (!allowedTypes.includes(targetType)) {
       return bad(res, 'Invalid targetType');
     }
-    if (!targetId || !isValidObjectId(targetId)) return bad(res, 'Invalid targetId');
-    if (!reason || typeof reason !== 'string' || reason.trim().length < 5) {
+
+    if (!targetId || !isValidObjectId(targetId)) {
+      return bad(res, 'Invalid targetId');
+    }
+
+    if (!reason || reason.trim().length < 5) {
       return bad(res, 'Reason is required');
     }
 
-    // Verify target exists
+    /* =====================
+       VALIDATE TARGET EXISTS
+    ===================== */
     let targetExists = false;
 
-    if (targetType === 'post') {
-      targetExists = await Post.exists({ _id: targetId, isRemoved: false });
-    } else if (targetType === 'comment') {
-      targetExists = await Post.exists({
-        'comments._id': targetId,
-        'comments.isRemoved': false
-      });
-    } else if (targetType === 'chat') {
-      targetExists = await Chat.exists({ _id: targetId, isRemoved: false });
+    switch (targetType) {
+      case 'hub':
+        targetExists = await Hub.exists({ _id: targetId, isRemoved: false });
+        break;
+
+      case 'group':
+        targetExists = await Group.exists({ _id: targetId, isRemoved: false });
+        break;
+
+      case 'voice':
+        targetExists = await Voice.exists({ _id: targetId, isRemoved: false });
+        break;
+
+      case 'post':
+        targetExists = await Post.exists({ _id: targetId, isRemoved: false });
+        break;
+
+      case 'chat':
+        targetExists = await Chat.exists({ _id: targetId, isRemoved: false });
+        break;
+
+      case 'user':
+        targetExists = await User.exists({ _id: targetId });
+        break;
     }
 
-    if (!targetExists) return notFound(res, 'Target content not found');
+    if (!targetExists) {
+      return notFound(res, `${targetType} not found`);
+    }
 
-    // Prevent duplicate active report
-    const existingReport = await Report.findOne({
+    /* =====================
+       PREVENT DUPLICATES
+    ===================== */
+    const existing = await Report.findOne({
       reporter: user.id,
       targetType,
       targetId,
       resolved: false
     });
 
-    if (existingReport) return bad(res, 'You already reported this content');
+    if (existing) {
+      return bad(res, 'You already reported this content');
+    }
 
+    /* =====================
+       CREATE REPORT
+    ===================== */
     const report = await Report.create({
       reporter: user.id,
       targetType,
@@ -2727,6 +2837,7 @@ exports.reportContent = async (req, res) => {
     });
 
     return created(res, report, 'Report submitted');
+
   } catch (error) {
     return serverError(res, error);
   }

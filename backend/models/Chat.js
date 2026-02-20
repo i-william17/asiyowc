@@ -127,6 +127,16 @@ const chatSchema = new mongoose.Schema(
       }
     ],
 
+    /* =====================
+   🚫 BLOCKED USERS
+===================== */
+    blockedUsers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      }
+    ],
+
     // 🔑 DM-only uniqueness key
     dmKey: {
       type: String,
@@ -223,5 +233,6 @@ chatSchema.index(
 
 chatSchema.index({ participants: 1, updatedAt: -1 });
 chatSchema.index({ isRemoved: 1 });
+chatSchema.index({ blockedUsers: 1 });
 
 module.exports = mongoose.model('Chat', chatSchema);

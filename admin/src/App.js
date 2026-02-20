@@ -5,6 +5,11 @@ import Profile from "./pages/admin/Profile";
 import Users from "./pages/admin/Users";
 import Groups from "./pages/admin/Groups";
 import Programs from "./pages/admin/Programs";
+import Marketplace from "./pages/admin/Marketplace";
+import Savings from "./pages/admin/Savings";
+import Moderation from "./pages/admin/Moderation";
+import Mentors from "./pages/admin/Mentors";
+import Events from "./pages/admin/Events";
 
 import ProtectedRoute from "./components/ProtectedRoute";
 import { useEffect } from "react";
@@ -79,6 +84,50 @@ function App() {
           }
         />
 
+        <Route
+          path="/admin/reports"
+          element={
+            <ProtectedRoute>
+              <Moderation />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin/marketplace"
+          element={
+            <ProtectedRoute>
+              <Marketplace />
+            </ProtectedRoute>
+          }
+        />
+        
+        <Route
+          path="/admin/savings"
+          element={
+            <ProtectedRoute>
+              <Savings />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin/mentors"
+          element={
+            <ProtectedRoute>
+              <Mentors />
+            </ProtectedRoute>
+          }
+        />
+        
+        <Route
+          path="/admin/events"
+          element={
+            <ProtectedRoute>
+              <Events />
+            </ProtectedRoute>
+          }
+        />
       </Routes>
     </BrowserRouter>
   );

@@ -9,7 +9,9 @@ import {
   FileText,
   Settings,
   Shield,
-  Activity
+  Activity,
+  UserCheck,
+  CalendarDays
 } from "lucide-react";
 
 export default function Sidebar() {
@@ -56,6 +58,26 @@ export default function Sidebar() {
           icon: DollarSign,
         },
         {
+          name: "Marketplace",
+          path: "/admin/marketplace",
+          icon: Layers,
+        },
+        {
+          name: "Savings",
+          path: "/admin/savings",
+          icon: DollarSign,
+        },
+        {
+          name: "Mentors",
+          path: "/admin/mentors",
+          icon: UserCheck,
+        },
+        {
+          name: "Events",
+          path: "/admin/events",
+          icon: CalendarDays,
+        },
+        {
           name: "Reports",
           path: "/admin/reports",
           icon: FileText,
@@ -97,7 +119,6 @@ export default function Sidebar() {
         overflow-y-auto
       "
     >
-
       {/* Sections */}
       <div className="flex flex-col gap-6">
         {menuSections.map((section) => (

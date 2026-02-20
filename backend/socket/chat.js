@@ -137,30 +137,46 @@ module.exports = (io, socket) => {
   });
 
   /* =====================================================
-     TYPING INDICATORS
+     TYPING INDICATORS (WITH BLOCK CHECK)
   ===================================================== */
-  socket.on('typing:start', ({ chatId }) => {
-    const cid = normalizeId(chatId);
-    if (!isValidId(cid)) return;
+  socket.on('typing:start', async ({ chatId }) => {
+    try {
+      const cid = normalizeId(chatId);
+      if (!isValidId(cid)) return;
 
-    socket.to(`chat:${cid}`).emit('typing:start', {
-      chatId: cid,
-      userId,
-    });
+      // 🔥 BLOCK CHECK
+      const chat = await Chat.findById(cid).select('blockedUsers');
+      if (chat?.blockedUsers?.map(String).includes(String(userId))) return;
+
+      socket.to(`chat:${cid}`).emit('typing:start', {
+        chatId: cid,
+        userId,
+      });
+    } catch (e) {
+      console.error('typing:start error', e);
+    }
   });
 
-  socket.on('typing:stop', ({ chatId }) => {
-    const cid = normalizeId(chatId);
-    if (!isValidId(cid)) return;
+  socket.on('typing:stop', async ({ chatId }) => {
+    try {
+      const cid = normalizeId(chatId);
+      if (!isValidId(cid)) return;
 
-    socket.to(`chat:${cid}`).emit('typing:stop', {
-      chatId: cid,
-      userId,
-    });
+      // 🔥 BLOCK CHECK
+      const chat = await Chat.findById(cid).select('blockedUsers');
+      if (chat?.blockedUsers?.map(String).includes(String(userId))) return;
+
+      socket.to(`chat:${cid}`).emit('typing:stop', {
+        chatId: cid,
+        userId,
+      });
+    } catch (e) {
+      console.error('typing:stop error', e);
+    }
   });
 
   /* =====================================================
-     SEND MESSAGE (TEXT / REPLY)
+     SEND MESSAGE (TEXT / REPLY) WITH BLOCK CHECK
   ===================================================== */
   socket.on('message:send', async ({ chatId, payload }, cb) => {
     try {
@@ -174,6 +190,11 @@ module.exports = (io, socket) => {
       });
 
       if (!chat) return;
+
+      // 🔥 BLOCK CHECK - Prevent blocked users from sending messages
+      if (chat.blockedUsers?.map(String).includes(String(userId))) {
+        return cb?.({ success: false, message: "You are blocked from sending messages in this chat" });
+      }
 
       const message = {
         _id: new mongoose.Types.ObjectId(),
@@ -202,7 +223,7 @@ module.exports = (io, socket) => {
   });
 
   /* =====================================================
-     MESSAGE REACTION (PERSISTED)
+     MESSAGE REACTION (PERSISTED) WITH BLOCK CHECK
   ===================================================== */
   socket.on("message:reaction", async ({ chatId, messageId, emoji }) => {
     try {
@@ -217,21 +238,24 @@ module.exports = (io, socket) => {
         participants: userId,
         "messages._id": mid,
         isRemoved: false,
-      }).populate(
-        "messages.reactions.user",
-        "profile.fullName profile.avatar"
-      );
+      });
 
       if (!chat) return;
+
+      // 🔥 BLOCK CHECK - Prevent blocked users from adding reactions
+      if (chat.blockedUsers?.map(String).includes(String(userId))) return;
 
       const msg = chat.messages.id(mid);
       if (!msg) return;
 
-      // ✅ ALWAYS REMOVE USER'S EXISTING REACTION FIRST
-      let reactions = msg.reactions.filter(
-        (r) => String(r.user?._id || r.user) !== String(userId)
+      let reactions = msg.reactions || [];
+
+      // 🔁 Remove previous reaction from this user
+      reactions = reactions.filter(
+        (r) => String(r.user) !== String(userId)
       );
 
+      // ➕ Add new reaction if emoji exists
       if (emoji) {
         reactions.push({
           user: userId,
@@ -240,28 +264,31 @@ module.exports = (io, socket) => {
         });
       }
 
+      // 🔥 IMPORTANT: Update ONLY the reactions field
       await Chat.updateOne(
         {
           _id: cid,
-          participants: userId,
           "messages._id": mid,
-          "messages.sender": userId
         },
         {
           $set: {
-            "messages.$.ciphertext": ciphertext,
-            "messages.$.editedAt": new Date(),
-          }
+            "messages.$.reactions": reactions,
+          },
         },
-        { runValidators: false }
+        { runValidators: false } // prevents ciphertext validation failure
       );
 
+      // Re-fetch updated message (populated)
       const populatedChat = await Chat.findOne(
         { _id: cid, "messages._id": mid },
         { "messages.$": 1 }
-      ).populate("messages.reactions.user", "profile.fullName profile.avatar");
+      ).populate(
+        "messages.reactions.user",
+        "profile.fullName profile.avatar"
+      );
 
-      const populatedMsg = populatedChat.messages[0];
+      const populatedMsg = populatedChat?.messages?.[0];
+      if (!populatedMsg) return;
 
       io.to(`chat:${cid}`).emit("message:reaction:update", {
         chatId: cid,
@@ -276,32 +303,37 @@ module.exports = (io, socket) => {
   /* =====================================================
      MESSAGE READ RECEIPT (PERSISTED)
   ===================================================== */
-  socket.on('message:read', async ({ chatId, messageId }) => {
+  socket.on("message:read", async ({ chatId, messageId }) => {
     try {
       const cid = normalizeId(chatId);
       const mid = normalizeId(messageId);
+
       if (!isValidId(cid) || !isValidId(mid)) return;
 
       await Chat.updateOne(
-        { _id: cid, "messages._id": mid },
         {
-          $addToSet: {
+          _id: cid,
+          "messages._id": mid,
+          "messages.readBy.user": { $ne: userId }, // 🔥 KEY
+        },
+        {
+          $push: {
             "messages.$.readBy": {
               user: userId,
               readAt: new Date(),
-            }
-          }
-        },
-        { runValidators: false }
+            },
+          },
+        }
       );
 
-      io.to(`chat:${cid}`).emit('message:read', {
+      io.to(String(cid)).emit("message:read:update", {
         chatId: cid,
         messageId: mid,
         userId,
       });
-    } catch (e) {
-      console.error('message:read error', e);
+
+    } catch (err) {
+      console.error("Read receipt error:", err);
     }
   });
 
@@ -522,6 +554,78 @@ module.exports = (io, socket) => {
     }
   });
 
+  /* =====================================================
+     BLOCK USER (FIXED + PERSISTENT + CONSISTENT)
+  ===================================================== */
+  socket.on("user:block", async ({ chatId, userToBlock }, cb) => {
+    try {
+      const cid = normalizeId(chatId);
+      const uid = normalizeId(userToBlock);
+
+      if (!isValidId(cid) || !isValidId(uid)) {
+        return cb?.({ success: false, message: "Invalid ids" });
+      }
+
+      const chat = await Chat.findOne({
+        _id: cid,
+        participants: userId,
+        type: "dm",
+      });
+
+      if (!chat) {
+        return cb?.({ success: false, message: "Chat not found" });
+      }
+
+      await Chat.updateOne(
+        { _id: cid },
+        { $addToSet: { blockedUsers: uid } }
+      );
+
+      // 🔥 RE-FETCH updated blockedUsers
+      const updatedChat = await Chat.findById(cid).select("blockedUsers");
+
+      io.to(`chat:${cid}`).emit("chat:user:blocked", {
+        chatId: cid,
+        blockedUsers: updatedChat.blockedUsers || [],
+      });
+
+      cb?.({ success: true });
+    } catch (err) {
+      console.error("Block error", err);
+      cb?.({ success: false, message: err.message });
+    }
+  });
+
+  /* =====================================================
+     UNBLOCK USER (FIXED + PERSISTENT + CONSISTENT)
+  ===================================================== */
+  socket.on("user:unblock", async ({ chatId, userToUnblock }, cb) => {
+    try {
+      const cid = normalizeId(chatId);
+      const uid = normalizeId(userToUnblock);
+
+      if (!isValidId(cid) || !isValidId(uid)) {
+        return cb?.({ success: false, message: "Invalid ids" });
+      }
+
+      await Chat.updateOne(
+        { _id: cid },
+        { $pull: { blockedUsers: uid } }
+      );
+
+      // 🔥 RE-FETCH updated blockedUsers
+      const updatedChat = await Chat.findById(cid).select("blockedUsers");
+
+      io.to(`chat:${cid}`).emit("chat:user:blocked", {
+        chatId: cid,
+        blockedUsers: updatedChat.blockedUsers || [],
+      });
+
+      cb?.({ success: true });
+    } catch (err) {
+      console.error("Unblock error", err);
+      cb?.({ success: false, message: err.message });
+    }
+  });
 
 };
-

@@ -293,29 +293,34 @@ export const sendGroupMessage = createAsyncThunk(
 );
 
 /* ===========================
-   HUB REACTIONS
+   JOIN / LEAVE HUB
 =========================== */
-export const toggleHubReaction = createAsyncThunk(
-  "community/toggleHubReaction",
-  async ({ hubId, emoji }, { getState, rejectWithValue }) => {
+export const joinHub = createAsyncThunk(
+  "community/joinHub",
+  async (hubId, { getState, rejectWithValue }) => {
     try {
-      const token = getState().auth.token;
-      if (!token) throw new Error("Auth token missing");
-
-      const res = await communityService.toggleHubReaction(
+      const res = await communityService.joinHub(
         hubId,
-        emoji,
-        token
+        getState().auth.token
       );
-
-      return {
-        hubId,
-        reactions: res.data.reactions,
-      };
+      return res?.data; // should return updated hub
     } catch (e) {
-      return rejectWithValue(
-        e?.message || "Failed to update hub reaction"
+      return rejectWithValue(e?.message || "Failed to join hub");
+    }
+  }
+);
+
+export const leaveHub = createAsyncThunk(
+  "community/leaveHub",
+  async (hubId, { getState, rejectWithValue }) => {
+    try {
+      const res = await communityService.leaveHub(
+        hubId,
+        getState().auth.token
       );
+      return res?.data; // should return updated hub
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to leave hub");
     }
   }
 );
@@ -326,12 +331,23 @@ export const toggleHubReaction = createAsyncThunk(
 
 export const fetchHubUpdates = createAsyncThunk(
   "community/fetchHubUpdates",
-  async (hubId, { getState, rejectWithValue }) => {
+  async (
+    { hubId, page = 1, limit = 20, append = false },
+    { getState, rejectWithValue }
+  ) => {
     try {
-      return await communityService.getHubUpdates(
+      const token = getState().auth.token;
+
+      const res = await communityService.getHubUpdates(
         hubId,
-        getState().auth.token
+        token,
+        { page, limit }
       );
+
+      return {
+        ...res.data,
+        append,
+      };
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to load updates");
     }
@@ -340,13 +356,21 @@ export const fetchHubUpdates = createAsyncThunk(
 
 export const createHubUpdate = createAsyncThunk(
   "community/createHubUpdate",
-  async ({ hubId, formData }, { getState, rejectWithValue }) => {
+  async (
+    { hubId, formData, onUploadProgress },
+    { getState, rejectWithValue }
+  ) => {
     try {
-      return await communityService.createHubUpdate(
+      const token = getState().auth.token;
+
+      const res = await communityService.createHubUpdate(
         hubId,
         formData,
-        getState().auth.token
+        token,
+        onUploadProgress
       );
+
+      return res;
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to create update");
     }
@@ -373,16 +397,26 @@ export const reactHubUpdate = createAsyncThunk(
   "community/reactHubUpdate",
   async ({ hubId, updateId, emoji }, { getState, rejectWithValue }) => {
     try {
+      const token = getState().auth.token;
+
       const res = await communityService.reactHubUpdate(
         hubId,
         updateId,
-        emoji,
-        getState().auth.token
+        { emoji }, // ✅ ALWAYS send object payload
+        token
       );
+
+      // ✅ Normalize to array no matter what backend returns
+      const reactions =
+        res?.data?.data?.reactions ??
+        res?.data?.data ??
+        res?.data?.reactions ??
+        res?.data ??
+        [];
 
       return {
         updateId,
-        reactions: res.data,
+        reactions: Array.isArray(reactions) ? reactions : [],
       };
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to react");
@@ -390,6 +424,31 @@ export const reactHubUpdate = createAsyncThunk(
   }
 );
 
+/* ===========================
+   REPORT CONTENT
+=========================== */
+export const reportContent = createAsyncThunk(
+  "community/reportContent",
+  async (
+    { targetType, targetId, reason },
+    { getState, rejectWithValue }
+  ) => {
+    try {
+      const token = getState().auth.token;
+
+      const res = await communityService.reportContent(
+        targetType,
+        targetId,
+        reason,
+        token
+      );
+
+      return res?.data;
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to submit report");
+    }
+  }
+);
 
 /* ============================================================
    SLICE
@@ -419,6 +478,9 @@ const communitySlice = createSlice({
 ===================== */
     hubUpdates: [],
     hubUpdatesLoading: false,
+    hubUpdatesPage: 1,
+    hubUpdatesHasMore: true,
+    hubUpdatesTotal: 0,
 
     /* =====================
        VOICE (🔥 REQUIRED)
@@ -435,6 +497,12 @@ const communitySlice = createSlice({
     voiceRequests: [],
     lastHeartbeat: null,
     voiceChatMessages: [],
+
+    /* =====================
+       REPORT CONTENT
+    ===================== */
+    reportLoading: false,
+    reportSuccess: false,
   },
 
   reducers: {
@@ -520,37 +588,31 @@ const communitySlice = createSlice({
        REACTIONS (REALTIME SAFE)
     ===================================================== */
     updateMessageReactions: (state, action) => {
-      const {
-        chatId,
-        message,        // ✅ DM payload
-        messageId,      // ✅ Group payload
-        reactions,      // ✅ Group payload
-      } = action.payload || {};
-
-      if (!chatId) return;
-      if (!state.selectedChat) return;
+      const { chatId, message, messageId, reactions } = action.payload || {};
+      if (!chatId || !state.selectedChat) return;
       if (String(state.selectedChat._id) !== String(chatId)) return;
-      if (!Array.isArray(state.selectedChat.messages)) return;
 
-      /* =====================================================
-         🔁 RESOLVE MESSAGE ID (DM OR GROUP)
-      ===================================================== */
-      const resolvedMessageId =
-        message?._id || messageId;
+      const msgs = state.selectedChat.messages;
+      if (!Array.isArray(msgs)) return;
 
-      if (!resolvedMessageId) return;
+      // DM: backend sends full updated message
+      if (message?._id) {
+        const idx = msgs.findIndex((m) => String(m._id) === String(message._id));
+        if (idx === -1) return;
 
-      const idx = state.selectedChat.messages.findIndex(
-        (m) => String(m._id) === String(resolvedMessageId)
-      );
+        // ✅ SOURCE OF TRUTH: replace entire message
+        msgs[idx] = message;
+        return;
+      }
 
+      // Group: backend sends messageId + reactions only
+      const resolvedId = messageId;
+      if (!resolvedId) return;
+
+      const idx = msgs.findIndex((m) => String(m._id) === String(resolvedId));
       if (idx === -1) return;
 
-      /* =====================================================
-         ✅ APPLY SOURCE OF TRUTH (BACKEND)
-      ===================================================== */
-      state.selectedChat.messages[idx].reactions =
-        message?.reactions || reactions || [];
+      msgs[idx].reactions = reactions || [];
     },
 
     /* =====================================================
@@ -610,13 +672,28 @@ const communitySlice = createSlice({
     //   }
     // },
 
+    updateBlockedUsers: (state, action) => {
+      const { chatId, blockedUsers } = action.payload;
+
+      const normalized = Array.isArray(blockedUsers)
+        ? blockedUsers.map((x) => String(x))
+        : [];
+
+      if (state.selectedChat && String(state.selectedChat._id) === String(chatId)) {
+        state.selectedChat.blockedUsers = normalized;
+      }
+
+      const chat = state.chats.find((c) => String(c._id) === String(chatId));
+      if (chat) chat.blockedUsers = normalized;
+    },
+
     /* =====================================================
    HUB UPDATES (REALTIME SAFE)
 ===================================================== */
 
     addHubUpdate: (state, action) => {
       const update = action.payload;
-      if (!update) return;
+      if (!update || !update._id) return;
 
       const exists = state.hubUpdates.some(
         (u) => String(u._id) === String(update._id)
@@ -627,7 +704,7 @@ const communitySlice = createSlice({
       }
     },
 
-  updateHubUpdateReactions: (state, action) => {
+    updateHubUpdateReactions: (state, action) => {
       const { updateId, reactions } = action.payload || {};
       if (!updateId) return;
 
@@ -640,11 +717,38 @@ const communitySlice = createSlice({
       }
     },
 
+    updatePinnedUpdate: (state, action) => {
+      if (!state.selectedHub) return;
+
+      const pinnedUpdate = action.payload;
+
+      if (!pinnedUpdate) {
+        state.selectedHub.pinnedUpdate = null;
+        state.selectedHub.pinnedUpdateFull = null;
+        return;
+      }
+
+      state.selectedHub.pinnedUpdate = pinnedUpdate._id;
+      state.selectedHub.pinnedUpdateFull = pinnedUpdate;
+    },
+
     removeHubUpdate: (state, action) => {
-      const id = action.payload;
+      const updateId = action.payload;
+
       state.hubUpdates = state.hubUpdates.filter(
-        (u) => String(u._id) !== String(id)
+        (u) => String(u._id) !== String(updateId)
       );
+
+      if (state.selectedHub?.updates) {
+        state.selectedHub.updates = state.selectedHub.updates.filter(
+          (u) => String(u._id) !== String(updateId)
+        );
+      }
+
+      // 🔥 If deleted update was pinned → unpin it
+      if (state.selectedHub?.pinnedUpdate === updateId) {
+        state.selectedHub.pinnedUpdate = null;
+      }
     },
 
     /* =====================================================
@@ -862,6 +966,11 @@ const communitySlice = createSlice({
       state.selectedChat = null;
     },
 
+    resetReportState: (state) => {
+      state.reportLoading = false;
+      state.reportSuccess = false;
+    },
+
   },
 
   extraReducers: (builder) => {
@@ -1072,6 +1181,52 @@ const communitySlice = createSlice({
         state.error = action.payload || "Failed to load hub";
       })
 
+      .addCase(joinHub.fulfilled, (state, action) => {
+        const payload = action.payload;
+        if (!payload?._id) return;
+
+        if (state.selectedHub?._id === payload._id) {
+          state.selectedHub.isMember = true;
+          state.selectedHub.membersCount = payload.membersCount;
+        }
+
+        state.hubs = state.hubs.map((hub) =>
+          String(hub._id) === String(payload._id)
+            ? {
+              ...hub,
+              isMember: true,
+              membersCount: payload.membersCount,
+            }
+            : hub
+        );
+      })
+
+      .addCase(leaveHub.fulfilled, (state, action) => {
+        const payload = action.payload;
+        if (!payload?._id) return;
+
+        /* =============================
+           1️⃣ Update selectedHub
+        ============================== */
+        if (state.selectedHub?._id === payload._id) {
+          state.selectedHub.isMember = false;
+          state.selectedHub.membersCount = payload.membersCount;
+        }
+
+        /* =============================
+           2️⃣ Update hubs list (CRITICAL)
+        ============================== */
+        state.hubs = state.hubs.map((hub) =>
+          String(hub._id) === String(payload._id)
+            ? {
+              ...hub,
+              isMember: false,
+              membersCount: payload.membersCount,
+            }
+            : hub
+        );
+      })
+
       /* =====================================================
    HUB UPDATES
 ===================================================== */
@@ -1082,7 +1237,27 @@ const communitySlice = createSlice({
 
       .addCase(fetchHubUpdates.fulfilled, (s, a) => {
         s.hubUpdatesLoading = false;
-        s.hubUpdates = a.payload?.data || [];
+
+        const { updates, page, hasMore, total, append } = a.payload;
+
+        if (append) {
+          // 🔥 prevent duplicates
+          const existingIds = new Set(
+            s.hubUpdates.map((u) => String(u._id))
+          );
+
+          const unique = updates.filter(
+            (u) => !existingIds.has(String(u._id))
+          );
+
+          s.hubUpdates = [...s.hubUpdates, ...unique];
+        } else {
+          s.hubUpdates = updates;
+        }
+
+        s.hubUpdatesPage = page;
+        s.hubUpdatesHasMore = hasMore;
+        s.hubUpdatesTotal = total;
       })
 
       .addCase(fetchHubUpdates.rejected, (s) => {
@@ -1090,9 +1265,14 @@ const communitySlice = createSlice({
       })
 
       .addCase(createHubUpdate.fulfilled, (s, a) => {
-        if (a.payload?.data) {
-          s.hubUpdates.unshift(a.payload.data);
-        }
+        if (!a.payload?.data) return;
+
+        const realUpdate = a.payload.data;
+
+        // remove optimistic one (optional improvement)
+        // s.hubUpdates = s.hubUpdates.filter(u => !u.pending);
+
+        s.hubUpdates.unshift(realUpdate);
       })
 
       .addCase(deleteHubUpdate.fulfilled, (s, a) => {
@@ -1101,14 +1281,45 @@ const communitySlice = createSlice({
         );
       })
 
-      .addCase(reactHubUpdate.fulfilled, (s, a) => {
-        const item = s.hubUpdates.find(
-          (u) => String(u._id) === String(a.payload.updateId)
+      .addCase(reactHubUpdate.fulfilled, (state, action) => {
+        const { updateId, reactions } = action.payload;
+
+        // 1️⃣ Update hubUpdates list
+        const item = state.hubUpdates.find(
+          (u) => String(u._id) === String(updateId)
         );
 
         if (item) {
-          item.reactions = a.payload.reactions;
+          item.reactions = reactions;
         }
+
+        // 2️⃣ Also update selectedHub detail screen
+        if (state.selectedHub?.updates) {
+          const selectedItem = state.selectedHub.updates.find(
+            (u) => String(u._id) === String(updateId)
+          );
+
+          if (selectedItem) {
+            selectedItem.reactions = reactions;
+          }
+        }
+      })
+
+      // report
+      .addCase(reportContent.pending, (state) => {
+        state.reportLoading = true;
+        state.reportSuccess = false;
+        state.error = null;
+      })
+
+      .addCase(reportContent.fulfilled, (state) => {
+        state.reportLoading = false;
+        state.reportSuccess = true;
+      })
+
+      .addCase(reportContent.rejected, (state, action) => {
+        state.reportLoading = false;
+        state.error = action.payload || "Report failed";
       })
 
   },
@@ -1125,6 +1336,7 @@ export const {
   deleteMessageForEveryone,
   updateEditedMessage,
   clearSelectedChat,
+  updateBlockedUsers,
 
   /* VOICE */
   voiceJoined,
@@ -1147,11 +1359,12 @@ export const {
   voiceChatUserUnmuted,
   voiceHeartbeat,
 
-    /* HUB UPDATES */
+  /* HUB UPDATES */
   addHubUpdate,
-updateHubReactions,
+  updateHubUpdateReactions,
+  updatePinnedUpdate,
   removeHubUpdate,
-  
+
 } = communitySlice.actions;
 
 export default communitySlice.reducer;

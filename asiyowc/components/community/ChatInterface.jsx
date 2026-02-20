@@ -10,6 +10,8 @@ import {
   Pressable,
   Modal,
   Keyboard,
+  ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,7 +19,10 @@ import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { Swipeable } from "react-native-gesture-handler";
 import { decode as atob } from "base-64";
+import { Dimensions } from "react-native";
+
 import ConfirmModal from "./ConfirmModal";
+import { REACTION_CATEGORIES } from "../../constants/reactions";
 
 import {
   fetchChatDetail,
@@ -30,11 +35,24 @@ import {
   deleteMessageForEveryone,
   updateMessageReceipt,
   clearSelectedChat,
+  reportContent,
+  updateBlockedUsers,
 } from "../../store/slices/communitySlice";
 
 import { connectSocket } from "../../services/socket";
 import tw from "../../utils/tw";
 import ShimmerLoader from "../../components/ui/ShimmerLoader";
+
+const SCREEN_HEIGHT = Dimensions.get("window").height;
+const REACTION_SHEET_HEIGHT = SCREEN_HEIGHT * 0.7;
+const REPORT_REASONS = [
+  "Spam",
+  "Harassment or bullying",
+  "Hate speech",
+  "Misinformation",
+  "Inappropriate content",
+  "Other",
+];
 
 /* =====================================================
    HELPERS (JWT = SOURCE OF TRUTH)
@@ -62,6 +80,33 @@ const getUserAvatar = (u) =>
   u?.profile?.avatar ||
   u?.avatar?.url ||
   u?.avatar ||
+  null;
+
+const getUserBio = (u) =>
+  u?.profile?.bio || null;
+
+const getUserLocation = (u) => {
+  const loc = u?.profile?.location;
+
+  if (!loc) return null;
+
+  if (typeof loc === "string") return loc;
+
+  if (typeof loc === "object") {
+    const parts = [];
+
+    if (loc.city) parts.push(loc.city);
+    if (loc.country) parts.push(loc.country);
+
+    return parts.length ? parts.join(", ") : null;
+  }
+
+  return null;
+};
+
+const getUserCover = (u) =>
+  u?.profile?.coverPhoto?.url ||
+  u?.profile?.coverPhoto ||
   null;
 
 const normalizeId = (v) => {
@@ -117,6 +162,21 @@ const copyToClipboard = async (value) => {
 };
 
 /* =====================================================
+   FIX 1: REACTION HELPER FUNCTIONS
+===================================================== */
+const getTotalReactions = (message) => {
+  if (!Array.isArray(message?.reactions)) return 0;
+  const uniqueUsers = new Set(message.reactions.map(r => String(r.user?._id || r.user)));
+  return uniqueUsers.size;
+};
+
+const formatCount = (n = 0) => {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
+};
+
+/* =====================================================
    DIRECT MESSAGE CHAT INTERFACE (COMPLETE WITH ALL FEATURES)
 ===================================================== */
 export default function ChatInterface({ chatId }) {
@@ -136,9 +196,34 @@ export default function ChatInterface({ chatId }) {
 
   const myId = getUserIdFromToken(token);
 
+  const [highlightedId, setHighlightedId] = useState(null);
+
   /* ================= PAGINATION STATE ================= */
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+
+  /* ================= USER INFO + REPORT + BLOCK ================= */
+  const [userInfoVisible, setUserInfoVisible] = useState(false);
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [selectedReason, setSelectedReason] = useState(null);
+  const [customReason, setCustomReason] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+
+  const [blockLoading, setBlockLoading] = useState(false);
+  const [bioExpanded, setBioExpanded] = useState(false);
+
+  const openUserInfo = () => setUserInfoVisible(true);
+  const closeUserInfo = () => setUserInfoVisible(false);
+
+  const openReportModal = () => {
+    setUserInfoVisible(false);
+    requestAnimationFrame(() => setReportModalVisible(true));
+  };
+
+  const closeReportModal = () => {
+    setReportModalVisible(false);
+    setReportReason("");
+  };
 
   /* ================= VIEWABILITY CONFIG ================= */
   const viewabilityConfig = useRef({
@@ -154,6 +239,11 @@ export default function ChatInterface({ chatId }) {
   const [inputHeight, setInputHeight] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
+  /* ================= EMOJI PICKER ================= */
+  const [emojiPickerVisible, setEmojiPickerVisible] = useState(false);
+  const [activeCategory, setActiveCategory] = useState("popular");
+  const touchStartX = useRef(0);
+
   /* Presence & typing */
   const [typing, setTyping] = useState(false);
   const [online, setOnline] = useState(false);
@@ -167,6 +257,127 @@ export default function ChatInterface({ chatId }) {
 
   /* ================= REACTION MODAL ================= */
   const [reactionModalMessageId, setReactionModalMessageId] = useState(null);
+
+  const isBlocked = useMemo(() => {
+    const blocked = Array.isArray(selectedChat?.blockedUsers)
+      ? selectedChat.blockedUsers.map((x) => String(normalizeId(x)))
+      : [];
+
+    const parts = Array.isArray(selectedChat?.participants)
+      ? selectedChat.participants.map((p) => String(normalizeId(p)))
+      : [];
+
+    const me = String(myId || "");
+    const other = parts.find((id) => id && id !== me);
+
+    if (!me || !other) return false;
+
+    const iBlockedThem = blocked.includes(other); // ✅ blockedUsers contains the receiver
+    const theyBlockedMe = blocked.includes(me);   // ✅ if backend also adds me when they block me
+
+    return iBlockedThem || theyBlockedMe;
+  }, [selectedChat?.blockedUsers, selectedChat?.participants, myId]);
+
+  /* =====================================================
+     REPORT CHAT FUNCTION
+  ===================================================== */
+  const handleReportSubmit = async () => {
+    const finalReason =
+      selectedReason === "Other"
+        ? customReason.trim()
+        : selectedReason;
+
+    if (!finalReason) return;
+
+    try {
+      setReportLoading(true);
+
+      await dispatch(
+        reportContent({
+          targetType: "chat",
+          targetId: chatId,
+          reason: finalReason,
+        })
+      ).unwrap();
+
+      setReportModalVisible(false);
+      setSelectedReason(null);
+      setCustomReason("");
+    } catch (err) {
+      console.warn("Report failed:", err);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  /* =====================================================
+     BLOCK USER FUNCTION
+  ===================================================== */
+  const handleBlockUser = async () => {
+    if (!receiverId || !socketRef.current) return;
+
+    try {
+      setBlockLoading(true);
+
+      socketRef.current.emit(
+        "user:block",
+        {
+          chatId,
+          userToBlock: receiverId,
+        },
+        (res) => {
+          if (!res?.success) {
+            console.warn("Block failed:", res?.message);
+            return;
+          }
+
+          closeUserInfo();
+          router.back(); // exit chat after blocking
+        }
+      );
+    } catch (err) {
+      console.warn("Block failed:", err);
+    } finally {
+      setBlockLoading(false);
+    }
+  };
+
+  const handleUnblockUser = async () => {
+    if (!receiverId || !socketRef.current) return;
+
+    try {
+      setBlockLoading(true);
+
+      socketRef.current.emit(
+        "user:unblock",
+        {
+          chatId,
+          userToUnblock: receiverId,
+        },
+        (res) => {
+          if (!res?.success) {
+            console.warn("Unblock failed:", res?.message);
+            return;
+          }
+
+          closeUserInfo();
+        }
+      );
+    } catch (err) {
+      console.warn("Unblock failed:", err);
+    } finally {
+      setBlockLoading(false);
+    }
+  };
+
+  const handleDeleteChat = async () => {
+    try {
+      await dispatch(deleteChat(chatId)).unwrap();
+      router.back();
+    } catch (err) {
+      console.warn("Delete chat failed:", err);
+    }
+  }
 
   /* =====================================================
      LOAD OLDER MESSAGES (WHATSAPP-STYLE PAGINATION)
@@ -205,6 +416,7 @@ export default function ChatInterface({ chatId }) {
   ===================================================== */
   const onViewableItemsChanged = useRef(({ viewableItems }) => {
     if (!socketRef.current || !chatId || !myId) return;
+    if (isBlocked) return;
 
     viewableItems.forEach(({ item }) => {
       // FIX #1: Guard against non-message items (date separators)
@@ -358,6 +570,11 @@ export default function ChatInterface({ chatId }) {
   const receiverId = normalizeId(receiver);
   const receiverName = isPopulatedUser(receiver) ? getUserName(receiver) : "Chat";
   const receiverAvatar = isPopulatedUser(receiver) ? getUserAvatar(receiver) : null;
+  const iBlockedThem =
+    selectedChat?.blockedUsers?.map(String).includes(String(receiverId));
+
+  const theyBlockedMe =
+    selectedChat?.blockedUsers?.map(String).includes(String(myId));
 
   /* =====================================================
      DELETE HANDLERS
@@ -371,6 +588,7 @@ export default function ChatInterface({ chatId }) {
 
   const requestDeleteForMe = () => {
     setDeleteOptionsVisible(false);
+    setContextMenuVisible(false);
     requestAnimationFrame(() => {
       setConfirmDeleteMeVisible(true);
     });
@@ -378,6 +596,7 @@ export default function ChatInterface({ chatId }) {
 
   const requestDeleteForEveryone = () => {
     setDeleteOptionsVisible(false);
+    setContextMenuVisible(false);
     requestAnimationFrame(() => {
       setConfirmDeleteEveryoneVisible(true);
     });
@@ -402,6 +621,7 @@ export default function ChatInterface({ chatId }) {
     /* ================= MESSAGES ================= */
     const onMessage = ({ chatId: id, message }) => {
       if (String(id) !== String(chatId)) return;
+      if (isBlocked) return;
 
       dispatch(
         pushIncomingMessage({
@@ -520,6 +740,41 @@ export default function ChatInterface({ chatId }) {
 
     socket.on("message:read:batch", handleBatchRead);
 
+    /* ================= BLOCK UPDATES ================= */
+    socket.on("chat:user:blocked", ({ chatId: id, blockedUsers }) => {
+      if (String(id) !== String(chatId)) return;
+
+      const normalized = Array.isArray(blockedUsers)
+        ? blockedUsers.map((x) => String(normalizeId(x)))
+        : [];
+
+      if (normalized.includes(String(myId))) {
+        router.back(); // ✅ kicked out if YOU are the blocked one
+      }
+
+      dispatch(
+        updateBlockedUsers({
+          chatId: id,
+          blockedUsers: normalized, // ✅ always normalized
+        })
+      );
+    });
+
+    socket.on("chat:user:unblocked", ({ chatId: id, blockedUsers }) => {
+      if (String(id) !== String(chatId)) return;
+
+      const normalized = Array.isArray(blockedUsers)
+        ? blockedUsers.map((x) => String(normalizeId(x)))
+        : [];
+
+      dispatch(
+        updateBlockedUsers({
+          chatId: id,
+          blockedUsers: normalized,
+        })
+      );
+    });
+
     /* ================= CLEANUP ================= */
     return () => {
       emitTypingStop();
@@ -535,6 +790,8 @@ export default function ChatInterface({ chatId }) {
       socket.off("message:reaction:update");
       // FIX #3: Remove batch read listener
       socket.off("message:read:batch", handleBatchRead); // ← ADDED
+      socket.off("chat:user:blocked");
+      socket.off("chat:user:unblocked");
 
       // socket.disconnect();
       // socketRef.current = null;
@@ -573,6 +830,8 @@ export default function ChatInterface({ chatId }) {
   ===================================================== */
   const emitTypingStart = () => {
     if (!socketRef.current || !chatId) return;
+    if (isBlocked) return;
+
     socketRef.current.emit("typing:start", { chatId });
   };
 
@@ -592,6 +851,8 @@ export default function ChatInterface({ chatId }) {
      SEND MESSAGE
   ===================================================== */
   const onSend = () => {
+    if (isBlocked) return;
+
     const trimmed = text.trim();
     if (!trimmed) return;
 
@@ -630,6 +891,7 @@ export default function ChatInterface({ chatId }) {
 
   const toggleReaction = (message, emoji) => {
     if (!message?._id || !socketRef.current) return;
+    if (isBlocked) return;
 
     const alreadyReacted = message?.reactions?.some((r) => {
       const uid = normalizeId(r.user);
@@ -667,7 +929,6 @@ export default function ChatInterface({ chatId }) {
       count: set.size,
     }));
   };
-
 
   /* ================= TOTAL ================= */
   const getTotalReactionCount = (message) =>
@@ -716,6 +977,7 @@ export default function ChatInterface({ chatId }) {
 
   const doPin = () => {
     if (!contextMessage?._id || !socketRef.current) return;
+    if (isBlocked) return;
 
     socketRef.current.emit("message:pin", {
       chatId,
@@ -797,6 +1059,40 @@ export default function ChatInterface({ chatId }) {
     return result;
   }, [uniqueMessages, myId]);
 
+  const scrollToPinnedMessage = useCallback(() => {
+    if (!pinnedMessage?._id || !listRef.current) return;
+
+    const reversedData = [...messagesWithDates].reverse();
+
+    const index = reversedData.findIndex(
+      (item) =>
+        item.type === "message" &&
+        String(item._id) === String(pinnedMessage._id)
+    );
+
+    if (index === -1) return;
+
+    // Highlight bubble
+    setHighlightedId(pinnedMessage._id);
+    setTimeout(() => setHighlightedId(null), 2000);
+
+    // First scroll
+    listRef.current.scrollToIndex({
+      index,
+      animated: true,
+    });
+
+    // Force center (second scroll)
+    setTimeout(() => {
+      listRef.current?.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.5,
+      });
+    }, 250);
+
+  }, [pinnedMessage, messagesWithDates]);
+
   /* =====================================================
      MESSAGE ROW WITH ALL FEATURES
   ===================================================== */
@@ -848,7 +1144,7 @@ export default function ChatInterface({ chatId }) {
 
     const isPinned = String(item._id) === String(selectedChat?.pinnedMessage);
     const reactionSummary = getReactionSummary(item);
-    const totalReactions = getTotalReactionCount(item);
+    const totalReactions = getTotalReactions(item); // FIX 1: Use correct total count
     const receipt = getReceiptState(item, isMine);
 
     return (
@@ -869,8 +1165,14 @@ export default function ChatInterface({ chatId }) {
             style={[
               tw`mb-5 flex-row`,
               isMine ? tw`justify-end` : tw`justify-start`,
+              highlightedId === item._id && {
+                backgroundColor: "#F3E8FF",
+                borderRadius: 18,
+                padding: 6,
+              },
             ]}
           >
+
             {!isMine && receiverAvatar && (
               <Image
                 source={{ uri: receiverAvatar }}
@@ -954,13 +1256,14 @@ export default function ChatInterface({ chatId }) {
                 </Text>
               )}
 
-              {/* REACTIONS */}
+              {/* FIX 1 & 2: REACTIONS with total count and width constraint */}
               {!showDeletedBubble && reactionSummary.length > 0 && (
                 <View style={tw`mt-2 flex-row items-center justify-end`}>
                   <Pressable
                     onPress={() => openReactionModal(item)}
                     style={[
                       tw`flex-row items-center px-2 py-1 rounded-full`,
+                      { maxWidth: 80 }, // FIX 2: Prevents infinite stretching
                       isMine
                         ? tw`bg-white border border-gray-300`
                         : tw`bg-purple-500/80`,
@@ -985,14 +1288,16 @@ export default function ChatInterface({ chatId }) {
                     </View>
 
                     <Text
+                      numberOfLines={1}
                       style={{
                         fontFamily: "Poppins-Medium",
                         fontSize: 11,
                         color: isMine ? "#111827" : "#FFFFFF",
                         marginLeft: 4,
+                        maxWidth: 40, // FIX 2: Prevents text overflow
                       }}
                     >
-                      {totalReactions}
+                      {formatCount(totalReactions)} {/* FIX 1: Formatted total count */}
                     </Text>
                   </Pressable>
                 </View>
@@ -1168,12 +1473,25 @@ export default function ChatInterface({ chatId }) {
               </Text>
             </View>
           </View>
+
+          {/* RIGHT SIDE - INFO BUTTON */}
+          <TouchableOpacity
+            onPress={openUserInfo}
+            style={tw`p-2`}
+            hitSlop={12}
+          >
+            <Ionicons name="information-circle-outline" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
         </View>
       </View>
 
       {/* ================= PINNED PREVIEW ================= */}
       {pinnedMessage && (
-        <View style={tw`bg-gradient-to-r from-purple-50 to-white border-b border-gray-100 px-4 py-3 shadow-sm`}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={scrollToPinnedMessage}
+          style={tw`bg-gradient-to-r from-purple-50 to-white border-b border-gray-100 px-4 py-3 shadow-sm`}
+        >
           <View style={tw`flex-row items-center justify-between`}>
             <View style={tw`flex-row items-center flex-1`}>
               {/* PIN ICON */}
@@ -1256,7 +1574,7 @@ export default function ChatInterface({ chatId }) {
               </>
             )}
           </View>
-        </View>
+        </TouchableOpacity>
       )}
 
       {/* ================= MESSAGES ================= */}
@@ -1307,6 +1625,14 @@ export default function ChatInterface({ chatId }) {
         maxToRenderPerBatch={25}
         windowSize={10}
         removeClippedSubviews
+        onScrollToIndexFailed={(info) => {
+          setTimeout(() => {
+            listRef.current?.scrollToIndex({
+              index: info.index,
+              animated: true,
+            });
+          }, 400);
+        }}
 
         /* =================================================
            Keyboard safe padding (manual KAV replacement)
@@ -1321,6 +1647,451 @@ export default function ChatInterface({ chatId }) {
             16,
         }}
       />
+
+      {/* ================= USER INFO MODAL ================= */}
+      <Modal
+        transparent
+        visible={userInfoVisible}
+        animationType="slide"
+        onRequestClose={closeUserInfo}
+      >
+        <View style={tw`flex-1 bg-black/50`}>
+          <Pressable style={tw`flex-1`} onPress={closeUserInfo} />
+
+          <View
+            style={[
+              tw`bg-white rounded-t-3xl`,
+              { paddingBottom: insets.bottom + 24, maxHeight: "85%" },
+            ]}
+          >
+            {/* ================= HEADER ================= */}
+            <View style={tw`px-5 pt-5 pb-3 flex-row items-center justify-between`}>
+              <Text
+                style={{
+                  fontFamily: "Poppins-Bold",
+                  fontSize: 18,
+                  color: "#111827",
+                }}
+              >
+                Chat Info
+              </Text>
+
+              <TouchableOpacity onPress={closeUserInfo}>
+                <Ionicons name="close" size={22} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* ================= SCROLLABLE CONTENT ================= */}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 20 }}
+            >
+              {/* ================= COVER PHOTO ================= */}
+              {getUserCover(receiver) && (
+                <Image
+                  source={{ uri: getUserCover(receiver) }}
+                  style={{
+                    width: "100%",
+                    height: 160,
+                    borderRadius: 20,
+                  }}
+                  resizeMode="cover"
+                />
+              )}
+
+              {/* ================= PROFILE SECTION ================= */}
+              <View style={tw`mt-6 flex-row items-center`}>
+                {receiverAvatar ? (
+                  <Image
+                    source={{ uri: receiverAvatar }}
+                    style={{
+                      width: 82,
+                      height: 82,
+                      borderRadius: 41,
+                      borderWidth: 3,
+                      borderColor: "#FFFFFF",
+                      marginTop: getUserCover(receiver) ? -42 : 0,
+                    }}
+                  />
+                ) : (
+                  <View
+                    style={{
+                      width: 82,
+                      height: 82,
+                      borderRadius: 41,
+                      backgroundColor: "#FFD700",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Poppins-Bold",
+                        fontSize: 26,
+                        color: "#6A1B9A",
+                      }}
+                    >
+                      {receiverName?.charAt(0)?.toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+
+                <View style={tw`ml-4 flex-1`}>
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Bold",
+                      fontSize: 20,
+                      color: "#111827",
+                    }}
+                  >
+                    {receiverName}
+                  </Text>
+
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Regular",
+                      fontSize: 14,
+                      color: online ? "#16A34A" : "#6B7280",
+                      marginTop: 4,
+                    }}
+                  >
+                    {online ? "Online" : "Offline"}
+                  </Text>
+                </View>
+              </View>
+
+              {/* ================= BIO ================= */}
+              {getUserBio(receiver) && (
+                <View style={tw`mt-6`}>
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-SemiBold",
+                      fontSize: 13,
+                      color: "#6B7280",
+                      marginBottom: 6,
+                    }}
+                  >
+                    About
+                  </Text>
+
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Regular",
+                      fontSize: 15,
+                      color: "#111827",
+                      lineHeight: 22,
+                    }}
+                  >
+                    {bioExpanded
+                      ? getUserBio(receiver)
+                      : getUserBio(receiver).slice(0, 120)}
+                    {getUserBio(receiver).length > 120 && !bioExpanded && "..."}
+                  </Text>
+
+                  {getUserBio(receiver).length > 120 && (
+                    <TouchableOpacity
+                      onPress={() => setBioExpanded(!bioExpanded)}
+                      style={tw`mt-2`}
+                    >
+                      <Text
+                        style={{
+                          fontFamily: "Poppins-SemiBold",
+                          color: "#6A1B9A",
+                        }}
+                      >
+                        {bioExpanded ? "Show Less" : "Show More"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              {/* ================= LOCATION ================= */}
+              {getUserLocation(receiver) && (
+                <View style={tw`mt-5 flex-row items-center`}>
+                  <Ionicons name="location-outline" size={18} color="#6B7280" />
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Regular",
+                      fontSize: 14,
+                      color: "#6B7280",
+                      marginLeft: 8,
+                    }}
+                  >
+                    {getUserLocation(receiver)}
+                  </Text>
+                </View>
+              )}
+
+              {/* Divider */}
+              <View style={tw`h-[1px] bg-gray-200 mt-8`} />
+
+              {/* ================= ACTIONS ================= */}
+              <View style={tw`mt-6 space-y-4`}>
+                {/* Report */}
+                <Pressable
+                  onPress={openReportModal}
+                  style={tw`flex-row items-center justify-between px-4 py-4 bg-red-50 border border-red-100 rounded-2xl`}
+                >
+                  <View style={tw`flex-row items-center`}>
+                    <Ionicons name="flag-outline" size={20} color="#DC2626" />
+                    <Text style={{ marginLeft: 12, fontFamily: "Poppins-SemiBold", color: "#DC2626" }}>
+                      Report Chat
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#DC2626" />
+                </Pressable>
+
+                {/* Block */}
+                {theyBlockedMe ? (
+                  <View
+                    style={tw`px-4 py-4 bg-red-50 border border-red-200 rounded-2xl mt-4`}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Poppins-Medium",
+                        fontSize: 14,
+                        color: "#DC2626",
+                      }}
+                    >
+                      You have been blocked by {receiverName}.
+                    </Text>
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={iBlockedThem ? handleUnblockUser : handleBlockUser}
+                    disabled={blockLoading}
+                    style={[
+                      tw`flex-row items-center justify-between px-4 py-4 rounded-2xl mt-4`,
+                      iBlockedThem
+                        ? tw`bg-green-50 border border-green-200`
+                        : tw`bg-gray-100 border border-gray-200`,
+                    ]}
+                  >
+                    <View style={tw`flex-row items-center`}>
+                      <Ionicons
+                        name={iBlockedThem ? "checkmark-circle-outline" : "ban-outline"}
+                        size={20}
+                        color={iBlockedThem ? "#16A34A" : "#111827"}
+                      />
+                      <Text
+                        style={{
+                          marginLeft: 12,
+                          fontFamily: "Poppins-SemiBold",
+                          color: iBlockedThem ? "#16A34A" : "#111827",
+                        }}
+                      >
+                        {blockLoading
+                          ? iBlockedThem
+                            ? "Unblocking..."
+                            : "Blocking..."
+                          : iBlockedThem
+                            ? "Unblock User"
+                            : "Block User"}
+                      </Text>
+                    </View>
+                  </Pressable>
+                )}
+
+                {/* ================= DELETE CHAT ================= */}
+                <Pressable
+                  onPress={handleDeleteChat}
+                  style={tw`flex-row items-center justify-between px-4 py-4 bg-red-100 border border-red-200 rounded-2xl mt-6`}
+                >
+                  <View style={tw`flex-row items-center`}>
+                    <Ionicons name="trash-outline" size={20} color="#B91C1C" />
+                    <Text
+                      style={{
+                        marginLeft: 12,
+                        fontFamily: "Poppins-SemiBold",
+                        color: "#B91C1C",
+                      }}
+                    >
+                      Delete Chat
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+
+              <View style={{ height: 40 }} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ================= REPORT CHAT MODAL ================= */}
+      <Modal
+        visible={reportModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReportModalVisible(false)}
+      >
+        <View style={tw`flex-1 bg-black/40 justify-end`}>
+
+          <View
+            style={[
+              tw`bg-white rounded-t-3xl px-5 pt-6`,
+              { paddingBottom: insets.bottom + 20 }
+            ]}
+          >
+            {/* ===== DRAG HANDLE ===== */}
+            <View style={tw`items-center mb-4`}>
+              <View style={{
+                width: 40,
+                height: 5,
+                borderRadius: 999,
+                backgroundColor: "#E5E7EB"
+              }} />
+            </View>
+
+            {/* ===== HEADER ===== */}
+            <View style={tw`flex-row items-center justify-between mb-6`}>
+              <View>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Bold",
+                    fontSize: 20,
+                    color: "#111827",
+                  }}
+                >
+                  Report Chat
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 13,
+                    color: "#6B7280",
+                    marginTop: 4,
+                  }}
+                >
+                  Tell us what’s wrong with this chat
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setReportModalVisible(false)}
+                style={{
+                  backgroundColor: "#F3F4F6",
+                  borderRadius: 20,
+                  padding: 6,
+                }}
+              >
+                <Ionicons name="close" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* ===== REASONS LIST ===== */}
+            <FlatList
+              data={REPORT_REASONS}
+              keyExtractor={(item) => item}
+              showsVerticalScrollIndicator={false}
+              style={{ maxHeight: 300 }}
+              renderItem={({ item }) => {
+                const active = selectedReason === item;
+
+                return (
+                  <TouchableOpacity
+                    onPress={() => setSelectedReason(item)}
+                    style={[
+                      tw`px-4 py-4 rounded-2xl mb-3 flex-row items-center justify-between`,
+                      {
+                        borderWidth: 1.5,
+                        borderColor: active ? "#6A1B9A" : "#E5E7EB",
+                        backgroundColor: active ? "#F3E8FF" : "#FFFFFF",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: active
+                          ? "Poppins-SemiBold"
+                          : "Poppins-Regular",
+                        fontSize: 15,
+                        color: "#111827",
+                      }}
+                    >
+                      {item}
+                    </Text>
+
+                    {active && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color="#6A1B9A"
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              }}
+            />
+
+            {/* ===== OTHER TEXT INPUT ===== */}
+            {selectedReason === "Other" && (
+              <View style={tw`mt-3`}>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 13,
+                    color: "#6B7280",
+                    marginBottom: 6,
+                  }}
+                >
+                  Describe the issue
+                </Text>
+
+                <TextInput
+                  placeholder="Write your reason..."
+                  value={customReason}
+                  onChangeText={setCustomReason}
+                  multiline
+                  style={{
+                    minHeight: 90,
+                    borderRadius: 18,
+                    borderWidth: 1.5,
+                    borderColor: "#E5E7EB",
+                    padding: 14,
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 14,
+                    textAlignVertical: "top",
+                  }}
+                />
+              </View>
+            )}
+
+            {/* ===== SUBMIT BUTTON ===== */}
+            <TouchableOpacity
+              onPress={handleReportSubmit}
+              disabled={reportLoading}
+              style={{
+                marginTop: 24,
+                backgroundColor: "#6A1B9A",
+                paddingVertical: 16,
+                borderRadius: 999,
+                alignItems: "center",
+                shadowColor: "#6A1B9A",
+                shadowOpacity: 0.3,
+                shadowRadius: 10,
+                elevation: 5,
+                opacity: reportLoading ? 0.7 : 1,
+              }}
+            >
+              {reportLoading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 16,
+                    color: "#FFFFFF",
+                  }}
+                >
+                  Submit Report
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* ================= DELETE FOR ME MODAL ================= */}
       <ConfirmModal
@@ -1529,6 +2300,19 @@ export default function ChatInterface({ chatId }) {
                     <Text style={{ fontSize: 18 }}>{e}</Text>
                   </Pressable>
                 ))}
+
+                {/* OPEN FULL PICKER */}
+                <Pressable
+                  onPress={() => {
+                    closeContextMenu();
+                    requestAnimationFrame(() => {
+                      setEmojiPickerVisible(true);
+                    });
+                  }}
+                  style={tw`ml-3`}
+                >
+                  <Ionicons name="chevron-forward" size={20} color="#6B7280" />
+                </Pressable>
               </View>
             </View>
 
@@ -1587,7 +2371,7 @@ export default function ChatInterface({ chatId }) {
         </Pressable>
       </Modal>
 
-      {/* ================= REACTION DETAILS MODAL - REVERTED TO GROUPED STRUCTURE ================= */}
+      {/* ================= REACTION DETAILS MODAL - FIX 3: Added total count ================= */}
       <Modal
         visible={!!reactionModalMessage}
         transparent
@@ -1600,21 +2384,36 @@ export default function ChatInterface({ chatId }) {
             onPress={closeReactionModal}
           />
 
-          <View style={[
-            tw`bg-white rounded-t-3xl pt-6 px-4`,
-            { maxHeight: '70%' }
-          ]}>
-            {/* Header */}
+          <View
+            style={[
+              tw`bg-white rounded-t-3xl pt-6 px-4`,
+              { height: REACTION_SHEET_HEIGHT }
+            ]}
+          >
+
+            {/* Header - FIX 3: Added total count */}
             <View style={tw`flex-row items-center justify-between mb-6`}>
-              <Text
-                style={{
-                  fontFamily: "Poppins-Bold",
-                  fontSize: 20,
-                  color: "#111827",
-                }}
-              >
-                Reactions
-              </Text>
+              <View>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Bold",
+                    fontSize: 20,
+                    color: "#111827",
+                  }}
+                >
+                  Reactions
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 13,
+                    color: "#6B7280",
+                    marginTop: 2,
+                  }}
+                >
+                  {formatCount(getTotalReactions(reactionModalMessage))} total
+                </Text>
+              </View>
               <TouchableOpacity onPress={closeReactionModal}>
                 <Ionicons name="close" size={24} color="#6B7280" />
               </TouchableOpacity>
@@ -1623,9 +2422,7 @@ export default function ChatInterface({ chatId }) {
             {/* ✅ REVERTED: FlatMap grouped users */}
             <FlatList
               data={reactionModalMessage?.reactions || []}
-
               keyExtractor={(item, index) => `reaction-${index}-${normalizeId(item.user) || index}`}
-
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => {
                 const uid = normalizeId(item.user);
@@ -1692,6 +2489,144 @@ export default function ChatInterface({ chatId }) {
         </View>
       </Modal>
 
+      {/* ================= FULL EMOJI PICKER MODAL ================= */}
+      <Modal
+        visible={emojiPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEmojiPickerVisible(false)}
+      >
+        <Pressable
+          style={tw`flex-1 bg-black/50 justify-center items-center px-4`}
+          onPress={() => setEmojiPickerVisible(false)}
+        >
+          <Pressable
+            onPress={() => { }}
+            style={{
+              width: "100%",
+              maxWidth: 440,
+              height: 560,
+              backgroundColor: "#FFFFFF",
+              borderRadius: 32,
+              paddingTop: 22,
+              paddingHorizontal: 20,
+              paddingBottom: 12,
+              shadowColor: "#6A1B9A",
+              shadowOpacity: 0.18,
+              shadowRadius: 30,
+              elevation: 25,
+            }}
+          >
+            {/* HEADER */}
+            <View style={tw`flex-row items-center justify-between mb-4`}>
+              <Text
+                style={{
+                  fontFamily: "Poppins-Bold",
+                  fontSize: 18,
+                  color: "#6A1B9A",
+                }}
+              >
+                React
+              </Text>
+
+              <TouchableOpacity
+                onPress={() => setEmojiPickerVisible(false)}
+                style={{
+                  backgroundColor: "#F3F4F6",
+                  borderRadius: 20,
+                  padding: 6,
+                }}
+              >
+                <Ionicons name="close" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* CATEGORY BAR */}
+            <View style={{ height: 50 }}>
+              <FlatList
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                data={REACTION_CATEGORIES}
+                keyExtractor={(item) => item.key}
+                renderItem={({ item }) => {
+                  const isActive = activeCategory === item.key;
+
+                  return (
+                    <Pressable
+                      onPress={() => setActiveCategory(item.key)}
+                      style={{
+                        minWidth: 95,
+                        height: 36,
+                        paddingHorizontal: 18,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 999,
+                        marginRight: 12,
+                        backgroundColor: isActive ? "#6A1B9A" : "#FFFFFF",
+                        borderWidth: 1,
+                        borderColor: isActive ? "#6A1B9A" : "#E5E7EB",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontFamily: "Poppins-Medium",
+                          fontSize: 13,
+                          color: isActive ? "#FFFFFF" : "#374151",
+                        }}
+                      >
+                        {item.label}
+                      </Text>
+                    </Pressable>
+                  );
+                }}
+              />
+            </View>
+
+            {/* DIVIDER */}
+            <View
+              style={{
+                height: 1,
+                backgroundColor: "#F3E8FF",
+                marginBottom: 10,
+              }}
+            />
+
+            {/* EMOJI GRID */}
+            <View style={{ flex: 1 }}>
+              <FlatList
+                data={
+                  REACTION_CATEGORIES.find(
+                    (c) => c.key === activeCategory
+                  )?.emojis || []
+                }
+                numColumns={7}
+                keyExtractor={(item, index) => `${item}-${index}`}
+                showsVerticalScrollIndicator={false}
+                renderItem={({ item }) => (
+                  <Pressable
+                    onPress={() => {
+                      toggleReaction(contextMessage, item);
+                      setEmojiPickerVisible(false);
+                    }}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginRight: 6,
+                      marginBottom: 8,
+                      borderRadius: 14,
+                    }}
+                  >
+                    <Text style={{ fontSize: 22 }}>{item}</Text>
+                  </Pressable>
+                )}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* ================= REPLY BAR ================= */}
       {replyTo && (
         <View
@@ -1723,6 +2658,36 @@ export default function ChatInterface({ chatId }) {
         </View>
       )}
 
+      {theyBlockedMe && (
+        <View style={tw`bg-red-50 border-t border-red-200 px-4 py-3`}>
+          <Text
+            style={{
+              fontFamily: "Poppins-Medium",
+              fontSize: 13,
+              color: "#DC2626",
+              textAlign: "center",
+            }}
+          >
+            You cannot send messages to {receiverName}.
+          </Text>
+        </View>
+      )}
+
+      {iBlockedThem && (
+        <View style={tw`bg-gray-100 border-t border-gray-200 px-4 py-3`}>
+          <Text
+            style={{
+              fontFamily: "Poppins-Medium",
+              fontSize: 13,
+              color: "#6B7280",
+              textAlign: "center",
+            }}
+          >
+            You blocked {receiverName}. Unblock to send messages.
+          </Text>
+        </View>
+      )}
+
       {/* ================= INPUT ================= */}
       <View
         onLayout={(e) => {
@@ -1731,6 +2696,7 @@ export default function ChatInterface({ chatId }) {
             setInputHeight(h);
           }
         }}
+        pointerEvents={isBlocked ? "none" : "auto"}
         style={[
           tw`bg-white border-t border-gray-200 px-4 py-3 flex-row items-center`,
           {
@@ -1740,6 +2706,7 @@ export default function ChatInterface({ chatId }) {
       >
         <TextInput
           value={text}
+          editable={!isBlocked}
           onChangeText={(v) => {
             setText(v);
             emitTypingStart();
@@ -1760,7 +2727,14 @@ export default function ChatInterface({ chatId }) {
           ]}
         />
 
-        <TouchableOpacity onPress={onSend} style={tw`bg-purple-600 rounded-full p-3`}>
+        <TouchableOpacity
+          onPress={onSend}
+          disabled={isBlocked}
+          style={[
+            tw`rounded-full p-3`,
+            isBlocked ? tw`bg-gray-400` : tw`bg-purple-600`
+          ]}
+        >
           <Ionicons name="send" size={18} color="white" />
         </TouchableOpacity>
       </View>

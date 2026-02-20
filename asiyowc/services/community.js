@@ -373,17 +373,17 @@ export const communityService = {
     }).then(json);
   },
 
-  toggleHubReaction: (hubId, emoji, token) => {
-    const id = normalizeId(hubId);
-    if (!id) throw new Error("Invalid hub id");
-    if (!emoji) throw new Error("Emoji required");
+  // toggleHubReaction: (hubId, emoji, token) => {
+  //   const id = normalizeId(hubId);
+  //   if (!id) throw new Error("Invalid hub id");
+  //   if (!emoji) throw new Error("Emoji required");
 
-    return fetch(`${server}/community/hubs/${id}/react`, {
-      method: "POST",
-      headers: headers(token),
-      body: JSON.stringify({ emoji }),
-    }).then(json);
-  },
+  //   return fetch(`${server}/community/hubs/${id}/react`, {
+  //     method: "POST",
+  //     headers: headers(token),
+  //     body: JSON.stringify({ emoji }),
+  //   }).then(json);
+  // },
 
   updateHub: (hubId, payload, token) => {
     const id = normalizeId(hubId);
@@ -401,16 +401,24 @@ export const communityService = {
    🔥 MATCHES EXISTING FETCH STYLE
 ============================================================ */
 
-  getHubUpdates: (hubId, token) => {
+  getHubUpdates: (hubId, token, { page = 1, limit = 20 } = {}) => {
     const id = normalizeId(hubId);
     if (!id) throw new Error("Invalid hub id");
 
-    return fetch(`${server}/community/hubs/${id}/updates`, {
-      headers: headers(token),
-    }).then(json);
+    const qs = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+    });
+
+    return fetch(
+      `${server}/community/hubs/${id}/updates?${qs.toString()}`,
+      {
+        headers: headers(token),
+      }
+    ).then(json);
   },
 
-  createHubUpdate: (hubId, formData, token) => {
+  createHubUpdate: (hubId, formData, token, onUploadProgress) => {
     const id = normalizeId(hubId);
     if (!id) throw new Error("Invalid hub id");
 
@@ -418,14 +426,51 @@ export const communityService = {
       throw new Error("FormData required for media upload");
     }
 
-    return fetch(`${server}/community/hubs/${id}/updates`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`, // ❌ no JSON header for multipart
-      },
-      body: formData,
-    }).then(json);
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      xhr.open("POST", `${server}/community/hubs/${id}/updates`);
+
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+      // 🔥 Upload Progress
+      if (onUploadProgress && xhr.upload) {
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            onUploadProgress({
+              loaded: event.loaded,
+              total: event.total,
+            });
+          }
+        };
+      }
+
+      xhr.onload = async () => {
+        try {
+          const data = JSON.parse(xhr.responseText || "{}");
+
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(data);
+          } else {
+            reject(
+              new Error(
+                data?.message ||
+                data?.error ||
+                `Upload failed (${xhr.status})`
+              )
+            );
+          }
+        } catch (err) {
+          reject(new Error("Invalid server response"));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Network error"));
+
+      xhr.send(formData);
+    });
   },
+
 
   deleteHubUpdate: (hubId, updateId, token) => {
     const hid = normalizeId(hubId);
@@ -442,22 +487,22 @@ export const communityService = {
     ).then(json);
   },
 
-  reactHubUpdate: (hubId, updateId, emoji, token) => {
-    const hid = normalizeId(hubId);
-    const uid = normalizeId(updateId);
+  // reactHubUpdate: (hubId, updateId, emoji, token) => {
+  //   const hid = normalizeId(hubId);
+  //   const uid = normalizeId(updateId);
 
-    if (!hid || !uid) throw new Error("Invalid ids");
-    if (!emoji) throw new Error("Emoji required");
+  //   if (!hid || !uid) throw new Error("Invalid ids");
+  //   if (!emoji) throw new Error("Emoji required");
 
-    return fetch(
-      `${server}/community/hubs/${hid}/updates/${uid}/react`,
-      {
-        method: "POST",
-        headers: headers(token),
-        body: JSON.stringify({ emoji }),
-      }
-    ).then(json);
-  },
+  //   return fetch(
+  //     `${server}/community/hubs/${hid}/updates/${uid}/react`,
+  //     {
+  //       method: "POST",
+  //       headers: headers(token),
+  //       body: JSON.stringify({ emoji }),
+  //     }
+  //   ).then(json);
+  // },
 
   /* ============================================================
      VOICE
@@ -507,4 +552,57 @@ export const communityService = {
       body: JSON.stringify(payload || {}),
     }).then(json);
   },
+
+  /* ============================================================
+   REPORTS & MODERATION
+============================================================ */
+
+  reportContent: (targetType, targetId, reason, token) => {
+    const id = normalizeId(targetId);
+    if (!id) throw new Error("Invalid target id");
+
+    if (!targetType) throw new Error("targetType required");
+    if (!reason || reason.trim().length < 5) {
+      throw new Error("Valid reason required");
+    }
+
+    return fetch(`${server}/community/report`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify({
+        targetType,
+        targetId: id,
+        reason: reason.trim(),
+      }),
+    }).then(json);
+  },
+
+  getModerationQueue: (token, { page = 1, limit = 20, resolved = false } = {}) => {
+    const qs = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+      resolved: String(resolved),
+    });
+
+    return fetch(
+      `${server}/community/moderation-queue?${qs.toString()}`,
+      {
+        headers: headers(token),
+      }
+    ).then(json);
+  },
+
+  resolveReport: (reportId, token) => {
+    const id = normalizeId(reportId);
+    if (!id) throw new Error("Invalid report id");
+
+    return fetch(
+      `${server}/community/reports/${id}/resolve`,
+      {
+        method: "PATCH",
+        headers: headers(token),
+      }
+    ).then(json);
+  },
+
 };

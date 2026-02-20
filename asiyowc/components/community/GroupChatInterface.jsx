@@ -12,6 +12,7 @@ import {
   Modal,
   Alert,
   Keyboard,
+  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,6 +20,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import { Swipeable } from "react-native-gesture-handler";
 import { decode as atob } from "base-64";
+import { Dimensions } from "react-native";
 
 import {
   fetchGroupConversation,
@@ -32,12 +34,26 @@ import {
   leaveGroup,
   updateMessageReceipt,
   clearSelectedChat,
+  reportContent,
 } from "../../store/slices/communitySlice";
 import ConfirmModal from "../../components/community/ConfirmModal";
+import { REACTION_CATEGORIES } from "../../constants/reactions";
 
 import { connectSocket } from "../../services/socket";
 import tw from "../../utils/tw";
 import ShimmerLoader from "../../components/ui/ShimmerLoader";
+
+const SCREEN_HEIGHT = Dimensions.get("window").height;
+const REACTION_SHEET_HEIGHT = SCREEN_HEIGHT * 0.7;
+
+const REPORT_REASONS = [
+  "Spam",
+  "Harassment or bullying",
+  "Hate speech",
+  "Misinformation",
+  "Inappropriate content",
+  "Other",
+];
 
 /* =====================================================
    GROUP CHAT INTERFACE (COMPLETE WITH ALL FEATURES)
@@ -81,11 +97,38 @@ export default function GroupChatInterface({ chatId }) {
   const [contextMessage, setContextMessage] = useState(null);
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
   const [reactionModalMessageId, setReactionModalMessageId] = useState(null);
+  const [highlightedId, setHighlightedId] = useState(null);
+
+  /* REPORT MODAL STATE */
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [selectedReason, setSelectedReason] = useState(null);
+  const [customReason, setCustomReason] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+
+  /* ================= EMOJI PICKER ================= */
+  const [emojiPickerVisible, setEmojiPickerVisible] = useState(false);
+  const [activeCategory, setActiveCategory] = useState("popular");
+  const touchStartX = useRef(0);
 
   /* DELETE MODALS */
   const [confirmDeleteMeVisible, setConfirmDeleteMeVisible] = useState(false);
   const [confirmDeleteEveryoneVisible, setConfirmDeleteEveryoneVisible] = useState(false);
   const [deleteOptionsVisible, setDeleteOptionsVisible] = useState(false);
+
+  /* =====================================================
+     FIX 1: REACTION HELPER FUNCTIONS
+  ===================================================== */
+  const getTotalReactions = (message) => {
+    if (!Array.isArray(message?.reactions)) return 0;
+    const uniqueUsers = new Set(message.reactions.map(r => String(r.user?._id || r.user)));
+    return uniqueUsers.size;
+  };
+
+  const formatCount = (n = 0) => {
+    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+    return String(n);
+  };
 
   /* =====================================================
      HELPERS
@@ -274,6 +317,45 @@ export default function GroupChatInterface({ chatId }) {
     ) || null;
   }, [selectedChat?.pinnedMessage, selectedChat?.messages]);
 
+  /* =====================================================
+     REPORT SUBMIT HANDLER
+  ===================================================== */
+  const handleReportSubmit = async () => {
+    const finalReason =
+      selectedReason === "Other"
+        ? customReason.trim()
+        : selectedReason;
+
+    if (!finalReason || !group?._id) {
+      Alert.alert("Error", "Please select a reason.");
+      return;
+    }
+
+    try {
+      setReportLoading(true);
+
+      await dispatch(
+        reportContent({
+          targetType: "group",
+          targetId: group._id,
+          reason: finalReason,
+        })
+      ).unwrap();
+
+      Alert.alert(
+        "Report submitted",
+        "Thank you for helping keep the community safe."
+      );
+
+      setReportModalVisible(false);
+      setSelectedReason(null);
+      setCustomReason("");
+    } catch (err) {
+      Alert.alert("Error", "Failed to submit report.");
+    } finally {
+      setReportLoading(false);
+    }
+  };
 
   /* =====================================================
      VIEWABILITY CONFIG FOR READ RECEIPTS
@@ -398,12 +480,6 @@ export default function GroupChatInterface({ chatId }) {
       emoji,
       count: users.size,
     }));
-  };
-
-  const getTotalReactionCount = (message) => {
-    if (!Array.isArray(message?.reactions)) return 0;
-    const uniqueUsers = new Set(message.reactions.map(r => String(r.user?._id || r.user)));
-    return uniqueUsers.size;
   };
 
   const openReactionModal = (message) => {
@@ -841,13 +917,47 @@ export default function GroupChatInterface({ chatId }) {
     return result;
   }, [uniqueMessages]);
 
-const reactionModalMessage = useMemo(() => {
-  if (!reactionModalMessageId) return null;
+  const scrollToPinnedMessage = useCallback(() => {
+    if (!pinnedMessage?._id || !listRef.current) return;
 
-  return messages.find(
-    (m) => String(m._id) === String(reactionModalMessageId)
-  ) || null;
-}, [reactionModalMessageId, messages]);
+    const reversedData = [...messagesWithDates].reverse();
+
+    const index = reversedData.findIndex(
+      (item) =>
+        item.type === "message" &&
+        String(item._id) === String(pinnedMessage._id)
+    );
+
+    if (index === -1) return;
+
+    // Highlight
+    setHighlightedId(pinnedMessage._id);
+    setTimeout(() => setHighlightedId(null), 2000);
+
+    // First scroll
+    listRef.current.scrollToIndex({
+      index,
+      animated: true,
+    });
+
+    // Second scroll → FORCE CENTER
+    setTimeout(() => {
+      listRef.current?.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.5,
+      });
+    }, 250);
+
+  }, [pinnedMessage, messagesWithDates]);
+
+  const reactionModalMessage = useMemo(() => {
+    if (!reactionModalMessageId) return null;
+
+    return messages.find(
+      (m) => String(m._id) === String(reactionModalMessageId)
+    ) || null;
+  }, [reactionModalMessageId, messages]);
 
   /* =====================================================
      HEADER STATUS TEXT
@@ -985,7 +1095,7 @@ const reactionModalMessage = useMemo(() => {
 
     const isPinned = String(item._id) === String(pinnedMessage);
     const reactionSummary = getReactionSummary(item);
-    const totalReactions = getTotalReactionCount(item);
+    const totalReactions = getTotalReactions(item); // FIX 1: Use correct total count
     const receipt = getReceiptState(item, isMine);
 
     return (
@@ -1002,7 +1112,17 @@ const reactionModalMessage = useMemo(() => {
           }}
           delayLongPress={250}
         >
-          <View style={[tw`mb-5 flex-row`, isMine ? tw`justify-end` : tw`justify-start`]}>
+          <View
+            style={[
+              tw`mb-5 flex-row`,
+              isMine ? tw`justify-end` : tw`justify-start`,
+              highlightedId === item._id && {
+                backgroundColor: "#F3E8FF",
+                borderRadius: 18,
+                padding: 6,
+              },
+            ]}
+          >
             {!isMine && senderAvatar && (
               <Image
                 source={{ uri: senderAvatar }}
@@ -1108,13 +1228,14 @@ const reactionModalMessage = useMemo(() => {
                 </Text>
               )}
 
-              {/* REACTIONS */}
+              {/* FIX 1 & 2: REACTIONS with total count and width constraint */}
               {!showDeletedBubble && reactionSummary.length > 0 && (
                 <View style={tw`mt-2 flex-row items-center justify-end`}>
                   <Pressable
                     onPress={() => openReactionModal(item)}
                     style={[
                       tw`flex-row items-center px-2 py-1 rounded-full`,
+                      { maxWidth: 80 }, // FIX 2: Prevents infinite stretching
                       isMine
                         ? tw`bg-white border border-gray-300`
                         : tw`bg-purple-500/80`,
@@ -1137,14 +1258,16 @@ const reactionModalMessage = useMemo(() => {
                     </View>
 
                     <Text
+                      numberOfLines={1}
                       style={{
                         fontFamily: "Poppins-Medium",
                         fontSize: 11,
                         color: isMine ? "#111827" : "#FFFFFF",
                         marginLeft: 4,
+                        maxWidth: 40, // FIX 2: Prevents text overflow
                       }}
                     >
-                      {totalReactions}
+                      {formatCount(totalReactions)} {/* FIX 1: Formatted total count */}
                     </Text>
                   </Pressable>
                 </View>
@@ -1330,7 +1453,12 @@ const reactionModalMessage = useMemo(() => {
 
       {/* ================= PINNED PREVIEW ================= */}
       {pinnedMessage && (
-        <View style={tw`bg-gradient-to-r from-purple-50 to-white border-b border-gray-100 px-4 py-3 shadow-sm`}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={scrollToPinnedMessage}
+          style={tw`bg-gradient-to-r from-purple-50 to-white border-b border-gray-100 px-4 py-3 shadow-sm`}
+        >
+
           <View style={tw`flex-row items-center justify-between`}>
             <View style={tw`flex-row items-center flex-1`}>
               {/* PIN ICON */}
@@ -1413,7 +1541,7 @@ const reactionModalMessage = useMemo(() => {
               </>
             )}
           </View>
-        </View>
+        </TouchableOpacity>
       )}
 
       {/* ================= MESSAGES ================= */}
@@ -1481,6 +1609,14 @@ const reactionModalMessage = useMemo(() => {
         initialNumToRender={25}
         maxToRenderPerBatch={25}
         windowSize={10}
+        onScrollToIndexFailed={(info) => {
+          setTimeout(() => {
+            listRef.current?.scrollToIndex({
+              index: info.index,
+              animated: true,
+            });
+          }, 400);
+        }}
 
         /* ================= THE IMPORTANT PART ================= */
         contentContainerStyle={{
@@ -1680,6 +1816,19 @@ const reactionModalMessage = useMemo(() => {
                     <Text style={{ fontSize: 18 }}>{e}</Text>
                   </Pressable>
                 ))}
+
+                {/* OPEN FULL PICKER */}
+                <Pressable
+                  onPress={() => {
+                    closeContextMenu();
+                    requestAnimationFrame(() => {
+                      setEmojiPickerVisible(true);
+                    });
+                  }}
+                  style={tw`ml-3`}
+                >
+                  <Ionicons name="chevron-forward" size={20} color="#6B7280" />
+                </Pressable>
               </View>
             </View>
 
@@ -1751,38 +1900,52 @@ const reactionModalMessage = useMemo(() => {
             onPress={closeReactionModal}
           />
 
-          <View style={[
-            tw`bg-white rounded-t-3xl pt-6 px-4`,
-            { maxHeight: '70%' }
-          ]}>
-            {/* Header */}
+          <View
+            style={[
+              tw`bg-white rounded-t-3xl pt-6 px-4`,
+              { height: REACTION_SHEET_HEIGHT } // 🔥 IMPORTANT
+            ]}
+          >
+
+            {/* Header - FIX 3: Added total count */}
             <View style={tw`flex-row items-center justify-between mb-6`}>
-              <Text
-                style={{
-                  fontFamily: "Poppins-Bold",
-                  fontSize: 20,
-                  color: "#111827",
-                }}
-              >
-                Reactions
-              </Text>
+              <View>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Bold",
+                    fontSize: 20,
+                    color: "#111827",
+                  }}
+                >
+                  Reactions
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 13,
+                    color: "#6B7280",
+                    marginTop: 2,
+                  }}
+                >
+                  {formatCount(getTotalReactions(reactionModalMessage))} total
+                </Text>
+              </View>
               <TouchableOpacity onPress={closeReactionModal}>
                 <Ionicons name="close" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
 
-            {/* Reaction Categories */}
+            {/* Reaction List */}
             <FlatList
               style={tw`flex-1`}
               data={reactionModalMessage?.reactions || []}
               extraData={reactionModalMessage?.reactions}
-
               keyExtractor={(item, index) => `reaction-${index}`}
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => {
                 const reactionUserId = safeId(item.user);
 
-                // 🔑 RESOLVE FROM KNOWN USERS (THIS IS THE FIX)
+                // 🔑 RESOLVE FROM KNOWN USERS
                 const reactionUser =
                   userMap.get(reactionUserId) || item.user;
 
@@ -1884,6 +2047,144 @@ const reactionModalMessage = useMemo(() => {
             />
           </View>
         </View>
+      </Modal>
+
+      {/* ================= FULL EMOJI PICKER MODAL ================= */}
+      <Modal
+        visible={emojiPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEmojiPickerVisible(false)}
+      >
+        <Pressable
+          style={tw`flex-1 bg-black/50 justify-center items-center px-4`}
+          onPress={() => setEmojiPickerVisible(false)}
+        >
+          <Pressable
+            onPress={() => { }}
+            style={{
+              width: "100%",
+              maxWidth: 440,
+              height: 560,
+              backgroundColor: "#FFFFFF",
+              borderRadius: 32,
+              paddingTop: 22,
+              paddingHorizontal: 20,
+              paddingBottom: 12,
+              shadowColor: "#6A1B9A",
+              shadowOpacity: 0.18,
+              shadowRadius: 30,
+              elevation: 25,
+            }}
+          >
+            {/* HEADER */}
+            <View style={tw`flex-row items-center justify-between mb-4`}>
+              <Text
+                style={{
+                  fontFamily: "Poppins-Bold",
+                  fontSize: 18,
+                  color: "#6A1B9A",
+                }}
+              >
+                React
+              </Text>
+
+              <TouchableOpacity
+                onPress={() => setEmojiPickerVisible(false)}
+                style={{
+                  backgroundColor: "#F3F4F6",
+                  borderRadius: 20,
+                  padding: 6,
+                }}
+              >
+                <Ionicons name="close" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* CATEGORY BAR */}
+            <View style={{ height: 50 }}>
+              <FlatList
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                data={REACTION_CATEGORIES}
+                keyExtractor={(item) => item.key}
+                renderItem={({ item }) => {
+                  const isActive = activeCategory === item.key;
+
+                  return (
+                    <Pressable
+                      onPress={() => setActiveCategory(item.key)}
+                      style={{
+                        minWidth: 95,
+                        height: 36,
+                        paddingHorizontal: 18,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 999,
+                        marginRight: 12,
+                        backgroundColor: isActive ? "#6A1B9A" : "#FFFFFF",
+                        borderWidth: 1,
+                        borderColor: isActive ? "#6A1B9A" : "#E5E7EB",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontFamily: "Poppins-Medium",
+                          fontSize: 13,
+                          color: isActive ? "#FFFFFF" : "#374151",
+                        }}
+                      >
+                        {item.label}
+                      </Text>
+                    </Pressable>
+                  );
+                }}
+              />
+            </View>
+
+            {/* DIVIDER */}
+            <View
+              style={{
+                height: 1,
+                backgroundColor: "#F3E8FF",
+                marginBottom: 10,
+              }}
+            />
+
+            {/* EMOJI GRID */}
+            <View style={{ flex: 1 }}>
+              <FlatList
+                data={
+                  REACTION_CATEGORIES.find(
+                    (c) => c.key === activeCategory
+                  )?.emojis || []
+                }
+                numColumns={7}
+                keyExtractor={(item, index) => `${item}-${index}`}
+                showsVerticalScrollIndicator={false}
+                renderItem={({ item }) => (
+                  <Pressable
+                    onPress={() => {
+                      toggleReaction(contextMessage, item);
+                      setEmojiPickerVisible(false);
+                    }}
+                    style={{
+                      width: 44,
+                      height: 44,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginRight: 6,
+                      marginBottom: 8,
+                      borderRadius: 14,
+                    }}
+                  >
+                    <Text style={{ fontSize: 22 }}>{item}</Text>
+                  </Pressable>
+                )}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* ================= REPLY BAR ================= */}
@@ -2012,13 +2313,7 @@ const reactionModalMessage = useMemo(() => {
               style={tw`px-4 py-3`}
               onPress={() => {
                 setMenuOpen(false);
-                router.push({
-                  pathname: "/modals/report",
-                  params: {
-                    type: "group",
-                    targetId: group?._id,
-                  },
-                });
+                setReportModalVisible(true);
               }}
             >
               <Text style={{ fontFamily: "Poppins-Regular" }}>
@@ -2047,6 +2342,180 @@ const reactionModalMessage = useMemo(() => {
             </Pressable>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* ================= REPORT GROUP MODAL ================= */}
+      <Modal
+        visible={reportModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReportModalVisible(false)}
+      >
+        <View style={tw`flex-1 bg-black/40 justify-end`}>
+
+          <View
+            style={[
+              tw`bg-white rounded-t-3xl px-5 pt-6`,
+              { paddingBottom: insets.bottom + 20 }
+            ]}
+          >
+            {/* ===== DRAG HANDLE ===== */}
+            <View style={tw`items-center mb-4`}>
+              <View style={{
+                width: 40,
+                height: 5,
+                borderRadius: 999,
+                backgroundColor: "#E5E7EB"
+              }} />
+            </View>
+
+            {/* ===== HEADER ===== */}
+            <View style={tw`flex-row items-center justify-between mb-6`}>
+              <View>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Bold",
+                    fontSize: 20,
+                    color: "#111827",
+                  }}
+                >
+                  Report Group
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 13,
+                    color: "#6B7280",
+                    marginTop: 4,
+                  }}
+                >
+                  Tell us what’s wrong with this group
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => setReportModalVisible(false)}
+                style={{
+                  backgroundColor: "#F3F4F6",
+                  borderRadius: 20,
+                  padding: 6,
+                }}
+              >
+                <Ionicons name="close" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            {/* ===== REASONS LIST ===== */}
+            <FlatList
+              data={REPORT_REASONS}
+              keyExtractor={(item) => item}
+              showsVerticalScrollIndicator={false}
+              style={{ maxHeight: 300 }}
+              renderItem={({ item }) => {
+                const active = selectedReason === item;
+
+                return (
+                  <TouchableOpacity
+                    onPress={() => setSelectedReason(item)}
+                    style={[
+                      tw`px-4 py-4 rounded-2xl mb-3 flex-row items-center justify-between`,
+                      {
+                        borderWidth: 1.5,
+                        borderColor: active ? "#6A1B9A" : "#E5E7EB",
+                        backgroundColor: active ? "#F3E8FF" : "#FFFFFF",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: active
+                          ? "Poppins-SemiBold"
+                          : "Poppins-Regular",
+                        fontSize: 15,
+                        color: "#111827",
+                      }}
+                    >
+                      {item}
+                    </Text>
+
+                    {active && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={20}
+                        color="#6A1B9A"
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              }}
+            />
+
+            {/* ===== OTHER TEXT INPUT ===== */}
+            {selectedReason === "Other" && (
+              <View style={tw`mt-3`}>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 13,
+                    color: "#6B7280",
+                    marginBottom: 6,
+                  }}
+                >
+                  Describe the issue
+                </Text>
+
+                <TextInput
+                  placeholder="Write your reason..."
+                  value={customReason}
+                  onChangeText={setCustomReason}
+                  multiline
+                  style={{
+                    minHeight: 90,
+                    borderRadius: 18,
+                    borderWidth: 1.5,
+                    borderColor: "#E5E7EB",
+                    padding: 14,
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 14,
+                    textAlignVertical: "top",
+                  }}
+                />
+              </View>
+            )}
+
+            {/* ===== SUBMIT BUTTON ===== */}
+            <TouchableOpacity
+              onPress={handleReportSubmit}
+              disabled={reportLoading}
+              style={{
+                marginTop: 24,
+                backgroundColor: "#6A1B9A",
+                paddingVertical: 16,
+                borderRadius: 999,
+                alignItems: "center",
+                shadowColor: "#6A1B9A",
+                shadowOpacity: 0.3,
+                shadowRadius: 10,
+                elevation: 5,
+                opacity: reportLoading ? 0.7 : 1,
+              }}
+            >
+              {reportLoading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 16,
+                    color: "#FFFFFF",
+                  }}
+                >
+                  Submit Report
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* ================= LEAVE CONFIRM MODAL ================= */}

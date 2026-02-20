@@ -1,3 +1,4 @@
+// socket/index.js
 const socketAuth = require('./auth');
 const registerPresence = require('./presence');
 const registerChat = require('./chat');

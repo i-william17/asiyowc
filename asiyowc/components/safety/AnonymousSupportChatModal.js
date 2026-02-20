@@ -158,6 +158,23 @@ export default function AnonymousSupportChatModal({ onClose }) {
     };
   }, [loading]);
 
+  useEffect(() => {
+    return () => {
+      // 🔥 Runs when modal unmounts
+      clearAiMemory();
+      setMessages([
+        {
+          role: "assistant",
+          content:
+            "This is a safe, anonymous space. You can share freely. I’m here to listen.",
+        },
+      ]);
+      setInput("");
+      setLoading(false);
+    };
+  }, [clearAiMemory]);
+
+
   /* ================= SEND MESSAGE ================= */
   const sendMessage = async (textOverride) => {
     const messageToSend = textOverride ?? input.trim();

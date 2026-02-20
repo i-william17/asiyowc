@@ -6,7 +6,7 @@ const mongoose = require("mongoose");
 const hubReactionSchema = new mongoose.Schema(
   {
     emoji: {
-      type: String, // 👍 ❤️ 🔥 😂
+      type: String,
       required: true,
       trim: true,
     },
@@ -28,8 +28,7 @@ const hubReactionSchema = new mongoose.Schema(
 );
 
 /* =====================================================
-   🔥 HUB UPDATE SUBSCHEMA (EMBEDDED)
-   Uses SAME reaction schema above
+   🔥 HUB UPDATE SUBSCHEMA
 ===================================================== */
 const hubUpdateSchema = new mongoose.Schema(
   {
@@ -39,15 +38,20 @@ const hubUpdateSchema = new mongoose.Schema(
       required: true,
     },
 
-    /* text | image | video */
     type: {
       type: String,
       enum: ["text", "image", "video"],
-      default: "text",
+      required: true,
     },
 
+    /* ================= CONTENT ================= */
     content: {
       text: {
+        type: String,
+        trim: true,
+      },
+
+      caption: {
         type: String,
         trim: true,
       },
@@ -57,19 +61,49 @@ const hubUpdateSchema = new mongoose.Schema(
       publicId: String, // Cloudinary cleanup
     },
 
-    /* ✅ REUSE SAME REACTION SCHEMA */
+    /* ================= REACTIONS ================= */
     reactions: {
       type: [hubReactionSchema],
       default: [],
     },
+
   },
-  {
-    timestamps: true,
-  }
+
+  /* ================= TIMESTAMPS ================= */
+  { timestamps: true }
 );
 
 /* =====================================================
-   HUB SCHEMA
+   🔥 STRICT TYPE VALIDATION
+===================================================== */
+hubUpdateSchema.pre("validate", function (next) {
+  if (!this.content) {
+    this.content = {};
+  }
+
+  if (this.type === "text") {
+    if (!this.content.text || !this.content.text.trim()) {
+      return next(new Error("Text update must include content.text"));
+    }
+  }
+
+  if (this.type === "image") {
+    if (!this.content.imageUrl) {
+      return next(new Error("Image update must include content.imageUrl"));
+    }
+  }
+
+  if (this.type === "video") {
+    if (!this.content.videoUrl) {
+      return next(new Error("Video update must include content.videoUrl"));
+    }
+  }
+
+  next();
+});
+
+/* =====================================================
+   🔥 HUB SCHEMA
 ===================================================== */
 const hubSchema = new mongoose.Schema(
   {
@@ -80,9 +114,6 @@ const hubSchema = new mongoose.Schema(
       maxlength: 100,
     },
 
-    /* =====================
-       UI FIELDS
-    ===================== */
     description: {
       type: String,
       maxlength: 500,
@@ -94,9 +125,6 @@ const hubSchema = new mongoose.Schema(
       default: null,
     },
 
-    /* =====================
-       TYPE
-    ===================== */
     type: {
       type: String,
       enum: ["regional", "international", "global"],
@@ -110,9 +138,6 @@ const hubSchema = new mongoose.Schema(
       },
     },
 
-    /* =====================
-       ROLES
-    ===================== */
     moderators: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -127,9 +152,6 @@ const hubSchema = new mongoose.Schema(
       },
     ],
 
-    /* =====================
-       POSTS (UNCHANGED)
-    ===================== */
     posts: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -137,18 +159,19 @@ const hubSchema = new mongoose.Schema(
       },
     ],
 
-    /* =====================================================
-       🔥 NEW: EMBEDDED UPDATES FEED
-       (NO NEW MODEL NEEDED)
-    ===================================================== */
+    /* ================= UPDATES FEED ================= */
     updates: {
       type: [hubUpdateSchema],
       default: [],
     },
 
-    /* =====================================================
-       HUB-LEVEL REACTIONS (SAME SCHEMA REUSED)
-    ===================================================== */
+    /* ================= PINNING ================= */
+    pinnedUpdate: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+
+    /* ================= HUB REACTIONS ================= */
     reactions: {
       type: [hubReactionSchema],
       default: [],
@@ -167,14 +190,14 @@ const hubSchema = new mongoose.Schema(
 );
 
 /* =====================================================
-   VIRTUALS
+   🔥 VIRTUALS
 ===================================================== */
 hubSchema.virtual("membersCount").get(function () {
   return this.members ? this.members.length : 0;
 });
 
 /* =====================================================
-   INDEXES
+   🔥 INDEXES
 ===================================================== */
 hubSchema.index({ type: 1, region: 1 });
 hubSchema.index({ members: 1 });

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import * as Clipboard from "expo-clipboard";
 
 import tw from "../../utils/tw";
 import { useAiStream } from "../../hooks/useAiStream";
+import { useFocusEffect } from "@react-navigation/native";
 
 export default function AiChatModal() {
   const router = useRouter();
@@ -143,6 +144,23 @@ export default function AiChatModal() {
       dot3.stopAnimation();
     };
   }, [loading]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        // 🔥 Runs when screen loses focus (navigating away)
+        clearAiMemory();
+        setMessages([
+          {
+            role: "assistant",
+            content: "Hi! I'm Asiyo AI. How can I help you today?",
+          },
+        ]);
+        setInput("");
+        setLoading(false);
+      };
+    }, [])
+  );
 
   /* ================= SEND MESSAGE ================= */
   const sendMessage = async () => {

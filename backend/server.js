@@ -28,7 +28,11 @@ const wellnessRoutes = require('./routes/wellness.js');
 const marketplaceRoutes = require('./routes/marketplace.js');
 const mentorRoutes = require('./routes/mentorship.js');
 const adminRoutes = require('./routes/admin.js');
-// const moderationRoutes = require('./routes/moderation.js');
+const moderationRoutes = require('./routes/moderation.js');
+const adminMarketplaceRoutes = require('./routes/adminMarketplace.js');
+const adminSavingsRoutes = require('./routes/adminSavings.js');
+const adminMentorsRoutes = require('./routes/adminMentors.js');
+const adminEventsRoutes = require('./routes/adminEvents.js');
 // const uploadRoutes = require('./routes/upload.js');
 
 // Middleware
@@ -94,7 +98,7 @@ app.use(
         callback(new Error("Not allowed by CORS"));
       }
     },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
@@ -183,7 +187,11 @@ app.use('/api/wellness', wellnessRoutes);
 app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/mentors', mentorRoutes);
 app.use('/api/admin', adminRoutes);
-// app.use('/api/moderation', moderationRoutes);
+app.use('/api/moderation', moderationRoutes);
+app.use('/api/admin/marketplace', adminMarketplaceRoutes);
+app.use('/api/admin/savings', adminSavingsRoutes);
+app.use('/api/admin/mentors', adminMentorsRoutes);
+app.use('/api/admin/events', adminEventsRoutes);
 // app.use('/api/upload', uploadRoutes);
 // app.use('/api/moderation', moderationRoutes);
 // app.use('/api/upload', uploadRoutes);

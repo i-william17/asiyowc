@@ -279,45 +279,41 @@ module.exports = (io, socket) => {
       if (!isValidId(chatId)) return;
       if (!Array.isArray(messageIds) || !messageIds.length) return;
 
-      const chat = await Chat.findById(chatId);
-      if (!chat) return;
-
       const updated = [];
 
       for (const mid of messageIds) {
         if (!isValidId(mid)) continue;
 
-        const msg = chat.messages.id(mid);
-        if (!msg) continue;
-
-        // 🧠 Skip messages sent by this user
-        if (String(msg.sender) === String(userId)) continue;
-
-        msg.readBy = msg.readBy || [];
-
-        const alreadyRead = msg.readBy.some(
-          (r) => String(r.user) === String(userId)
+        const result = await Chat.updateOne(
+          {
+            _id: chatId,
+            "messages._id": mid,
+            "messages.sender": { $ne: userId }, // skip own messages
+            "messages.readBy.user": { $ne: userId }, // 🔥 PREVENT DUPLICATE
+          },
+          {
+            $push: {
+              "messages.$.readBy": {
+                user: userId,
+                readAt: new Date(),
+              },
+            },
+          }
         );
 
-        if (alreadyRead) continue;
-
-        msg.readBy.push({
-          user: userId,
-          readAt: new Date(),
-        });
-
-        updated.push(String(mid));
+        if (result.modifiedCount > 0) {
+          updated.push(String(mid));
+        }
       }
 
       if (!updated.length) return;
-
-      await chat.save();
 
       io.to(`chat:${chatId}`).emit("group:read:batch", {
         chatId,
         messageIds: updated,
         userId,
       });
+
     } catch (e) {
       console.error("group:read:batch error", e);
     }
