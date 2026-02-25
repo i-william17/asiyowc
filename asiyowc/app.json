@@ -8,43 +8,71 @@
     "icon": "./assets/images/asiyo-nobg.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+
     "splash": {
       "image": "./assets/images/asiyo-nobg.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.asiyowc"
+      "bundleIdentifier": "com.anonymous.asiyowc",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "This app needs microphone access for voice rooms.",
+        "UIBackgroundModes": ["audio"]
+      }
     },
+
     "android": {
       "softwareKeyboardLayoutMode": "resize",
+      "edgeToEdgeEnabled": true,
+      "package": "com.anonymous.asiyowc",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/asiyo-nobg.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.asiyowc",
-      "permissions": []
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "INTERNET",
+        "BLUETOOTH",
+        "BLUETOOTH_CONNECT"
+      ]
     },
+
     "web": {
       "name": "Asiyo Women Connect",
       "favicon": "./assets/images/asiyo-nobg.png"
     },
+
     "plugins": [
       "expo-router",
       "expo-font",
       "react-native-compressor",
       "react-native-video",
       "expo-video",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "react-native-webrtc",
+      "react-native-maps",
+      "expo-location",
+      "expo-notifications",
+      "expo-image-picker",
+      "expo-av",
+      "expo-secure-store",
+      "expo-clipboard",
+      "expo-sensors",
+      "expo-blur",
+      "expo-linear-gradient"
     ],
+
     "extra": {
       "router": {},
       "eas": {
         "projectId": "bc56a75f-6b8a-4619-8118-6199e886c21b"
       }
     },
+
     "owner": "williamwritescode"
   }
 }

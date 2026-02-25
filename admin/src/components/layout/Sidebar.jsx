@@ -53,11 +53,6 @@ export default function Sidebar() {
           icon: GraduationCap,
         },
         {
-          name: "Contributions",
-          path: "/admin/revenue",
-          icon: DollarSign,
-        },
-        {
           name: "Marketplace",
           path: "/admin/marketplace",
           icon: Layers,

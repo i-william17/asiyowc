@@ -11,6 +11,7 @@ const { Server } = require('socket.io');
 require('express-async-errors');
 const dotenv = require('dotenv');
 const path = require('path');
+const { initRedis } = require('./config/redis.js');
 
 // Routes
 const authRoutes = require('./routes/auth.js');
@@ -33,6 +34,7 @@ const adminMarketplaceRoutes = require('./routes/adminMarketplace.js');
 const adminSavingsRoutes = require('./routes/adminSavings.js');
 const adminMentorsRoutes = require('./routes/adminMentors.js');
 const adminEventsRoutes = require('./routes/adminEvents.js');
+const adminAnalyticsRoutes = require('./routes/adminAnalytics.js');
 // const uploadRoutes = require('./routes/upload.js');
 
 // Middleware
@@ -171,6 +173,16 @@ const connectDB = async () => {
   }
 };
 
+// REDIS CONNECTION
+(async () => {
+  try {
+    await initRedis();
+  } catch (error) {
+    console.error('Redis connection error:', error);
+    process.exit(1);
+  }
+})();
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -192,6 +204,7 @@ app.use('/api/admin/marketplace', adminMarketplaceRoutes);
 app.use('/api/admin/savings', adminSavingsRoutes);
 app.use('/api/admin/mentors', adminMentorsRoutes);
 app.use('/api/admin/events', adminEventsRoutes);
+app.use('/api/admin/analytics', adminAnalyticsRoutes);
 // app.use('/api/upload', uploadRoutes);
 // app.use('/api/moderation', moderationRoutes);
 // app.use('/api/upload', uploadRoutes);

@@ -497,6 +497,7 @@ const communitySlice = createSlice({
     voiceRequests: [],
     lastHeartbeat: null,
     voiceChatMessages: [],
+    voiceErrors: null, // ✅ Added missing field
 
     /* =====================
        REPORT CONTENT
@@ -647,31 +648,6 @@ const communitySlice = createSlice({
       }
     },
 
-    // /* =====================================================
-    //    HUB REACTIONS (SAFE + REALTIME)
-    // ===================================================== */
-    // updateHubReactions: (state, action) => {
-    //   const { hubId, reactions } = action.payload || {};
-    //   if (!hubId || !Array.isArray(reactions)) return;
-
-    //   // 1️⃣ Update selectedHub (detail screen)
-    //   if (
-    //     state.selectedHub &&
-    //     String(state.selectedHub._id) === String(hubId)
-    //   ) {
-    //     state.selectedHub.reactions = reactions;
-    //   }
-
-    //   // 2️⃣ Update hubs list (optional badge/preview)
-    //   const hub = state.hubs.find(
-    //     (h) => String(h._id) === String(hubId)
-    //   );
-
-    //   if (hub) {
-    //     hub.reactions = reactions;
-    //   }
-    // },
-
     updateBlockedUsers: (state, action) => {
       const { chatId, blockedUsers } = action.payload;
 
@@ -797,8 +773,13 @@ const communitySlice = createSlice({
     },
 
     /* =====================================================
- VOICE ROOM – SESSION LIFECYCLE
-===================================================== */
+       VOICE ROOM – SESSION LIFECYCLE
+       WITH PROFESSIONAL REFINEMENTS:
+       - ✅ Array safety guards
+       - ✅ Source tracking for approvals/demotions
+       - ✅ SpeakingUsers cleanup
+       - ✅ Data integrity protection
+    ===================================================== */
     voiceJoined: (state, action) => {
       const { room, instance, role, chatEnabled, lockedStage, reconnected } =
         action.payload;
@@ -814,6 +795,7 @@ const communitySlice = createSlice({
         state.messages = [];
         state.speakingUsers = {};
         state.voiceRequests = [];
+        state.voiceChatMessages = [];
       }
     },
 
@@ -828,61 +810,128 @@ const communitySlice = createSlice({
       state.messages = [];
       state.speakingUsers = {};
       state.voiceRequests = [];
+      state.voiceChatMessages = [];
     },
 
     voiceUserJoined: (state, action) => {
       if (!state.instance) return;
 
-      const exists = state.instance.participants
-        .some(p => p._id === action.payload._id);
+      // ✅ Safety guards
+      state.instance.speakers = state.instance.speakers || [];
+      state.instance.participants = state.instance.participants || [];
 
-      if (!exists) {
-        state.instance.participants.push(action.payload);
+      const incoming = action.payload;
+      const uid = String(incoming._id);
+
+      // Check speakers first
+      let user = state.instance.speakers.find(s => String(s._id) === uid);
+
+      if (user) {
+        // ✅ Preserve existing rich data, merge incoming
+        Object.assign(user, {
+          ...incoming,
+          isConnected: true,
+        });
+        return;
       }
+
+      // Check participants
+      user = state.instance.participants.find(p => String(p._id) === uid);
+
+      if (user) {
+        // ✅ Preserve existing rich data, merge incoming
+        Object.assign(user, {
+          ...incoming,
+          isConnected: true,
+        });
+        return;
+      }
+
+      // If truly new (rare case)
+      state.instance.participants.push({
+        ...incoming,
+        isConnected: true,
+      });
     },
 
     voiceUserLeft: (state, action) => {
-      const uid = String(action.payload.userId);
       if (!state.instance) return;
 
-      state.instance.participants =
-        state.instance.participants.filter(p => String(p._id) !== uid);
+      // ✅ Safety guards
+      state.instance.speakers = state.instance.speakers || [];
+      state.instance.participants = state.instance.participants || [];
 
-      state.instance.speakers =
-        state.instance.speakers?.filter(s => String(s._id) !== uid) || [];
+      const uid = String(action.payload.userId);
+
+      const speaker = state.instance.speakers.find(s => String(s._id) === uid);
+
+      if (speaker) {
+        speaker.isConnected = false;
+      }
+
+      const participant = state.instance.participants.find(p => String(p._id) === uid);
+
+      if (participant) {
+        participant.isConnected = false;
+      }
+
+      // ✅ Clean up speakingUsers when user leaves
+      delete state.speakingUsers[uid];
     },
 
     voiceSpeakerRequested: (state, action) => {
-      const { userId } = action.payload;
-      if (!state.voiceRequests.includes(userId)) {
-        state.voiceRequests.push(userId);
-      }
-    },
-
-    voiceSpeakerApproved: (state, action) => {
       if (!state.instance) return;
 
       const userId = String(action.payload.userId);
 
-      const user =
-        state.instance.participants.find(p => String(p._id) === userId) ||
-        state.instance.speakers.find(s => String(s._id) === userId);
+      const exists = state.voiceRequests.includes(userId);
+      if (!exists) {
+        state.voiceRequests.push(userId);
+      }
+    },
 
-      if (!user) return;
+    voiceSpeakerDeclined: (state, action) => {
+      const userId = String(action.payload.userId);
 
-      // REMOVE FROM participants
+      state.voiceRequests = state.voiceRequests.filter(
+        id => String(id) !== userId
+      );
+    },
+
+    // ✅ FIX 3: Optimized - no unnecessary speaker removal/readdition
+    voiceSpeakerApproved: (state, action) => {
+      if (!state.instance) return;
+
+      // ✅ Safety guards
+      state.instance.speakers = state.instance.speakers || [];
+      state.instance.participants = state.instance.participants || [];
+
+      const userId = String(action.payload.userId);
+
+      // If user is already a speaker, just clear request and return
+      const existingSpeaker = state.instance.speakers.find(
+        s => String(s._id) === userId
+      );
+
+      if (existingSpeaker) {
+        state.voiceRequests = state.voiceRequests.filter(id => id !== userId);
+        return;
+      }
+
+      // Find user in participants
+      const existingParticipant = state.instance.participants.find(
+        p => String(p._id) === userId
+      );
+
+      if (!existingParticipant) return;
+
+      // Remove from participants
       state.instance.participants = state.instance.participants.filter(
         p => String(p._id) !== userId
       );
 
-      // ADD TO speakers (if not already there)
-      const exists = state.instance.speakers.some(
-        s => String(s._id) === userId
-      );
-
-      if (!exists) {
-        state.instance.speakers.push(user);
-      }
+      // Add to speakers
+      state.instance.speakers.push(existingParticipant);
 
       state.voiceRequests = state.voiceRequests.filter(id => id !== userId);
     },
@@ -890,47 +939,70 @@ const communitySlice = createSlice({
     voiceSpeakerDemoted: (state, action) => {
       if (!state.instance) return;
 
+      // ✅ Safety guards
+      state.instance.speakers = state.instance.speakers || [];
+      state.instance.participants = state.instance.participants || [];
+
       const userId = String(action.payload.userId);
 
-      const user =
-        state.instance.speakers.find(s => String(s._id) === userId);
-
+      const user = state.instance.speakers.find(s => String(s._id) === userId);
       if (!user) return;
 
-      // REMOVE FROM speakers
+      // Remove from speakers
       state.instance.speakers = state.instance.speakers.filter(
         s => String(s._id) !== userId
       );
 
-      // ADD BACK TO participants
-      state.instance.participants.push(user);
+      // Add to participants (prevent duplicates)
+      const existsInParticipants = state.instance.participants.some(
+        p => String(p._id) === userId
+      );
+
+      if (!existsInParticipants) {
+        state.instance.participants.push(user);
+      }
     },
 
     voiceStageLocked: (state) => {
-      state.voiceStageLocked = true;
+      state.lockedStage = true;
     },
 
     voiceStageUnlocked: (state) => {
-      state.voiceStageLocked = false;
+      state.lockedStage = false;
     },
 
     voiceUserMuted: (state, action) => {
-      const user = state.instance?.participants?.find(
-        (p) => String(p._id) === String(action.payload.userId)
-      );
+      if (!state.instance) return;
+
+      state.instance.speakers = state.instance.speakers || [];
+      state.instance.participants = state.instance.participants || [];
+
+      const findUser = (list) =>
+        list?.find(p => String(p._id) === String(action.payload.userId));
+
+      let user = findUser(state.instance.participants) ||
+                 findUser(state.instance.speakers);
+
       if (user) user.isMuted = true;
     },
 
     voiceUserUnmuted: (state, action) => {
-      const user = state.instance?.participants?.find(
-        (p) => String(p._id) === String(action.payload.userId)
-      );
+      if (!state.instance) return;
+
+      state.instance.speakers = state.instance.speakers || [];
+      state.instance.participants = state.instance.participants || [];
+
+      const findUser = (list) =>
+        list?.find(p => String(p._id) === String(action.payload.userId));
+
+      let user = findUser(state.instance.participants) ||
+                 findUser(state.instance.speakers);
+
       if (user) user.isMuted = false;
     },
 
     voiceUserSpeaking: (state, action) => {
-      state.speakingUsers[action.payload.userId] =
-        action.payload.isSpeaking;
+      state.speakingUsers[action.payload.userId] = action.payload.isSpeaking;
     },
 
     voiceHeartbeat: (state) => {
@@ -938,7 +1010,7 @@ const communitySlice = createSlice({
     },
 
     voiceChatMessageReceived: (state, action) => {
-      if (!state.voiceChatEnabled) return;
+      if (!state.chatEnabled) return;
       state.voiceChatMessages.push(action.payload);
     },
 
@@ -958,6 +1030,78 @@ const communitySlice = createSlice({
       // Optional UI flag
     },
 
+    voiceRoomEnded: (state) => {
+      state.room = null;
+      state.instance = null;
+      state.role = null;
+      state.chatEnabled = true;
+      state.lockedStage = false;
+      state.messages = [];
+      state.speakingUsers = {};
+      state.voiceRequests = [];
+      state.voiceChatMessages = [];
+    },
+
+    // ✅ FIX 1: Fixed to match dispatch payload
+    voiceHostChanged: (state, action) => {
+      const newHostId = action.payload.userId; // Socket dispatches { userId }
+      if (state.room && newHostId) {
+        state.room.host = newHostId;
+      }
+    },
+
+    voiceRecordingStarted: (state) => {
+      if (state.instance) {
+        state.instance.recording = true;
+      }
+    },
+
+    voiceRecordingReady: (state, action) => {
+      if (state.instance) {
+        state.instance.recording = false;
+        state.instance.replayUrl = action.payload.replayUrl;
+      }
+    },
+
+    voiceUserRemoved: (state, action) => {
+      const userId = String(action.payload.userId);
+      
+      if (state.instance) {
+        state.instance.speakers = state.instance.speakers?.filter(
+          s => String(s._id) !== userId
+        ) || [];
+        
+        state.instance.participants = state.instance.participants?.filter(
+          p => String(p._id) !== userId
+        ) || [];
+      }
+      
+      state.voiceRequests = state.voiceRequests.filter(id => id !== userId);
+      
+      // ✅ Clean up speakingUsers
+      delete state.speakingUsers[userId];
+    },
+
+    voiceUserBanned: (state, action) => {
+      const userId = String(action.payload.userId);
+      
+      if (state.instance) {
+        state.instance.speakers = state.instance.speakers?.filter(
+          s => String(s._id) !== userId
+        ) || [];
+        
+        state.instance.participants = state.instance.participants?.filter(
+          p => String(p._id) !== userId
+        ) || [];
+      }
+      
+      state.voiceRequests = state.voiceRequests.filter(id => id !== userId);
+      
+      // ✅ Clean up speakingUsers
+      delete state.speakingUsers[userId];
+    },
+
+    // ✅ FIX 2: Fixed to use existing voiceErrors field
     clearVoiceErrors: (state) => {
       state.voiceErrors = null;
     },
@@ -1345,6 +1489,7 @@ export const {
   voiceUserLeft,
   voiceSpeakerRequested,
   voiceSpeakerApproved,
+  voiceSpeakerDeclined,
   voiceSpeakerDemoted,
   voiceStageLocked,
   voiceStageUnlocked,
@@ -1354,10 +1499,16 @@ export const {
   voiceChatMessageReceived,
   voiceChatDisabled,
   voiceChatEnabled,
-  clearVoiceErrors,
+  voiceRoomEnded,
+  voiceHostChanged,
+  voiceRecordingStarted,
+  voiceRecordingReady,
+  voiceUserRemoved,
+  voiceUserBanned,
   voiceChatUserMuted,
   voiceChatUserUnmuted,
   voiceHeartbeat,
+  clearVoiceErrors,
 
   /* HUB UPDATES */
   addHubUpdate,

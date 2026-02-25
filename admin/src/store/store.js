@@ -6,6 +6,7 @@ import marketplaceSlice from "./slices/marketplaceSlice";
 import savingsSlice from "./slices/savingsSlice";
 import mentorsSlice from "./slices/mentorsSlice";
 import eventsSlice from "./slices/eventsSlice";
+import analyticsSlice from "./slices/analyticsSlice";
 
 const store = configureStore({
   reducer: {
@@ -16,6 +17,7 @@ const store = configureStore({
     savings: savingsSlice,
     mentors: mentorsSlice,
     events: eventsSlice,
+    analytics: analyticsSlice,
   },
 });
 

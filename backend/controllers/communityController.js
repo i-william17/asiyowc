@@ -1,6 +1,9 @@
 // controllers/communityController.js
 const mongoose = require('mongoose');
 
+const { AccessToken } = require("livekit-server-sdk");
+require("dotenv").config();
+
 const Group = require('../models/Group');
 const User = require('../models/User');
 const Hub = require('../models/Hub');
@@ -2613,6 +2616,51 @@ exports.updateVoiceInstanceStatus = async (req, res) => {
     return ok(res, instance, 'Instance status updated');
   } catch (error) {
     return serverError(res, error);
+  }
+};
+
+exports.generateVoiceToken = async (req, res) => {
+  try {
+    const { roomName } = req.body;
+
+    if (!roomName) {
+      return res.status(400).json({ success: false, message: "Room name required" });
+    }
+
+    const user = req.user; // assuming protect middleware attaches user
+
+    // Optional: validate user is allowed in this voice room
+    // e.g. check group membership, bans, expiry, etc.
+
+    const at = new AccessToken(
+      process.env.LIVEKIT_API_KEY,
+      process.env.LIVEKIT_API_SECRET,
+      {
+        identity: user._id.toString(),
+        name: user.profile?.fullName || "User",
+      }
+    );
+
+    at.addGrant({
+      roomJoin: true,
+      room: roomName,
+      canPublish: true,
+      canSubscribe: true,
+    });
+
+    const token = await at.toJwt();
+
+    res.json({
+      success: true,
+      token,
+    });
+
+  } catch (error) {
+    console.error("LiveKit token error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate voice token",
+    });
   }
 };
 

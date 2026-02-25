@@ -207,6 +207,8 @@ router.post('/voice', communityController.createVoice);
 router.get('/voice', communityController.getVoices);
 router.get('/voice/:id', communityController.getVoiceById);
 
+router.post("/voice/token", communityController.generateVoiceToken);
+
 router.get('/voice/:id/info', communityController.getVoiceInfo);
 router.put('/voice/:id', communityController.updateVoice);
 

@@ -1,23 +1,34 @@
 /* =====================================================
    useVoiceSocket.js
    -----------------------------------------------------
-   Voice Room Socket Hookconst state = store.getState().community;
-
-const alreadyPresent =
-  state.instance?.participants?.some(
-    p => String(p._id) === String(participant?._id)
-  );
-
-if (!alreadyPresent && participant._id !== localUserId) {
-  playJoin();
-}
-
-   - Handles signaling only (NO WebRTC)
-   - Redux is the source of truth
-   - Instance-based lifecycle
+   Fixed version with proper socket handling:
+   - No global socket disconnection on unmount
+   - Named event handlers for proper cleanup
+   - Removed redundant WebRTC event bridge
+   - Proper reconnection handling
+   - ✅ Added isConnected state for WebRTC timing
+   - ✅ Moved voice:join inside socket.on("connect") to eliminate race condition
+   - ✅ Consolidated disconnect handlers to prevent duplicate listeners
+   - ✅ Heartbeat starts only after successful join (semantic hardening)
+   - ✅ Join in-flight guard to prevent duplicate emits
+   - ✅ Join success tracking for safe leave
+   - ✅ Reconnect fallback to join on failure
+   - ✅ StrictMode safe leave emissions
+   - ✅ Added voice:speaker:declined handler
+   - ✅ Added device meta to requestToSpeak
+   - ✅ Fixed alreadyPresent check for speakers
+   - ✅ EXTRACTED joinInstance for centralized join logic
+   - ✅ FIXED: joinedRef reset on join failure
+   - ✅ FIXED: Clear heartbeat in leaveRoom
+   - ✅ FIXED: Use socket.io "reconnect" event instead of "connect"
+   - ✅ FIXED: Added instanceId safety check in emit helper
+   - ✅ FIXED: Set joinedRef.current = true on successful join (prevents double join after reconnect)
+   - ✅ HARDENING: Eager joinedRef setting moved inside success handler
+   - ✅ HARDENING: Reconnect handler uses instanceId check instead of joinedRef
+   - ✅ HARDENING: Development-only console logs
 ===================================================== */
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { connectSocket } from "../services/socket";
 import { loadVoiceSounds, playJoin, playLeave, playReconnect } from "../utils/voiceSounds";
@@ -36,6 +47,7 @@ import {
     voiceSpeakerRequested,
     voiceSpeakerApproved,
     voiceSpeakerDemoted,
+    voiceSpeakerDeclined,
 
     voiceStageLocked,
     voiceStageUnlocked,
@@ -74,13 +86,18 @@ export function useVoiceSocket({
     localUserId
 }) {
     /* =====================================================
-       INTERNAL REFS
+       INTERNAL REFS & STATE
     ===================================================== */
 
     const dispatch = useDispatch();
 
     const socketRef = useRef(null);
     const heartbeatRef = useRef(null);
+
+    /**
+     * ✅ Track real socket connection state
+     */
+    const [isConnected, setIsConnected] = useState(false);
 
     /**
      * Prevents double-joining on re-render
@@ -91,6 +108,10 @@ export function useVoiceSocket({
     const hasReconnectedRef = useRef(false);
     const hasEverConnectedRef = useRef(false);
     const soundsLoadedRef = useRef(false);
+
+    // ===== HARDENING REFS =====
+    const joinInFlightRef = useRef(false);   // prevents duplicate join emits
+    const didJoinOkRef = useRef(false);      // true only after successful join
 
     useEffect(() => {
         if (!enabled) return;
@@ -104,68 +125,57 @@ export function useVoiceSocket({
 
     /* =====================================================
        DEBUG LOG
+       🔴 FIX #3: Development-only logging
     ===================================================== */
 
-    console.log("[voice] socket init", {
-        voiceId,
-        instanceId,
-        enabled,
-        token: token ? "present" : "missing",
-    });
-
-    // const state = useSelector(s => s.community);
-
-    // const MAX_SOUND_PARTICIPANTS = 30;
-
-    // if (
-    //     state.instance?.participants?.length < MAX_SOUND_PARTICIPANTS
-    // ) {
-    //     playJoin();
-    // }
+    if (process.env.NODE_ENV === "development") {
+        console.log("[voice] socket init", {
+            voiceId,
+            instanceId,
+            enabled,
+            token: token ? "present" : "missing",
+        });
+    }
 
     /* =====================================================
-       CONNECT + JOIN (INSTANCE SCOPED)
+       ✅ STEP 1: EXTRACTED JOIN LOGIC
+       Centralized join function that can be called from anywhere
+       🔴 FIX #1: Set joinedRef only on success
     ===================================================== */
 
-    useEffect(() => {
-        /**
-         * Guard clauses:
-         * - socket disabled
-         * - missing instanceId
-         * - already joined
-         */
-        if (!enabled) return;
+    const joinInstance = useCallback(() => {
+        const socket = socketRef.current;
+        if (!socket) return;
         if (!instanceId) return;
-        if (joinedRef.current) return;
+        
+        // 🔴 FIX #1: Check both joinedRef and joinInFlightRef
+        if (joinedRef.current || joinInFlightRef.current) return;
 
-        joinedRef.current = true;
+        if (process.env.NODE_ENV === "development") {
+            console.log("[voice] joining instance:", instanceId);
+        }
 
-        /* =====================================================
-           CONNECT SOCKET
-        ===================================================== */
-
-        const socket = connectSocket(token);
-        socketRef.current = socket;
-
-        console.log("[voice] socket connected");
-
-        /* =====================================================
-           JOIN INSTANCE
-        ===================================================== */
-
-        console.log("[voice] joining instance:", instanceId);
+        joinInFlightRef.current = true;
 
         socket.emit(
             "voice:join",
             { instanceId },
             (res) => {
-                console.log("[voice] join response:", res);
+                joinInFlightRef.current = false;
 
                 if (!res?.success) {
-                    console.error("[voice] join failed", res);
-                    joinedRef.current = false;
+                    if (process.env.NODE_ENV === "development") {
+                        console.error("[voice] join failed", res);
+                    }
+                    didJoinOkRef.current = false;
+                    joinedRef.current = false; // Allow retry on failure
                     return;
                 }
+
+                didJoinOkRef.current = true;
+                leftRef.current = false;
+                // 🔴 FIX #1: Set joined flag ONLY on success
+                joinedRef.current = true;
 
                 /**
                  * Hydrate Redux voice state
@@ -179,73 +189,168 @@ export function useVoiceSocket({
                         lockedStage: res.lockedStage,
                     })
                 );
+
+                /* =====================================================
+                   HEARTBEAT (KEEP ALIVE) - START ONLY AFTER SUCCESSFUL JOIN
+                   ✅ Semantic: Heartbeat implies active membership
+                ===================================================== */
+                if (!heartbeatRef.current) {
+                    heartbeatRef.current = setInterval(() => {
+                        socket.emit("voice:heartbeat", { instanceId });
+                        dispatch(voiceHeartbeat());
+                    }, 15000);
+                }
             }
         );
+    }, [instanceId, dispatch]);
+
+    /* =====================================================
+       CONNECT + JOIN (INSTANCE SCOPED)
+       ✅ FIXED: voice:join now fires ONLY after socket connection is confirmed
+       ✅ HEARTBEAT: Starts only after successful join
+       ✅ JOIN GUARD: Prevents duplicate emits
+    ===================================================== */
+
+    useEffect(() => {
+        /**
+         * Guard clauses:
+         * - socket disabled
+         * - missing instanceId
+         * - already joined
+         */
+        if (!enabled) return;
+        if (!instanceId) return;
+        
+        // 🔴 FIX #1: Don't set joinedRef here - let joinInstance handle it on success
+        if (joinedRef.current || joinInFlightRef.current) return;
 
         /* =====================================================
-           HEARTBEAT (KEEP ALIVE)
+           CONNECT SOCKET
         ===================================================== */
 
-        heartbeatRef.current = setInterval(() => {
-            socket.emit("voice:heartbeat", { instanceId });
-            dispatch(voiceHeartbeat());
-        }, 15000);
+        const socket = connectSocket(token);
+        socketRef.current = socket;
 
-        socket.on("disconnect", () => {
+        if (process.env.NODE_ENV === "development") {
+            console.log("[voice] socket instance created");
+        }
+
+        /* =====================================================
+           ✅ STEP 2: SIMPLIFIED CONNECTION HANDLERS
+        ===================================================== */
+
+        const handleConnect = () => {
+            if (process.env.NODE_ENV === "development") {
+                console.log("[voice] socket connected (real)");
+            }
+            setIsConnected(true);
+            hasEverConnectedRef.current = true;
+
+            // ✅ Use extracted join function
+            joinInstance();
+        };
+
+        const handleDisconnect = () => {
+            if (process.env.NODE_ENV === "development") {
+                console.log("[voice] socket disconnected");
+            }
+            setIsConnected(false);
+
+            // ✅ Clean up heartbeat on disconnect
             if (heartbeatRef.current) {
                 clearInterval(heartbeatRef.current);
                 heartbeatRef.current = null;
             }
-        });
+        };
+
+        socket.on("connect", handleConnect);
+        socket.on("disconnect", handleDisconnect);
+
+        /* =====================================================
+           IF ALREADY CONNECTED (HOT RELOAD / REUSE)
+        ===================================================== */
+
+        if (socket.connected) {
+            handleConnect();
+        }
 
         /* =====================================================
            CLEANUP ON UNMOUNT
         ===================================================== */
 
         return () => {
-            console.log("[voice] leaving instance:", instanceId);
+            if (process.env.NODE_ENV === "development") {
+                console.log("[voice] leaving instance:", instanceId);
+            }
 
             joinedRef.current = false;
+            setIsConnected(false);
+
+            // Remove connection listeners
+            socket.off("connect", handleConnect);
+            socket.off("disconnect", handleDisconnect);
 
             if (heartbeatRef.current) {
                 clearInterval(heartbeatRef.current);
                 heartbeatRef.current = null;
             }
 
-            socket.emit("voice:leave", { instanceId });
-            socket.disconnect();
-
-            dispatch(voiceLeft());
+            // ✅ Only emit leave if we successfully joined, DO NOT disconnect the global socket
+            // ✅ StrictMode safe: prevents duplicate leave on remount
+            if (didJoinOkRef.current && !leftRef.current) {
+                leftRef.current = true;
+                socket.emit("voice:leave", { instanceId });
+                // dispatch(voiceLeft());
+            }
+            // ❌ REMOVED: socket.disconnect();
         };
-    }, [enabled, instanceId, token, dispatch]);
+    }, [enabled, instanceId, token, dispatch, joinInstance]);
 
     /* =====================================================
-       RECONNECT HANDLING
+       ✅ STEP 3: FIXED RECONNECT HANDLING
+       Now uses socket.io "reconnect" event and joinInstance for fallback
+       🔴 FIX #2: Use instanceId check instead of joinedRef
     ===================================================== */
 
     useEffect(() => {
         const socket = socketRef.current;
         if (!socket) return;
+        
+        // 🔴 FIX #2: Check instanceId, not joinedRef
         if (!instanceId) return;
 
         const handleReconnect = () => {
-            if (!joinedRef.current) return;
-
             if (!hasEverConnectedRef.current) {
                 hasEverConnectedRef.current = true;
                 return; // 🚫 initial connect → no sound
             }
 
-            console.log("[voice] reconnecting instance:", instanceId);
+            if (process.env.NODE_ENV === "development") {
+                console.log("[voice] reconnecting instance:", instanceId);
+            }
+
+            // ✅ HARDENING: Prevent duplicate reconnect emits
+            if (joinInFlightRef.current) return;
+            joinInFlightRef.current = true;
 
             socket.emit(
                 "voice:reconnect",
                 { instanceId },
                 (res) => {
+                    joinInFlightRef.current = false;
+
                     if (!res?.success) {
-                        console.warn("[voice] reconnect failed");
-                        return;
+                        if (process.env.NODE_ENV === "development") {
+                            console.warn("[voice] reconnect failed — falling back to join");
+                        }
+                        didJoinOkRef.current = false;
+                        joinedRef.current = false; // Reset to allow retry
+                        // ✅ STEP 4: Use extracted joinInstance for fallback
+                        return joinInstance();
                     }
+
+                    didJoinOkRef.current = true;
+                    joinedRef.current = true; // ✅ Ensure joined flag is set
 
                     dispatch(
                         voiceJoined({
@@ -258,21 +363,28 @@ export function useVoiceSocket({
                         })
                     );
 
+                    if (!heartbeatRef.current) {
+                        heartbeatRef.current = setInterval(() => {
+                            socket.emit("voice:heartbeat", { instanceId });
+                            dispatch(voiceHeartbeat());
+                        }, 15000);
+                    }
+
                     if (!hasReconnectedRef.current) {
                         playReconnect();
                         hasReconnectedRef.current = true;
                     }
                 }
-
             );
         };
 
-        socket.on("connect", handleReconnect);
+        // ✅ FIX: Use socket.io "reconnect" event instead of "connect"
+        socket.io?.on("reconnect", handleReconnect);
 
         return () => {
-            socket.off("connect", handleReconnect);
+            socket.io?.off("reconnect", handleReconnect);
         };
-    }, [instanceId, dispatch]);
+    }, [instanceId, dispatch, joinInstance]);
 
     /* =====================================================
        SOCKET EVENT BINDINGS
@@ -285,15 +397,20 @@ export function useVoiceSocket({
         const socket = socketRef.current;
 
         /* =====================================================
-           USER PRESENCE
+           USER PRESENCE - Using named handlers for proper cleanup
         ===================================================== */
-        socket.on("voice:user:joined", ({ userId, role, participant }) => {
+        
+        const onUserJoined = ({ userId, role, participant, shouldCreateOffer }) => {
             if (!participant?._id) return;
 
             dispatch(voiceUserJoined(participant));
 
+            // ✅ Check both participants AND speakers arrays
             const alreadyPresent =
                 instance?.participants?.some(
+                    (p) => String(p._id) === String(participant._id)
+                ) ||
+                instance?.speakers?.some(
                     (p) => String(p._id) === String(participant._id)
                 );
 
@@ -301,136 +418,225 @@ export function useVoiceSocket({
             if (!alreadyPresent && participant._id !== localUserId) {
                 playJoin();
             }
-        });
 
-        socket.on("voice:room:hydrated", ({ room, instance }) => {
+            // ✅ WebRTC hook listens directly to voice:user:joined
+        };
+
+        const onRoomHydrated = ({ room, instance }) => {
             dispatch(voiceJoined({
                 room,
                 instance,
                 reconnected: true,
             }));
-        });
+        };
 
-        socket.on("voice:user:left", ({ userId }) => {
+        const onUserLeft = ({ userId }) => {
             dispatch(voiceUserLeft({ userId }));
 
             // 🔊 DO NOT play sound for self
             if (userId !== localUserId) {
                 playLeave();
             }
-        });
 
-        socket.on("voice:room:ended", () => {
+            // ✅ WebRTC hook listens directly to voice:user:left
+        };
+
+        const onRoomEnded = () => {
             dispatch(voiceRoomEnded());
-        });
+        };
 
-        socket.on("voice:host:changed", ({ userId }) => {
+        const onHostChanged = ({ userId }) => {
             dispatch(voiceHostChanged({ userId }));
-        });
+        };
 
         /* =====================================================
            SPEAKER / STAGE CONTROL
         ===================================================== */
 
-        socket.on("voice:speaker:requested", ({ userId }) => {
-            dispatch(voiceSpeakerRequested({ userId }));
-        });
+        const onSpeakerRequested = ({ userId, meta }) => {
+            dispatch(voiceSpeakerRequested({ userId, meta }));
+        };
 
-        socket.on("voice:speaker:approved", ({ userId }) => {
+        const onSpeakerApproved = ({ userId }) => {
             dispatch(voiceSpeakerApproved({ userId }));
-        });
+        };
 
-        socket.on("voice:speaker:demoted", ({ userId }) => {
+        const onSpeakerDeclined = ({ userId }) => {
+            dispatch(voiceSpeakerDeclined({ userId }));
+        };
+
+        const onSpeakerDemoted = ({ userId }) => {
             dispatch(voiceSpeakerDemoted({ userId }));
-        });
+        };
 
-        socket.on("voice:stage:locked", () => {
+        const onStageLocked = () => {
             dispatch(voiceStageLocked());
-        });
+        };
 
-        socket.on("voice:stage:unlocked", () => {
+        const onStageUnlocked = () => {
             dispatch(voiceStageUnlocked());
-        });
+        };
 
         /* =====================================================
            AUDIO SIGNALING (NO WEBRTC)
         ===================================================== */
 
-        socket.on("voice:user:muted", ({ userId }) => {
+        const onUserMuted = ({ userId }) => {
             dispatch(voiceUserMuted({ userId }));
-        });
+        };
 
-        socket.on("voice:user:unmuted", ({ userId }) => {
+        const onUserUnmuted = ({ userId }) => {
             dispatch(voiceUserUnmuted({ userId }));
-        });
+        };
 
-        socket.on("voice:user:speaking", ({ userId, isSpeaking }) => {
+        const onUserSpeaking = ({ userId, isSpeaking }) => {
             dispatch(voiceUserSpeaking({ userId, isSpeaking }));
-        });
+        };
 
         /* =====================================================
            CHAT EVENTS
         ===================================================== */
 
-        socket.on("voice:chat:message", (payload) => {
+        const onChatMessage = (payload) => {
             dispatch(voiceChatMessageReceived(payload));
-        });
+        };
 
-        socket.on("voice:chat:disabled", () => {
+        const onChatDisabled = () => {
             dispatch(voiceChatDisabled());
-        });
+        };
 
-        socket.on("voice:chat:enabled", () => {
+        const onChatEnabled = () => {
             dispatch(voiceChatEnabled());
-        });
+        };
 
-        socket.on("voice:chat:user:muted", ({ userId }) => {
+        const onChatUserMuted = ({ userId }) => {
             dispatch(voiceChatUserMuted({ userId }));
-        });
+        };
 
-        socket.on("voice:chat:user:unmuted", ({ userId }) => {
+        const onChatUserUnmuted = ({ userId }) => {
             dispatch(voiceChatUserUnmuted({ userId }));
-        });
+        };
 
         /* =====================================================
            RECORDING EVENTS
         ===================================================== */
 
-        socket.on("voice:recording:started", () => {
+        const onRecordingStarted = () => {
             dispatch(voiceRecordingStarted());
-        });
+        };
 
-        socket.on("voice:recording:ready", ({ replayUrl }) => {
+        const onRecordingReady = ({ replayUrl }) => {
             dispatch(voiceRecordingReady({ replayUrl }));
-        });
+        };
 
         /* =====================================================
            MODERATION EVENTS
         ===================================================== */
 
-        socket.on("voice:user:kicked", ({ userId }) => {
+        const onUserKicked = ({ userId }) => {
             dispatch(voiceUserRemoved({ userId }));
-        });
+        };
 
-        socket.on("voice:user:banned", ({ userId }) => {
+        const onUserBanned = ({ userId }) => {
             dispatch(voiceUserBanned({ userId }));
-        });
+        };
 
         /* =====================================================
-           CLEANUP
+           REGISTER ALL LISTENERS
+        ===================================================== */
+
+        // User presence
+        socket.on("voice:user:joined", onUserJoined);
+        socket.on("voice:room:hydrated", onRoomHydrated);
+        socket.on("voice:user:left", onUserLeft);
+        socket.on("voice:room:ended", onRoomEnded);
+        socket.on("voice:host:changed", onHostChanged);
+
+        // Speaker/stage control
+        socket.on("voice:speaker:requested", onSpeakerRequested);
+        socket.on("voice:speaker:approved", onSpeakerApproved);
+        socket.on("voice:speaker:declined", onSpeakerDeclined);
+        socket.on("voice:speaker:demoted", onSpeakerDemoted);
+        socket.on("voice:stage:locked", onStageLocked);
+        socket.on("voice:stage:unlocked", onStageUnlocked);
+
+        // Audio signaling
+        socket.on("voice:user:muted", onUserMuted);
+        socket.on("voice:user:unmuted", onUserUnmuted);
+        socket.on("voice:user:speaking", onUserSpeaking);
+
+        // Chat events
+        socket.on("voice:chat:message", onChatMessage);
+        socket.on("voice:chat:disabled", onChatDisabled);
+        socket.on("voice:chat:enabled", onChatEnabled);
+        socket.on("voice:chat:user:muted", onChatUserMuted);
+        socket.on("voice:chat:user:unmuted", onChatUserUnmuted);
+
+        // Recording events
+        socket.on("voice:recording:started", onRecordingStarted);
+        socket.on("voice:recording:ready", onRecordingReady);
+
+        // Moderation events
+        socket.on("voice:user:kicked", onUserKicked);
+        socket.on("voice:user:banned", onUserBanned);
+
+        /* =====================================================
+           CLEANUP - Using named handlers for each event
         ===================================================== */
 
         return () => {
-            socket.removeAllListeners();
+            // User presence
+            socket.off("voice:user:joined", onUserJoined);
+            socket.off("voice:room:hydrated", onRoomHydrated);
+            socket.off("voice:user:left", onUserLeft);
+            socket.off("voice:room:ended", onRoomEnded);
+            socket.off("voice:host:changed", onHostChanged);
+
+            // Speaker/stage control
+            socket.off("voice:speaker:requested", onSpeakerRequested);
+            socket.off("voice:speaker:approved", onSpeakerApproved);
+            socket.off("voice:speaker:declined", onSpeakerDeclined);
+            socket.off("voice:speaker:demoted", onSpeakerDemoted);
+            socket.off("voice:stage:locked", onStageLocked);
+            socket.off("voice:stage:unlocked", onStageUnlocked);
+
+            // Audio signaling
+            socket.off("voice:user:muted", onUserMuted);
+            socket.off("voice:user:unmuted", onUserUnmuted);
+            socket.off("voice:user:speaking", onUserSpeaking);
+
+            // Chat events
+            socket.off("voice:chat:message", onChatMessage);
+            socket.off("voice:chat:disabled", onChatDisabled);
+            socket.off("voice:chat:enabled", onChatEnabled);
+            socket.off("voice:chat:user:muted", onChatUserMuted);
+            socket.off("voice:chat:user:unmuted", onChatUserUnmuted);
+
+            // Recording events
+            socket.off("voice:recording:started", onRecordingStarted);
+            socket.off("voice:recording:ready", onRecordingReady);
+
+            // Moderation events
+            socket.off("voice:user:kicked", onUserKicked);
+            socket.off("voice:user:banned", onUserBanned);
         };
-    }, [enabled, dispatch]);
+    }, [enabled, dispatch, instance, localUserId]);
 
     /* =====================================================
        EMIT HELPER
+       ✅ Added safety check against stale instanceId
     ===================================================== */
 
     const emit = useCallback(
         (event, payload = {}) => {
+            // ✅ Safety: Don't emit if no instanceId
+            if (!instanceId) {
+                if (process.env.NODE_ENV === "development") {
+                    console.warn(`[voice] Attempted to emit ${event} without instanceId`);
+                }
+                return;
+            }
+            
             socketRef.current?.emit(event, {
                 instanceId,
                 ...payload,
@@ -441,13 +647,20 @@ export function useVoiceSocket({
 
     /* =====================================================
        PUBLIC API
+       ✅ Fixed leaveRoom to clear heartbeat
     ===================================================== */
 
     return {
+        /* ===== SOCKET STATE ===== */
+        socket: socketRef.current,
+        isConnected,
+
         /* ===== SPEAKING ===== */
-        requestToSpeak: () => emit("voice:request:speak"),
+        requestToSpeak: (meta) => emit("voice:request:speak", { meta }),
         approveSpeaker: (userId) =>
             emit("voice:approve:speaker", { userId }),
+        declineSpeaker: (userId) =>
+            emit("voice:decline:speaker", { userId }),
         demoteSpeaker: (userId) =>
             emit("voice:demote:speaker", { userId }),
 
@@ -479,7 +692,15 @@ export function useVoiceSocket({
             leftRef.current = true;
             hasReconnectedRef.current = false;
 
-            emit("voice:leave");
+            // ✅ Clear heartbeat on manual leave
+            if (heartbeatRef.current) {
+                clearInterval(heartbeatRef.current);
+                heartbeatRef.current = null;
+            }
+
+            if (didJoinOkRef.current) {
+                emit("voice:leave");
+            }
         },
 
         /* ===== RECORDING ===== */
@@ -491,5 +712,5 @@ export function useVoiceSocket({
             emit("voice:moderation:kick", { userId }),
         banUser: (userId) =>
             emit("voice:moderation:ban", { userId }),
-    };
+    };   
 }
