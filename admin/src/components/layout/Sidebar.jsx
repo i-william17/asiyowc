@@ -73,6 +73,11 @@ export default function Sidebar() {
           icon: CalendarDays,
         },
         {
+          name: "Wellness",
+          path: "/admin/wellness",
+          icon: Activity,
+        },
+        {
           name: "Reports",
           path: "/admin/reports",
           icon: FileText,

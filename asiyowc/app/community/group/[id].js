@@ -270,7 +270,9 @@ export default function GroupDetail() {
                   }}
                 >
                   {g.membersCount ?? g.members?.length ?? 0} members •{" "}
-                  {g.privacy}
+                  {typeof g.privacy === "string"
+                    ? g.privacy.charAt(0).toUpperCase() + g.privacy.slice(1)
+                    : ""}
                 </Text>
               </View>
             </View>
@@ -369,7 +371,7 @@ export default function GroupDetail() {
         {/* =====================================================
            POSTS
         ===================================================== */}
-        <View style={tw`px-6 mt-10`}>
+        {/* <View style={tw`px-6 mt-10`}>
           <Text
             style={{
               fontFamily: "Poppins-SemiBold",
@@ -401,7 +403,7 @@ export default function GroupDetail() {
               </View>
             ))
           )}
-        </View>
+        </View> */}
 
         {/* =====================================================
            MEMBERS (Preview + Modal)
@@ -553,7 +555,7 @@ export default function GroupDetail() {
             </Text>
 
             <View style={tw`bg-white border border-gray-200 rounded-xl mt-3`}>
-              <TouchableOpacity style={tw`px-5 py-4`}>
+              {/* <TouchableOpacity style={tw`px-5 py-4`}>
                 <Text
                   style={{
                     fontFamily: "Poppins-Medium",
@@ -562,7 +564,7 @@ export default function GroupDetail() {
                 >
                   Edit group
                 </Text>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
 
               <View style={tw`h-px bg-gray-200`} />
 

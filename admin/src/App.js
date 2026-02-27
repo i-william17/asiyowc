@@ -11,6 +11,7 @@ import Savings from "./pages/admin/Savings";
 import Moderation from "./pages/admin/Moderation";
 import Mentors from "./pages/admin/Mentors";
 import Events from "./pages/admin/Events";
+import Wellness from "./pages/admin/Wellness";
 
 import ProtectedRoute from "./components/ProtectedRoute";
 import { useEffect } from "react";
@@ -84,7 +85,7 @@ function App() {
             </ProtectedRoute>
           }
         />
-        
+
         <Route
           path="/admin/programs"
           element={
@@ -111,7 +112,7 @@ function App() {
             </ProtectedRoute>
           }
         />
-        
+
         <Route
           path="/admin/savings"
           element={
@@ -129,12 +130,21 @@ function App() {
             </ProtectedRoute>
           }
         />
-        
+
         <Route
           path="/admin/events"
           element={
             <ProtectedRoute>
               <Events />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin/wellness"
+          element={
+            <ProtectedRoute>
+              <Wellness />
             </ProtectedRoute>
           }
         />

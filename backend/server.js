@@ -34,6 +34,7 @@ const adminMarketplaceRoutes = require('./routes/adminMarketplace.js');
 const adminSavingsRoutes = require('./routes/adminSavings.js');
 const adminMentorsRoutes = require('./routes/adminMentors.js');
 const adminEventsRoutes = require('./routes/adminEvents.js');
+const adminWellnessRoutes = require('./routes/adminWellness.js');
 const adminAnalyticsRoutes = require('./routes/adminAnalytics.js');
 // const uploadRoutes = require('./routes/upload.js');
 
@@ -206,6 +207,7 @@ app.use('/api/admin/marketplace', adminMarketplaceRoutes);
 app.use('/api/admin/savings', adminSavingsRoutes);
 app.use('/api/admin/mentors', adminMentorsRoutes);
 app.use('/api/admin/events', adminEventsRoutes);
+app.use('/api/admin/wellness', adminWellnessRoutes);
 app.use('/api/admin/analytics', adminAnalyticsRoutes);
 // app.use('/api/upload', uploadRoutes);
 // app.use('/api/moderation', moderationRoutes);
