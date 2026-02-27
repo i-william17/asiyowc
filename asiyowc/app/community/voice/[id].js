@@ -10,6 +10,7 @@ import {
   Platform,
   Animated,
   TextInput,
+  Share,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useDispatch, useSelector } from "react-redux";
@@ -18,11 +19,12 @@ import LottieView from "lottie-react-native";
 import { server } from "../../../server";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { decode as atob } from "base-64";
+import * as Clipboard from "expo-clipboard";
 
 import tw from "../../../utils/tw";
 import LoadingBlock from "../../../components/community/LoadingBlock";
 import EmptyState from "../../../components/community/EmptyState";
-import { fetchVoiceDetail } from "../../../store/slices/communitySlice";
+import { fetchVoiceDetail, deleteVoiceRoom, reportContent } from "../../../store/slices/communitySlice";
 
 /* =====================================================
    VOICE DETAIL SCREEN
@@ -41,7 +43,11 @@ export default function VoiceDetail() {
   const [joining, setJoining] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState("");
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [reportReasonDetail, setReportReasonDetail] = useState("");
 
   useEffect(() => {
     if (id) dispatch(fetchVoiceDetail(id));
@@ -74,6 +80,45 @@ export default function VoiceDetail() {
   const v = selectedVoice;
   const instance = v?.currentInstance || v?.instances?.[0];
   const isLive = instance?.status === "live";
+
+  /* ================= SHARE FUNCTIONALITY ================= */
+  const SHARE_BASE_URL = server.replace("/api", "");// Change to your actual domain
+
+  const voiceShareLink = useMemo(() => {
+    if (!instance?.instanceId) return null;
+    return `${SHARE_BASE_URL}/community/voice-room/${instance.instanceId}`;
+  }, [instance]);
+
+  const handleCopyLink = async () => {
+    if (!voiceShareLink) return;
+    await Clipboard.setStringAsync(voiceShareLink);
+    alert("Link copied to clipboard");
+  };
+
+  const handleShareLink = async () => {
+    if (!voiceShareLink) return;
+
+    try {
+      await Share.share({
+        message: `Join this voice room on Asiyo:\n${voiceShareLink}`,
+        url: voiceShareLink,
+      });
+    } catch (error) {
+      console.error("Share failed:", error);
+    }
+  };
+
+  /* ================= SIMPLE EXPIRY CHECK ================= */
+  const isExpired = useMemo(() => {
+    if (!instance?.endsAt) return false;
+
+    const now = new Date();
+    const endTime = new Date(instance.endsAt);
+
+    return now > endTime;
+  }, [instance]);
+
+  const canEnterRoom = isLive && !isExpired;
 
   /* ================= NORMALIZED HOST DATA ================= */
   const host = useMemo(() => {
@@ -181,57 +226,8 @@ export default function VoiceDetail() {
     return instance.instanceId;
   }, [instance]);
 
-  // const handleJoin = async () => {
-  //   if (!instanceId || joining) return;
-
-  //   try {
-  //     setJoining(true);
-
-  //     console.log("Joining voice:", v._id);
-
-  //     // // 🟢 Already joined → just enter
-  //     // if (hasJoined) {
-  //     //   router.push(`/community/voice-room/${instanceId}`);
-  //     //   return;
-  //     // }
-
-  //     // 🟡 Join via backend
-  //     const res = await fetch(
-  //       `${server}/community/voice/instance/${v._id}/join`,
-  //       {
-  //         method: "POST",
-  //         headers: {
-  //           "Content-Type": "application/json",
-  //           Authorization: `Bearer ${token}`,
-  //         },
-  //       }
-  //     );
-
-  //     if (!res.ok) {
-  //       throw new Error("Failed to join room");
-  //     }
-
-  //     const data = await res.json();
-
-  //     console.log("Join response:", data);
-
-  //     // 🔴 HARD REQUIREMENT
-  //     if (!data?.instanceId) {
-  //       throw new Error("Backend did not return instanceId");
-  //     }
-
-  //     // ✅ ALWAYS navigate with LIVE INSTANCE ID
-  //     router.push(`/community/voice-room/${data.instanceId}`);
-  //   } catch (err) {
-  //     console.error("Join failed:", err);
-  //     alert("Unable to join room");
-  //   } finally {
-  //     setJoining(false);
-  //   }
-  // };
-
   const handleJoin = async () => {
-    if (!instanceId || joining) return;
+    if (!instanceId || joining || !canEnterRoom) return;
 
     try {
       setJoining(true);
@@ -262,6 +258,50 @@ export default function VoiceDetail() {
       alert(err.message);
     } finally {
       setJoining(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    try {
+      if (!v?._id) return;
+
+      await dispatch(deleteVoiceRoom(v._id)).unwrap();
+
+      setShowDeleteModal(false);
+
+      router.replace("/community");
+
+    } catch (err) {
+      alert(err?.message || "Failed to delete room");
+    }
+  };
+
+  const handleReportSubmit = async () => {
+    const finalReason =
+      reportReason === "Other"
+        ? reportReasonDetail.trim()
+        : reportReason;
+
+    if (!finalReason || finalReason.length < 5) {
+      alert("Please provide a valid reason (at least 5 characters).");
+      return;
+    }
+
+    try {
+      await dispatch(
+        reportContent({
+          targetType: "voice",
+          targetId: v?._id,
+          reason: finalReason,
+        })
+      ).unwrap();
+
+      setShowReportModal(false);
+      setReportReason("");
+      setReportReasonDetail("");
+
+    } catch (error) {
+      alert("Failed to submit report.");
     }
   };
 
@@ -387,6 +427,40 @@ export default function VoiceDetail() {
 
         {/* ================= CONTENT ================= */}
         <View style={tw`px-5 pt-6 pb-10`}>
+          {/* ================= EXPIRED WARNING ================= */}
+          {isExpired && (
+            <View style={tw`bg-red-50 border border-red-200 rounded-2xl p-4 mb-5`}>
+              <View style={tw`flex-row items-center`}>
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={20}
+                  color="#DC2626"
+                  style={tw`mr-2`}
+                />
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 14,
+                    color: "#B91C1C",
+                  }}
+                >
+                  This session has ended.
+                </Text>
+              </View>
+
+              <Text
+                style={{
+                  fontFamily: "Poppins-Regular",
+                  fontSize: 13,
+                  color: "#7F1D1D",
+                  marginTop: 6,
+                }}
+              >
+                The scheduled ending time has passed. Please create a new meeting to continue.
+              </Text>
+            </View>
+          )}
+
           {/* ================= DETAILS ================= */}
           <Card title="Details">
             <Row
@@ -520,10 +594,13 @@ export default function VoiceDetail() {
 
           {/* ================= CTA ================= */}
           <TouchableOpacity
-            disabled={joining}
+            disabled={!canEnterRoom || joining}
             onPress={handleJoin}
             activeOpacity={0.9}
-            style={tw`bg-blue-700 py-4 rounded-2xl items-center mt-4`}
+            style={[
+              tw`py-4 rounded-2xl items-center mt-4`,
+              canEnterRoom ? tw`bg-blue-700` : tw`bg-gray-400`,
+            ]}
           >
             <Text
               style={{
@@ -532,12 +609,101 @@ export default function VoiceDetail() {
                 color: "white",
               }}
             >
-              {hasJoined ? "Enter Room" : "Join Room"}
+              {isExpired
+                ? "Session Ended"
+                : hasJoined
+                  ? "Enter Room"
+                  : "Join Room"}
             </Text>
           </TouchableOpacity>
 
-          {/* ================= HOST CONTROLS ================= */}
+          {/* ================= SHARE ROOM (NATIVE ONLY) ================= */}
+          {Platform.OS !== "web" && (
+            <TouchableOpacity
+              onPress={handleShareLink}
+              style={tw`border border-[#6A1B9A] py-3 rounded-2xl items-center mt-4`}
+            >
+              <View style={tw`flex-row items-center`}>
+                <Ionicons
+                  name="share-social-outline"
+                  size={18}
+                  color="#6A1B9A"
+                  style={tw`mr-2`}
+                />
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 14,
+                    color: "#6A1B9A",
+                  }}
+                >
+                  Share Room
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
+
+          {/* ================= COPY LINK ================= */}
+          <TouchableOpacity
+            onPress={handleCopyLink}
+            style={tw`border border-gray-300 py-3 rounded-2xl items-center mt-3`}
+          >
+            <View style={tw`flex-row items-center`}>
+              <Ionicons name="link-outline" size={18} color="#6B7280" style={tw`mr-2`} />
+              <Text
+                style={{
+                  fontFamily: "Poppins-SemiBold",
+                  fontSize: 14,
+                  color: "#6B7280",
+                }}
+              >
+                Copy Link
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* ================= REPORT ROOM ================= */}
+          <TouchableOpacity
+            onPress={() => setShowReportModal(true)}
+            style={tw`border border-orange-500 py-3 rounded-2xl items-center mt-4`}
+          >
+            <View style={tw`flex-row items-center`}>
+              <Ionicons name="flag-outline" size={18} color="#F59E0B" style={tw`mr-2`} />
+              <Text
+                style={{
+                  fontFamily: "Poppins-SemiBold",
+                  fontSize: 14,
+                  color: "#F59E0B",
+                }}
+              >
+                Report Room
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* ================= DELETE ROOM (HOST ONLY) ================= */}
           {isHost && (
+            <TouchableOpacity
+              onPress={() => setShowDeleteModal(true)}
+              style={tw`border border-red-600 py-3 rounded-2xl mt-4 items-center`}
+            >
+              <View style={tw`flex-row items-center`}>
+                <Ionicons name="trash-outline" size={18} color="#DC2626" style={tw`mr-2`} />
+                <Text
+                  style={{
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 14,
+                    color: "#DC2626",
+                  }}
+                >
+                  Delete Room
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
+
+          {/* ================= HOST CONTROLS ================= */}
+          {/* {isHost && (
             <>
               <TouchableOpacity
                 onPress={openSettingsModal}
@@ -573,7 +739,7 @@ export default function VoiceDetail() {
                 </View>
               </TouchableOpacity>
             </>
-          )}
+          )} */}
         </View>
       </ScrollView>
 
@@ -597,7 +763,209 @@ export default function VoiceDetail() {
         hostName={host?.name}
         isHost={isHost}
       />
+
+      {/* ================= DELETE CONFIRMATION MODAL ================= */}
+      <DeleteConfirmModal
+        visible={showDeleteModal}
+        onCancel={() => setShowDeleteModal(false)}
+        onConfirm={handleConfirmDelete}
+      />
+
+      {/* ================= REPORT MODAL ================= */}
+      <Modal
+        animationType="slide"
+        transparent
+        visible={showReportModal}
+        onRequestClose={() => setShowReportModal(false)}
+      >
+        <View style={tw`flex-1 bg-black/50 justify-end`}>
+          <View style={tw`bg-white rounded-t-3xl p-6`}>
+
+            <View style={tw`w-12 h-1.5 bg-gray-300 rounded-full self-center mb-6`} />
+
+            <Text style={{
+              fontFamily: "Poppins-Bold",
+              fontSize: 20,
+              color: "#1F2937",
+              marginBottom: 16
+            }}>
+              Report Voice Room
+            </Text>
+
+            <Text style={{
+              fontFamily: "Poppins-Regular",
+              fontSize: 14,
+              color: "#4B5563",
+              marginBottom: 24
+            }}>
+              Help us understand the issue. Our moderators will review it.
+            </Text>
+
+            {/* ================= REASONS ================= */}
+            {[
+              "Inappropriate content",
+              "Spam or advertising",
+              "Harassment or bullying",
+              "Hate speech",
+              "False information",
+              "Impersonation",
+              "Violence or threats",
+              "Sexual content",
+              "Other"
+            ].map((reason) => (
+              <TouchableOpacity
+                key={reason}
+                onPress={() => setReportReason(reason)}
+                style={tw`flex-row items-center py-3`}
+              >
+                <View style={tw`w-6 h-6 rounded-full border-2 mr-3 ${reportReason === reason
+                  ? "bg-[#6A1B9A] border-[#6A1B9A]"
+                  : "border-gray-300"
+                  }`}>
+                  {reportReason === reason && (
+                    <Ionicons name="checkmark" size={16} color="#fff" style={tw`self-center`} />
+                  )}
+                </View>
+
+                <Text style={{
+                  fontFamily: "Poppins-Regular",
+                  fontSize: 14,
+                  color: "#374151"
+                }}>
+                  {reason}
+                </Text>
+              </TouchableOpacity>
+            ))}
+
+            {/* ================= OTHER INPUT FIELD ================= */}
+            {reportReason === "Other" && (
+              <View style={tw`mt-4`}>
+                <Text style={{
+                  fontFamily: "Poppins-SemiBold",
+                  fontSize: 14,
+                  color: "#374151",
+                  marginBottom: 8
+                }}>
+                  Please specify
+                </Text>
+
+                <TextInput
+                  value={reportReasonDetail}
+                  onChangeText={setReportReasonDetail}
+                  placeholder="Describe the issue..."
+                  multiline
+                  numberOfLines={4}
+                  style={tw`border border-gray-300 rounded-2xl px-4 py-3 font-poppins min-h-[100px]`}
+                  placeholderTextColor="#9CA3AF"
+                  textAlignVertical="top"
+                />
+              </View>
+            )}
+
+            {/* ================= ACTION BUTTONS ================= */}
+            <View style={tw`flex-row mt-6`}>
+              <TouchableOpacity
+                onPress={() => setShowReportModal(false)}
+                style={tw`flex-1 py-4 rounded-xl border-2 border-gray-200 mr-2`}
+              >
+                <Text style={{
+                  fontFamily: "Poppins-SemiBold",
+                  fontSize: 16,
+                  textAlign: "center",
+                  color: "#4B5563"
+                }}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleReportSubmit}
+                style={tw`flex-1 py-4 rounded-xl bg-[#6A1B9A] ml-2`}
+              >
+                <Text style={{
+                  fontFamily: "Poppins-SemiBold",
+                  fontSize: 16,
+                  textAlign: "center",
+                  color: "#fff"
+                }}>
+                  Submit
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
+  );
+}
+
+/* =====================================================
+   DELETE CONFIRMATION MODAL
+===================================================== */
+
+function DeleteConfirmModal({ visible, onCancel, onConfirm }) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onCancel}
+    >
+      <View style={tw`flex-1 bg-black/50 justify-center items-center px-6`}>
+        <View style={tw`bg-white rounded-3xl p-6 w-full`}>
+
+          <View style={tw`items-center mb-4`}>
+            <Ionicons name="warning-outline" size={40} color="#DC2626" />
+          </View>
+
+          <Text
+            style={{
+              fontFamily: "Poppins-Bold",
+              fontSize: 18,
+              textAlign: "center",
+              marginBottom: 8,
+            }}
+          >
+            Delete This Room?
+          </Text>
+
+          <Text
+            style={{
+              fontFamily: "Poppins-Regular",
+              fontSize: 14,
+              textAlign: "center",
+              color: "#6B7280",
+              marginBottom: 20,
+            }}
+          >
+            This action cannot be undone. The room will no longer be accessible.
+          </Text>
+
+          <View style={tw`flex-row space-x-3`}>
+            <TouchableOpacity
+              onPress={onCancel}
+              style={tw`flex-1 border border-gray-300 py-3 rounded-2xl items-center`}
+            >
+              <Text style={tw`font-poppins-bold text-gray-700`}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={onConfirm}
+              style={tw`flex-1 bg-red-600 py-3 rounded-2xl items-center`}
+            >
+              <Text style={tw`font-poppins-bold text-white`}>
+                Delete
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+        </View>
+      </View>
+    </Modal>
   );
 }
 

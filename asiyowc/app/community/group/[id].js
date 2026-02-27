@@ -7,10 +7,15 @@ import {
   TouchableOpacity,
   Image,
   SafeAreaView,
+  Share,
+  Modal,
+  Pressable,
+  ActivityIndicator,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useDispatch, useSelector } from "react-redux";
 import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 
 import tw from "../../../utils/tw";
 import LoadingBlock from "../../../components/community/LoadingBlock";
@@ -20,6 +25,8 @@ import {
   fetchGroupDetail,
   joinGroup,
   leaveGroup,
+  generateGroupInviteLink,
+  deleteGroup,
 } from "../../../store/slices/communitySlice";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -49,6 +56,12 @@ export default function GroupDetail() {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [showAlreadyMemberModal, setShowAlreadyMemberModal] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteLink, setInviteLink] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showMembersModal, setShowMembersModal] = useState(false);
   const insets = useSafeAreaInsets();
 
 
@@ -76,6 +89,17 @@ export default function GroupDetail() {
   const isAdmin = !!g.isAdmin;
 
   /* =====================================================
+     MEMBER ADMIN CHECK HELPER
+  ===================================================== */
+  const isMemberAdmin = (memberId) => {
+    const id = String(memberId || "");
+    const adminIds = Array.isArray(g.admins) ? g.admins.map((a) => String(a?._id || a)) : [];
+    const creatorId = g.createdBy?._id ? String(g.createdBy._id) : (g.createdBy ? String(g.createdBy) : null);
+
+    return adminIds.includes(id) || (creatorId && creatorId === id);
+  };
+
+  /* =====================================================
      JOIN / LEAVE HANDLERS
   ===================================================== */
   const handleJoinConfirmed = async () => {
@@ -86,11 +110,17 @@ export default function GroupDetail() {
         return;
       }
 
-      const res = await dispatch(joinGroup(g._id)).unwrap();
-      if (!res?.chatId) return;
+      const res = await dispatch(
+        joinGroup({
+          groupId: g._id, // ✅ MUST be object
+        })
+      ).unwrap();
 
       setShowJoinModal(false);
-      router.replace(`/community/group-chat/${g.chatId}`);
+
+      if (res?.chatId) {
+        router.replace(`/community/group-chat/${res.chatId}`);
+      }
     } catch (err) {
       console.error("[GroupDetail] ❌ Join failed:", err);
     }
@@ -98,13 +128,56 @@ export default function GroupDetail() {
 
   const handleLeaveConfirmed = async () => {
     try {
-      const res = await dispatch(leaveGroup(g._id)).unwrap();
-      if (!res || res._id !== g._id) return;
+      await dispatch(leaveGroup(g._id)).unwrap(); // ✅ raw id
 
       setShowLeaveModal(false);
       router.replace("/community");
     } catch (err) {
       console.error("[GroupDetail] ❌ Leave failed:", err);
+    }
+  };
+
+  const handleInvite = async () => {
+    if (inviting) return;
+
+    try {
+      setInviting(true);
+
+      const res = await dispatch(
+        generateGroupInviteLink(g._id) // ✅ raw id
+      ).unwrap();
+
+      const link = res?.inviteLink;
+      if (!link) return;
+
+      setInviteLink(link);
+      setShowInviteModal(true);
+
+    } catch (err) {
+      console.log("Invite error:", err);
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  /* =====================================================
+     DELETE HANDLER
+  ===================================================== */
+  const handleDeleteConfirmed = async () => {
+    console.log("[GroupDetail] ✅ delete confirm pressed");
+    if (deleting) return;
+
+    try {
+      setDeleting(true);
+
+      await dispatch(deleteGroup(g._id)).unwrap();
+
+      setShowDeleteModal(false);
+      router.replace("/community");
+    } catch (err) {
+      console.error("[GroupDetail] ❌ Delete failed:", err);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -272,7 +345,12 @@ export default function GroupDetail() {
               )}
 
               <TouchableOpacity
-                style={tw`ml-3 px-5 py-2.5 rounded-lg border border-gray-300`}
+                onPress={handleInvite}
+                disabled={inviting}
+                style={[
+                  tw`ml-3 px-5 py-2.5 rounded-lg border border-gray-300`,
+                  inviting && tw`opacity-50`
+                ]}
               >
                 <Text
                   style={{
@@ -281,7 +359,7 @@ export default function GroupDetail() {
                     color: "#374151",
                   }}
                 >
-                  Invite
+                  {inviting ? "..." : "Invite"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -326,7 +404,7 @@ export default function GroupDetail() {
         </View>
 
         {/* =====================================================
-           MEMBERS
+           MEMBERS (Preview + Modal)
         ===================================================== */}
         <View style={tw`px-6 mt-10`}>
           <Text
@@ -339,53 +417,77 @@ export default function GroupDetail() {
             Members
           </Text>
 
-
-          {!Array.isArray(g.members) || g.members.length === 0 ? (
+          {(!Array.isArray(g.members) || g.members.length === 0) ? (
             <EmptyState title="No members yet" subtitle="Group is empty." />
           ) : (
-            g.members.map((m) => {
-              const memberAvatar = resolveImageUri(m.avatar);
+            <>
+              {/* Preview first 5 */}
+              {g.members.slice(0, 5).map((m) => {
+                const memberAvatar = resolveImageUri(m.avatar);
+                const admin = isMemberAdmin(m._id);
 
-              return (
-                <View
-                  key={m._id}
-                  style={tw`bg-white border border-gray-200 rounded-lg px-4 py-3 mt-3 flex-row items-center`}
-                >
-                  <Image
-                    source={
-                      memberAvatar
-                        ? { uri: memberAvatar }
-                        : require("../../../assets/images/image-placeholder.png")
-                    }
-                    style={tw`w-9 h-9 rounded-full bg-gray-200`}
-                  />
+                return (
+                  <View
+                    key={m._id}
+                    style={tw`bg-white border border-gray-200 rounded-lg px-4 py-3 mt-3 flex-row items-center`}
+                  >
+                    <Image
+                      source={
+                        memberAvatar
+                          ? { uri: memberAvatar }
+                          : require("../../../assets/images/image-placeholder.png")
+                      }
+                      style={tw`w-9 h-9 rounded-full bg-gray-200`}
+                    />
 
-                  <View style={tw`ml-3 flex-1`}>
-                    <Text
-                      style={{
-                        fontFamily: "Poppins-Medium",
-                        color: "#111827",
-                      }}
-                    >
-                      {m.fullName || "Member"}
-                    </Text>
-
-                    {!!m.joinedAt && (
+                    <View style={tw`ml-3 flex-1`}>
                       <Text
                         style={{
-                          fontFamily: "Poppins-Regular",
-                          fontSize: 12,
-                          color: "#6B7280",
-                          marginTop: 2,
+                          fontFamily: "Poppins-Medium",
+                          color: "#111827",
                         }}
                       >
-                        Joined {new Date(m.joinedAt).toLocaleDateString()}
+                        {m.fullName || "Member"}
                       </Text>
+
+                      {!!m.joinedAt && (
+                        <Text
+                          style={{
+                            fontFamily: "Poppins-Regular",
+                            fontSize: 12,
+                            color: "#6B7280",
+                            marginTop: 2,
+                          }}
+                        >
+                          Joined {new Date(m.joinedAt).toLocaleDateString()}
+                        </Text>
+                      )}
+                    </View>
+
+                    {/* Admin icon at far right */}
+                    {admin && (
+                      <View style={tw`ml-2`}>
+                        <Ionicons name="person-circle" size={22} color="#7C3AED" />
+                      </View>
                     )}
                   </View>
-                </View>
-              );
-            })
+                );
+              })}
+
+              {/* View more row (only if > 5) */}
+              {g.members.length > 5 && (
+                <Pressable
+                  onPress={() => setShowMembersModal(true)}
+                  style={tw`mt-3 bg-white border border-gray-200 rounded-lg px-4 py-3 flex-row items-center justify-between`}
+                >
+                  <Text style={{ fontFamily: "Poppins-Medium", color: "#374151" }}>
+                    View all members ({g.members.length})
+                  </Text>
+
+                  <Ionicons name="chevron-down" size={20} color="#6B7280" />
+                </Pressable>
+              )}
+            </>
           )}
         </View>
 
@@ -423,12 +525,25 @@ export default function GroupDetail() {
           onConfirm={handleLeaveConfirmed}
         />
 
+        <ConfirmModal
+          visible={showDeleteModal}
+          danger
+          title="Delete group?"
+          message="This will permanently remove the group for everyone. This action cannot be undone."
+          confirmText={deleting ? "Deleting..." : "Delete"}
+          onCancel={() => (!deleting ? setShowDeleteModal(false) : null)}
+          onConfirm={() => {
+            if (deleting) return;
+            handleDeleteConfirmed();
+          }}
+        />
+
         {/* =====================================================
            ADMIN ACTIONS
         ===================================================== */}
         {isAdmin && (
           <View style={tw`px-6 mt-10`}>
-            <Text s style={{
+            <Text style={{
               fontFamily: "Poppins-SemiBold",
               fontSize: 18,
               color: "#111827",
@@ -451,20 +566,226 @@ export default function GroupDetail() {
 
               <View style={tw`h-px bg-gray-200`} />
 
-              <TouchableOpacity style={tw`px-5 py-4`}>
+              <TouchableOpacity
+                onPress={() => setShowDeleteModal(true)}
+                disabled={deleting}
+                style={[
+                  tw`px-5 py-4 flex-row items-center justify-between`,
+                  deleting && tw`opacity-50`
+                ]}
+              >
                 <Text
                   style={{
                     fontFamily: "Poppins-Medium",
                     color: "#DC2626",
                   }}
                 >
-                  Archive group
+                  Delete group
                 </Text>
+
+                {deleting ? <ActivityIndicator size="small" color="#DC2626" /> : null}
               </TouchableOpacity>
             </View>
           </View>
         )}
       </ScrollView>
+
+      {/* =====================================================
+         INVITE MODAL
+      ===================================================== */}
+      {showInviteModal && (
+        <View
+          style={[
+            tw`absolute inset-0 bg-black/40 items-center justify-center px-6`,
+            { paddingBottom: insets.bottom }
+          ]}
+        >
+          <View style={tw`bg-white w-full rounded-2xl p-6`}>
+
+            <Text
+              style={{
+                fontFamily: "Poppins-SemiBold",
+                fontSize: 18,
+                color: "#111827",
+              }}
+            >
+              Invite Link
+            </Text>
+
+            <Text
+              style={{
+                fontFamily: "Poppins-Regular",
+                fontSize: 13,
+                color: "#6B7280",
+                marginTop: 6,
+              }}
+            >
+              Share this link with others to join the group.
+            </Text>
+
+            {/* LINK BOX */}
+            <View style={tw`mt-4 p-3 bg-gray-100 rounded-lg`}>
+              <Text
+                selectable
+                style={{
+                  fontFamily: "Poppins-Regular",
+                  fontSize: 13,
+                  color: "#374151",
+                }}
+              >
+                {inviteLink}
+              </Text>
+            </View>
+
+            {/* ACTIONS */}
+            <View style={tw`flex-row mt-5`}>
+
+              <TouchableOpacity
+                onPress={async () => {
+                  await Clipboard.setStringAsync(inviteLink);
+                }}
+                style={tw`flex-1 py-3 rounded-lg border border-gray-300 items-center`}
+              >
+                <Text style={{ fontFamily: "Poppins-Medium" }}>
+                  Copy
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={async () => {
+                  await Share.share({ message: inviteLink });
+                }}
+                style={tw`flex-1 ml-3 py-3 rounded-lg bg-purple-600 items-center`}
+              >
+                <Text style={{ fontFamily: "Poppins-Medium", color: "#fff" }}>
+                  Share
+                </Text>
+              </TouchableOpacity>
+
+            </View>
+
+            <TouchableOpacity
+              onPress={() => {
+                setShowInviteModal(false);
+                setInviteLink(null);
+              }}
+              style={tw`mt-5 items-center`}
+            >
+              <Text style={{ fontFamily: "Poppins-Medium", color: "#6B7280" }}>
+                Close
+              </Text>
+            </TouchableOpacity>
+
+          </View>
+        </View>
+      )}
+
+      {/* =====================================================
+   MEMBERS BOTTOM SHEET (Proper Bottom Drawer)
+===================================================== */}
+      <Modal
+        visible={showMembersModal}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setShowMembersModal(false)}
+      >
+        <Pressable
+          style={tw`flex-1 bg-black/40 justify-end`}
+          onPress={() => setShowMembersModal(false)}
+        >
+          <Pressable
+            style={[
+              tw`bg-white rounded-t-3xl`,
+              {
+                maxHeight: "85%",
+                paddingBottom: insets.bottom,
+              },
+            ]}
+            onPress={() => { }} // Prevent backdrop close when tapping inside
+          >
+            {/* Drag Indicator */}
+            <View style={tw`items-center pt-3`}>
+              <View style={tw`w-12 h-1.5 bg-gray-300 rounded-full`} />
+            </View>
+
+            {/* Header */}
+            <View style={tw`px-6 pt-4 pb-3 border-b border-gray-200 flex-row items-center justify-between`}>
+              <Text
+                style={{
+                  fontFamily: "Poppins-SemiBold",
+                  fontSize: 18,
+                  color: "#111827",
+                }}
+              >
+                Members ({g.members?.length || 0})
+              </Text>
+
+              <TouchableOpacity
+                onPress={() => setShowMembersModal(false)}
+                style={tw`w-10 h-10 items-center justify-center rounded-xl bg-gray-100`}
+              >
+                <Ionicons name="close" size={18} color="#111827" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Scrollable List */}
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={tw`px-6 pt-4 pb-10`}
+            >
+              {g.members.map((m) => {
+                const memberAvatar = resolveImageUri(m.avatar);
+                const admin = isMemberAdmin(m._id);
+
+                return (
+                  <View
+                    key={m._id}
+                    style={tw`bg-white border border-gray-200 rounded-lg px-4 py-3 mt-3 flex-row items-center`}
+                  >
+                    <Image
+                      source={
+                        memberAvatar
+                          ? { uri: memberAvatar }
+                          : require("../../../assets/images/image-placeholder.png")
+                      }
+                      style={tw`w-10 h-10 rounded-full bg-gray-200`}
+                    />
+
+                    <View style={tw`ml-3 flex-1`}>
+                      <Text
+                        style={{
+                          fontFamily: "Poppins-Medium",
+                          color: "#111827",
+                        }}
+                      >
+                        {m.fullName || "Member"}
+                      </Text>
+
+                      {!!m.joinedAt && (
+                        <Text
+                          style={{
+                            fontFamily: "Poppins-Regular",
+                            fontSize: 12,
+                            color: "#6B7280",
+                            marginTop: 2,
+                          }}
+                        >
+                          Joined {new Date(m.joinedAt).toLocaleDateString()}
+                        </Text>
+                      )}
+                    </View>
+
+                    {admin && (
+                      <Ionicons name="person-circle" size={22} color="#7C3AED" />
+                    )}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }

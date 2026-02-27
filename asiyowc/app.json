@@ -52,18 +52,7 @@
       "react-native-compressor",
       "react-native-video",
       "expo-video",
-      "@react-native-community/datetimepicker",
-      "react-native-webrtc",
-      "react-native-maps",
-      "expo-location",
-      "expo-notifications",
-      "expo-image-picker",
-      "expo-av",
-      "expo-secure-store",
-      "expo-clipboard",
-      "expo-sensors",
-      "expo-blur",
-      "expo-linear-gradient"
+      "@react-native-community/datetimepicker"
     ],
 
     "extra": {

@@ -29,6 +29,12 @@ router.get('/groups/:groupId', communityController.getGroupById);
 // 4. Join group
 router.post('/groups/:groupId/join', communityController.joinGroup);
 
+// 4B. Generate group invite link (admin only)
+router.post(
+  '/groups/:groupId/invite-link',
+  communityController.createGroupInviteLink
+);
+
 // 5. Leave group
 router.post('/groups/:groupId/leave', communityController.leaveGroup);
 
@@ -194,6 +200,11 @@ router.post(
   communityController.markMessageAsRead
 );
 
+// Delete entire chat
+router.delete(
+  '/chats/:chatId',
+  communityController.deleteChat
+);
 
 /* =====================================================
    VOICE ROUTES
@@ -210,7 +221,8 @@ router.get('/voice/:id', communityController.getVoiceById);
 router.post("/voice/token", communityController.generateVoiceToken);
 
 router.get('/voice/:id/info', communityController.getVoiceInfo);
-router.put('/voice/:id', communityController.updateVoice);
+router.put('/voice/:voiceId', communityController.updateVoice);
+router.delete('/voice/:voiceId', communityController.deleteVoice);
 
 router.post(
   '/voice/:id/instances',

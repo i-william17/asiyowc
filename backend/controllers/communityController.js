@@ -1,6 +1,6 @@
 // controllers/communityController.js
 const mongoose = require('mongoose');
-
+const crypto = require('crypto');
 const { AccessToken } = require("livekit-server-sdk");
 require("dotenv").config();
 
@@ -179,55 +179,89 @@ const sliceMessagesProjection = (skip, limit) => ({
 });
 
 /* =====================================================
+   VOICE STATUS ENGINE (TIME DRIVEN)
+===================================================== */
+const computeVoiceInstanceStatus = (instance) => {
+  const now = Date.now();
+  const startsAt = new Date(instance.startsAt).getTime();
+  const endsAt = new Date(instance.endsAt).getTime();
+
+  const liveFrom = startsAt - (10 * 60 * 1000); // 10 minutes early
+
+  if (now < liveFrom) return "scheduled";
+  if (now <= endsAt) return "live";
+  return "ended";
+};
+
+/* =====================================================
    GROUPS
 ===================================================== */
 
+// 1. Create group
 // 1. Create group
 exports.createGroup = async (req, res) => {
   try {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
-    const { name, description, avatar, privacy = 'public' } = req.body;
+    const { name, description, avatar, privacy = "public" } = req.body;
 
-    if (!name || typeof name !== 'string' || name.trim().length < 2) {
-      return bad(res, 'Group name is required');
+    if (!name || typeof name !== "string" || name.trim().length < 2) {
+      return bad(res, "Group name is required");
     }
 
-    if (privacy && !['public', 'private', 'invite', 'system'].includes(privacy)) {
-      return bad(res, 'Invalid privacy value');
+    // ✅ Only allow public/private from creation endpoint
+    if (!["public", "private"].includes(privacy)) {
+      return bad(res, "Invalid privacy value");
+    }
+
+    // ✅ Enforce 200-word limit
+    if (description && typeof description === "string") {
+      const wordCount = description.trim().split(/\s+/).filter(Boolean).length;
+      if (wordCount > 200) {
+        return bad(res, "Description cannot exceed 200 words");
+      }
     }
 
     const existingGroup = await Group.findOne({
-      name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
-      isRemoved: false
+      name: { $regex: new RegExp(`^${name.trim()}$`, "i") },
+      isRemoved: false,
     });
 
     if (existingGroup) {
-      return bad(res, 'Group name already exists');
+      return bad(res, "Group name already exists");
     }
 
+    // ✅ IMPORTANT: create group chat FIRST (Group.chat is required)
+    const chat = await Chat.create({
+      type: "group",
+      participants: [user.id], // matches your existing Chat docs (ObjectIds)
+      messages: [],
+    });
+
+    // ✅ Now create group WITH chat
     const group = await Group.create({
       name: name.trim(),
-      description: typeof description === 'string' ? description : '',
+      description: typeof description === "string" ? description : "",
       avatar: avatar || null,
       createdBy: user.id,
-      admins: [user.id],
+      admins: [user.id], // creator is admin
       members: [
         {
           user: user.id,
-          joinedAt: new Date()
-        }
+          joinedAt: new Date(),
+        },
       ],
-
-      privacy
+      privacy,
+      chat: chat._id, // ✅ satisfies required
     });
 
-    // Ensure a group chat exists immediately
+    // keep your existing sync logic (no changes elsewhere)
     await ensureGroupChatExistsAndSynced(group);
 
-    return created(res, group, 'Group created');
+    return created(res, group, "Group created");
   } catch (error) {
+    console.error(error);
     return serverError(res, error);
   }
 };
@@ -247,7 +281,12 @@ exports.getGroups = async (req, res) => {
       privacy: { $ne: 'system' },
       ...(mine
         ? { 'members.user': user.id }
-        : { privacy: 'public' })
+        : {
+          $or: [
+            { privacy: 'public' },
+            { privacy: 'private', 'members.user': user.id }
+          ]
+        })
     };
 
     const [groups, total] = await Promise.all([
@@ -255,9 +294,7 @@ exports.getGroups = async (req, res) => {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .select(
-          'name description avatar privacy members chat createdAt'
-        ),
+        .select('name description avatar privacy members chat createdAt'),
 
       Group.countDocuments(query)
     ]);
@@ -275,7 +312,7 @@ exports.getGroups = async (req, res) => {
         privacy: g.privacy,
         membersCount: g.members.length,
         isMember,
-        chatId: g.chat // ✅ AUTHORITATIVE SOURCE
+        chatId: g.chat
       };
     });
 
@@ -292,7 +329,6 @@ exports.getGroups = async (req, res) => {
     return serverError(res, error);
   }
 };
-
 
 // 3. Get group by id (full group info)
 exports.getGroupById = async (req, res) => {
@@ -343,12 +379,13 @@ exports.getGroupById = async (req, res) => {
 };
 
 // 4. Join group
+
 exports.joinGroup = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?._id;
     const { groupId } = req.params;
+    const { inviteToken } = req.body;
 
-    console.log('[joinGroup]', { groupId, userId });
     if (!mongoose.Types.ObjectId.isValid(groupId)) {
       return bad(res, 'Invalid group ID');
     }
@@ -368,6 +405,28 @@ exports.joinGroup = async (req, res) => {
       return bad(res, 'User already a member of this group');
     }
 
+    // 🔐 PRIVATE GROUP: require valid invite token
+    if (group.privacy === 'private') {
+      if (!inviteToken) {
+        return forbidden(res, 'Invite link required to join this private group');
+      }
+
+      const tokenHash = crypto
+        .createHash('sha256')
+        .update(String(inviteToken))
+        .digest('hex');
+
+      const validToken = (group.inviteTokens || []).find(
+        (t) =>
+          t.tokenHash === tokenHash &&
+          (!t.expiresAt || new Date(t.expiresAt) > new Date())
+      );
+
+      if (!validToken) {
+        return forbidden(res, 'Invalid or expired invite link');
+      }
+    }
+
     group.members.push({
       user: userId,
       joinedAt: new Date()
@@ -375,7 +434,6 @@ exports.joinGroup = async (req, res) => {
 
     await group.save();
 
-    // ✅ AUTHORITATIVE chat creation
     const chat = await ensureGroupChatExistsAndSynced(group);
 
     return ok(res, {
@@ -387,6 +445,87 @@ exports.joinGroup = async (req, res) => {
   } catch (err) {
     console.error('[joinGroup]', err);
     return serverError(res, err);
+  }
+};
+
+// 5. Create group invite link
+exports.createGroupInviteLink = async (req, res) => {
+  try {
+    const user = ensureAuthUser(req, res);
+    if (!user) return;
+
+    const { groupId } = req.params;
+    if (!ensureObjectIdParam(res, groupId, 'groupId')) return;
+
+    const group = await Group.findOne({
+      _id: groupId,
+      isRemoved: false
+    });
+
+    if (!group) return notFound(res, 'Group not found');
+
+    const isMember = group.members.some(
+      (m) => String(m.user) === String(user.id)
+    );
+
+    const isAdminOrCreator = isGroupAdminOrCreator(group, user.id);
+
+    /* =====================================
+       🔐 PERMISSION RULES
+    ===================================== */
+
+    if (group.privacy === 'public') {
+      // Any member can generate link
+      if (!isMember && !isAdminOrCreator) {
+        return forbidden(res, 'Only group members can generate invite links');
+      }
+    }
+
+    if (group.privacy === 'private') {
+      // Only admin/creator can generate link
+      if (!isAdminOrCreator) {
+        return forbidden(res, 'Only group admins can generate invite links');
+      }
+    }
+
+    /* =====================================
+       1️⃣ GENERATE TOKEN
+    ===================================== */
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
+
+    group.inviteTokens = group.inviteTokens || [];
+
+    group.inviteTokens.push({
+      tokenHash,
+      createdBy: user.id,
+      createdAt: new Date(),
+      expiresAt: null
+    });
+
+    await group.save();
+
+    /* =====================================
+       2️⃣ BUILD LINK
+    ===================================== */
+
+    const BASE_URL =
+      process.env.CLIENT_URL ||
+      'http://localhost:8081'
+    "http://localhost:5000";
+
+    const inviteLink = `${BASE_URL}/groups/${group._id}?invite=${rawToken}`;
+
+    return ok(res, { inviteLink }, 'Invite link generated');
+
+  } catch (error) {
+    console.error('[createGroupInviteLink]', error);
+    return serverError(res, error);
   }
 };
 
@@ -470,14 +609,25 @@ exports.updateGroup = async (req, res) => {
       return forbidden(res, 'Only group admins can update the group');
     }
 
-    const allowed = pick(req.body, ['name', 'description', 'avatar', 'privacy', 'isArchived']);
-    if (allowed.privacy && !['public', 'private', 'invite', 'system'].includes(allowed.privacy)) {
+    const allowed = pick(req.body, [
+      'name',
+      'description',
+      'avatar',
+      'privacy',
+      'isArchived'
+    ]);
+
+    // ✅ Only allow public/private
+    if (allowed.privacy && !['public', 'private'].includes(allowed.privacy)) {
       return bad(res, 'Invalid privacy value');
     }
 
+    // ✅ Name validation
     if (allowed.name && typeof allowed.name === 'string') {
       allowed.name = allowed.name.trim();
-      if (allowed.name.length < 2) return bad(res, 'Group name too short');
+      if (allowed.name.length < 2) {
+        return bad(res, 'Group name too short');
+      }
 
       const exists = await Group.findOne({
         _id: { $ne: groupId },
@@ -485,7 +635,21 @@ exports.updateGroup = async (req, res) => {
         isRemoved: false
       });
 
-      if (exists) return bad(res, 'Another group with this name already exists');
+      if (exists) {
+        return bad(res, 'Another group with this name already exists');
+      }
+    }
+
+    // ✅ 200-word description limit
+    if (allowed.description && typeof allowed.description === 'string') {
+      const wordCount = allowed.description
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean).length;
+
+      if (wordCount > 200) {
+        return bad(res, 'Description cannot exceed 200 words');
+      }
     }
 
     Object.assign(group, allowed);
@@ -952,6 +1116,34 @@ exports.markMessageAsRead = async (req, res) => {
     return ok(res, msg.readBy, 'Message marked as read');
   } catch (e) {
     return serverError(res, e);
+  }
+};
+
+// DELETE CHAT (soft delete)
+exports.deleteChat = async (req, res) => {
+  try {
+    const user = ensureAuthUser(req, res);
+    if (!user) return;
+
+    const { chatId } = req.params;
+
+    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
+
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: user.id,
+      isRemoved: false
+    });
+
+    if (!chat) return notFound(res, 'Chat not found');
+
+    // Soft delete
+    chat.isRemoved = true;
+    await chat.save();
+
+    return ok(res, null, 'Chat deleted');
+  } catch (error) {
+    return serverError(res, error);
   }
 };
 
@@ -2189,47 +2381,128 @@ exports.sharePostInChat = async (req, res) => {
 ===================================================== */
 
 // 1. Create voice
+// 1. Create voice (WITH INITIAL INSTANCE)
+// 1. Create voice (WITH SCHEDULING SUPPORT)
 exports.createVoice = async (req, res) => {
   try {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
-    const { title, group, hub, instances = [] } = req.body;
+    const { title, group, hub, startsAt, endsAt } = req.body;
 
-    if (!title || typeof title !== 'string' || title.trim().length < 2) {
-      return bad(res, 'Voice title is required');
+    /* ================= VALIDATION ================= */
+
+    if (!title || typeof title !== "string" || title.trim().length < 2) {
+      return bad(res, "Voice title is required");
     }
 
-    // If attaching to group/hub, validate membership
-    if (group) {
-      if (!isValidObjectId(group)) return bad(res, 'Invalid group');
-      const g = await Group.findOne({ _id: group, isRemoved: false });
-      if (!g) return notFound(res, 'Group not found');
+    let groupDoc = null;
+    let hubDoc = null;
 
-      const vis = await ensureGroupVisibility(g, user.id);
-      if (!vis.ok) return forbidden(res, 'No access to this group');
+    if (group) {
+      if (!isValidObjectId(group)) return bad(res, "Invalid group");
+
+      groupDoc = await Group.findOne({ _id: group, isRemoved: false });
+      if (!groupDoc) return notFound(res, "Group not found");
+
+      const vis = await ensureGroupVisibility(groupDoc, user.id);
+      if (!vis.ok) return forbidden(res, "No access to this group");
     }
 
     if (hub) {
-      if (!isValidObjectId(hub)) return bad(res, 'Invalid hub');
-      const h = await Hub.findOne({ _id: hub, isRemoved: false });
-      if (!h) return notFound(res, 'Hub not found');
-      const isMember = (h.members || []).some((m) => String(m) === String(user.id));
-      if (!isMember && !hasRole(user, ['admin'])) return forbidden(res, 'Not a member of this hub');
+      if (!isValidObjectId(hub)) return bad(res, "Invalid hub");
+
+      hubDoc = await Hub.findOne({ _id: hub, isRemoved: false });
+      if (!hubDoc) return notFound(res, "Hub not found");
+
+      const isMember = (hubDoc.members || []).some(
+        (m) => String(m) === String(user.id)
+      );
+
+      if (!isMember && !hasRole(user, ["admin"])) {
+        return forbidden(res, "Not a member of this hub");
+      }
     }
+
+    /* ================= TIME LOGIC ================= */
+
+    const now = new Date();
+    let start;
+    let end;
+    let initialStatus;
+
+    if (startsAt && endsAt) {
+      // 🕒 SCHEDULED ROOM
+      start = new Date(startsAt);
+      end = new Date(endsAt);
+
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return bad(res, "Invalid start or end time");
+      }
+
+      if (end <= start) {
+        return bad(res, "End time must be after start time");
+      }
+
+      const durationMinutes = (end - start) / (1000 * 60);
+
+      if (durationMinutes < 30) {
+        return bad(res, "Minimum duration is 30 minutes");
+      }
+
+      initialStatus = "scheduled";
+
+    } else {
+      // 🔥 GO LIVE (Default 2 Hours)
+      start = now;
+      end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      initialStatus = "live";
+    }
+
+    /* ================= CREATE VOICE ================= */
 
     const voice = await Voice.create({
       title: title.trim(),
       host: user.id,
       group: group || null,
       hub: hub || null,
-      instances: Array.isArray(instances) ? instances : [],
-      isRemoved: false
+      instances: [
+        {
+          startsAt: start,
+          endsAt: end,
+          status: initialStatus,
+          speakers: [user.id],
+          participants: [user.id],
+          chatEnabled: true,
+          sharedPosts: [],
+          kickedUsers: [],
+        },
+      ],
+      isRemoved: false,
     });
 
-    return created(res, voice, 'Voice created');
+    /* ================= POPULATE ================= */
+
+    await voice.populate([
+      {
+        path: "host",
+        select: "profile.fullName profile.avatar",
+      },
+      {
+        path: "instances.speakers",
+        select: "profile.fullName profile.avatar",
+      },
+      {
+        path: "instances.participants",
+        select: "profile.fullName profile.avatar",
+      },
+    ]);
+
+    return created(res, voice, "Voice room created");
+
   } catch (error) {
-    return serverError(res, error);
+    console.error("[createVoice]", error);
+    return serverError(res, error.message || "Failed to create voice");
   }
 };
 
@@ -2381,41 +2654,28 @@ exports.getVoiceInstanceById = async (req, res) => {
     const user = req.user;
     const { instanceId } = req.params;
 
-    /* ===========================
-       1️⃣ VALIDATE instanceId
-    =========================== */
     if (!mongoose.Types.ObjectId.isValid(instanceId)) {
       return bad(res, "Invalid instanceId");
     }
 
     const instanceObjectId = new mongoose.Types.ObjectId(instanceId);
 
-    /* ===========================
-       2️⃣ FIND VOICE + POPULATE
-    =========================== */
     const voice = await Voice.findOne({
       "instances.instanceId": instanceObjectId,
       isRemoved: false
     })
-      // 🎤 HOST
       .populate({
         path: "host",
         select: "profile.fullName profile.avatar"
       })
-
-      // 🎙️ SPEAKERS
       .populate({
         path: "instances.speakers",
         select: "profile.fullName profile.avatar"
       })
-
-      // 👂 LISTENERS
       .populate({
         path: "instances.participants",
         select: "profile.fullName profile.avatar"
       })
-
-      // OPTIONAL CONTEXT
       .populate("group", "name avatar privacy")
       .populate("hub", "name avatar type region");
 
@@ -2423,9 +2683,6 @@ exports.getVoiceInstanceById = async (req, res) => {
       return notFound(res, "Voice instance not found");
     }
 
-    /* ===========================
-       3️⃣ EXTRACT INSTANCE
-    =========================== */
     const instance = voice.instances.find(
       (i) => String(i.instanceId) === String(instanceObjectId)
     );
@@ -2434,22 +2691,17 @@ exports.getVoiceInstanceById = async (req, res) => {
       return notFound(res, "Instance not found");
     }
 
-    if (instance.status !== "live") {
-      return bad(res, "This voice instance is not live");
+    const computedStatus = computeVoiceInstanceStatus(instance);
+
+    if (computedStatus !== "live") {
+      return bad(res, "This voice session is not open yet");
     }
 
-    /* ===========================
-       4️⃣ ROLE RESOLUTION
-    =========================== */
     let role = "listener";
 
-    if (
-      voice.host &&
-      String(voice.host._id) === String(user.id)
-    ) {
+    if (String(voice.host?._id) === String(user.id)) {
       role = "host";
     } else if (
-      Array.isArray(instance.speakers) &&
       instance.speakers.some(
         (s) => String(s?._id) === String(user.id)
       )
@@ -2457,29 +2709,25 @@ exports.getVoiceInstanceById = async (req, res) => {
       role = "speaker";
     }
 
-    /* ===========================
-       5️⃣ NORMALIZED ROOM OBJECT
-    =========================== */
-    const room = {
-      _id: voice._id,
-      title: voice.title,
-      host: voice.host || null,   // 🔒 always explicit
-      group: voice.group || null,
-      hub: voice.hub || null
-    };
-
-    /* ===========================
-       6️⃣ FINAL RESPONSE
-    =========================== */
     return ok(res, {
-      room,
-      instance,
+      room: {
+        _id: voice._id,
+        title: voice.title,
+        host: voice.host,
+        group: voice.group || null,
+        hub: voice.hub || null
+      },
+      instance: {
+        ...instance.toObject(),
+        status: computedStatus
+      },
       role,
       chatEnabled: instance.chatEnabled ?? true,
       lockedStage: false
     });
+
   } catch (e) {
-    console.error("❌ getVoiceInstanceById error:", e);
+    console.error("getVoiceInstanceById error:", e);
     return serverError(res, e);
   }
 };
@@ -2511,6 +2759,57 @@ exports.updateVoice = async (req, res) => {
     await voice.save();
 
     return ok(res, voice, 'Voice updated');
+  } catch (error) {
+    return serverError(res, error);
+  }
+};
+
+// Soft delete entire voice room
+exports.deleteVoice = async (req, res) => {
+  try {
+    const user = ensureAuthUser(req, res);
+    if (!user) return;
+
+    const { voiceId } = req.params;
+    if (!ensureObjectIdParam(res, voiceId, "voiceId")) return;
+
+    const voice = await Voice.findOne({
+      _id: voiceId,
+      isRemoved: false
+    });
+
+    if (!voice) return notFound(res, "Voice not found");
+
+    const isHost = String(voice.host) === String(user.id);
+
+    if (!isHost && !hasRole(user, ["admin", "moderator"])) {
+      return forbidden(res, "Only host can delete this voice room");
+    }
+
+    /* ===============================
+       1️⃣ END ANY LIVE INSTANCES
+    =============================== */
+    voice.instances.forEach((instance) => {
+      if (instance.status === "live") {
+        instance.status = "ended";
+      }
+    });
+
+    /* ===============================
+       2️⃣ SOFT DELETE ROOM
+    =============================== */
+    voice.isRemoved = true;
+    await voice.save();
+
+    /* ===============================
+       3️⃣ REALTIME FORCE EXIT
+    =============================== */
+    req.io.to(`voice:${voiceId}`).emit("voice:deleted", {
+      voiceId
+    });
+
+    return ok(res, null, "Voice room deleted");
+
   } catch (error) {
     return serverError(res, error);
   }
@@ -2670,8 +2969,6 @@ exports.joinVoice = async (req, res) => {
     const user = req.user;
     const { instanceId } = req.params;
 
-    console.log("🎧 joinVoice instanceId:", instanceId);
-
     if (!mongoose.Types.ObjectId.isValid(instanceId)) {
       return bad(res, "Invalid instance id");
     }
@@ -2691,18 +2988,17 @@ exports.joinVoice = async (req, res) => {
 
     if (!instance) return notFound(res, "Instance not found");
 
-    if (instance.status !== "live") {
-      return bad(res, "This voice instance is not live");
+    const computedStatus = computeVoiceInstanceStatus(instance);
+
+    if (computedStatus !== "live") {
+      return bad(res, "This voice session is not open");
     }
 
-    /* =====================================================
-       ✅ PREVENT DUPLICATES (SPEAKERS + PARTICIPANTS)
-    ===================================================== */
     const alreadyJoined =
-      (instance.participants || []).some(
+      instance.participants.some(
         (p) => String(p) === String(user.id)
       ) ||
-      (instance.speakers || []).some(
+      instance.speakers.some(
         (s) => String(s) === String(user.id)
       );
 
@@ -2710,11 +3006,6 @@ exports.joinVoice = async (req, res) => {
       instance.participants.push(user.id);
       await voice.save();
     }
-
-    console.log("✅ User joined instance:", {
-      userId: user.id,
-      instanceId,
-    });
 
     return ok(
       res,
@@ -2724,8 +3015,9 @@ exports.joinVoice = async (req, res) => {
       },
       "Joined voice instance"
     );
+
   } catch (e) {
-    console.error("❌ joinVoice error:", e);
+    console.error("joinVoice error:", e);
     return serverError(res, e);
   }
 };

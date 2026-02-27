@@ -14,12 +14,15 @@ import {
     Animated,
     Dimensions,
     Platform,
+    useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useDispatch, useSelector } from "react-redux";
+import { clearVoiceChatToast } from "../../store/slices/communitySlice";
 import LoadingBlock from './LoadingBlock';
 import tw from "../../utils/tw";
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
 // Status bar heights for dynamic padding
 const headerPadTop = Platform.OS === "ios" ? 0 : (StatusBar.currentHeight ?? 0);
@@ -115,9 +118,7 @@ const SmallAvatar = ({ user }) => {
 };
 
 // Sub-components with Poppins font
-const SpeakerCard = ({ speaker, isHostView, currentUserId, onMute }) => {
-    const [isHovered, setIsHovered] = useState(false);
-
+const SpeakerCard = ({ speaker, isHostView, currentUserId, onMute, onModerate }) => {
     return (
         <View style={tw.style(
             'bg-white/5 border border-white/10 rounded-3xl p-5 items-center relative',
@@ -176,31 +177,40 @@ const SpeakerCard = ({ speaker, isHostView, currentUserId, onMute }) => {
             </View>
 
             {isHostView && speaker.userId !== currentUserId && (
-                <TouchableOpacity
-                    style={tw.style(
-                        'absolute top-3 right-3 w-10 h-10 rounded-full items-center justify-center shadow-md shadow-black/30',
-                        speaker.isMuted ? 'bg-emerald-500' : 'bg-red-500'
-                    )}
-                    onPress={onMute} // ✅ Fixed: now calls without args
-                >
-                    <Ionicons
-                        name={speaker.isMuted ? "mic" : "mic-off"}
-                        size={20}
-                        color="#fff"
-                    />
-                </TouchableOpacity>
+                <View style={tw`absolute top-3 right-3 flex-row gap-2`}>
+                    <TouchableOpacity
+                        style={tw.style(
+                            'w-10 h-10 rounded-full items-center justify-center shadow-md shadow-black/30',
+                            speaker.isMuted ? 'bg-emerald-500' : 'bg-red-500'
+                        )}
+                        onPress={onMute}
+                    >
+                        <Ionicons
+                            name={speaker.isMuted ? "mic" : "mic-off"}
+                            size={20}
+                            color="#fff"
+                        />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={tw`w-10 h-10 rounded-full bg-amber-500 items-center justify-center shadow-md shadow-black/30`}
+                        onPress={() => onModerate(speaker.userId, speaker.name, true)}
+                    >
+                        <Ionicons name="settings" size={20} color="#fff" />
+                    </TouchableOpacity>
+                </View>
             )}
         </View>
     );
 };
 
-const ListenerCard = ({ listener, isHostView, currentUserId, onApprove, onRemove }) => {
+const ListenerCard = ({ listener, isHostView, currentUserId, onApprove, onModerate, isRequesting }) => {
     return (
         <View style={tw`flex-row items-center bg-white/5 rounded-2xl p-4 mb-2`}>
             <View style={tw`relative`}>
                 <SmallAvatar user={listener} />
 
-                {listener.isRequestingSpeaker && (
+                {isRequesting && (
                     <View style={tw`absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-500 border border-white items-center justify-center`}>
                         <Ionicons name="hand-left" size={10} color="#fff" />
                     </View>
@@ -214,7 +224,7 @@ const ListenerCard = ({ listener, isHostView, currentUserId, onApprove, onRemove
                 </PoppinsTextSemibold>
 
                 <View style={tw`flex-row`}>
-                    {listener.isRequestingSpeaker ? (
+                    {isRequesting ? (
                         <View style={tw`flex-row items-center bg-sky-500/20 px-2.5 py-1 rounded-3xl`}>
                             <Ionicons name="hand-left" size={12} color="#38bdf8" />
                             <PoppinsText style={tw`text-xs ml-1.5 text-white`}>Requesting</PoppinsText>
@@ -230,7 +240,7 @@ const ListenerCard = ({ listener, isHostView, currentUserId, onApprove, onRemove
 
             {isHostView && (
                 <View style={tw`flex-row gap-2`}>
-                    {listener.isRequestingSpeaker && (
+                    {isRequesting && (
                         <TouchableOpacity
                             style={tw`w-10 h-10 rounded-full bg-emerald-500 items-center justify-center shadow-md shadow-black/30`}
                             onPress={() => onApprove(listener.userId)}
@@ -241,7 +251,7 @@ const ListenerCard = ({ listener, isHostView, currentUserId, onApprove, onRemove
 
                     <TouchableOpacity
                         style={tw`w-10 h-10 rounded-full bg-red-500 items-center justify-center shadow-md shadow-black/30`}
-                        onPress={() => onRemove(listener.userId)}
+                        onPress={() => onModerate(listener.userId, listener.name, false)}
                     >
                         <Ionicons name="remove-circle" size={22} color="#fff" />
                     </TouchableOpacity>
@@ -251,15 +261,16 @@ const ListenerCard = ({ listener, isHostView, currentUserId, onApprove, onRemove
     );
 };
 
+// ✅ UPGRADED: ChatMessage with Host/Speaker badges
 const ChatMessage = ({ message, currentUserId }) => {
     const isOwnMessage = message.userId === currentUserId;
-    
-    // ✅ Safe timestamp handling
+
+    // Safe timestamp handling
     const time = message.timestamp
         ? new Date(message.timestamp).toLocaleTimeString([], {
             hour: '2-digit',
             minute: '2-digit'
-          })
+        })
         : '';
 
     return (
@@ -268,15 +279,35 @@ const ChatMessage = ({ message, currentUserId }) => {
             isOwnMessage ? 'items-end' : 'items-start'
         )}>
             {!isOwnMessage && (
-                <PoppinsTextSemibold style={tw`text-xs text-white/70 mb-1 ml-2`}>
-                    {message.userName}
-                </PoppinsTextSemibold>
+                <View style={tw`flex-row items-center ml-2 mb-1`}>
+                    <PoppinsTextSemibold style={tw`text-xs text-white/80 mr-2`}>
+                        {message.userName}
+                    </PoppinsTextSemibold>
+
+                    {message.role === "host" && (
+                        <View style={tw`bg-amber-500 px-2 py-0.5 rounded-full`}>
+                            <PoppinsText style={tw`text-[10px] text-white`}>
+                                HOST
+                            </PoppinsText>
+                        </View>
+                    )}
+
+                    {message.role === "speaker" && (
+                        <View style={tw`bg-violet-600 px-2 py-0.5 rounded-full`}>
+                            <PoppinsText style={tw`text-[10px] text-white`}>
+                                SPEAKER
+                            </PoppinsText>
+                        </View>
+                    )}
+                </View>
             )}
+
             <View style={tw.style(
                 'p-3 rounded-2xl max-w-[80%]',
                 isOwnMessage ? 'bg-indigo-600 rounded-br-sm' : 'bg-white/10 rounded-bl-sm'
             )}>
                 <PoppinsText style={tw`text-sm text-white`}>{message.message}</PoppinsText>
+
                 <View style={tw.style(
                     'flex-row items-center mt-1',
                     isOwnMessage ? 'justify-end' : 'justify-start'
@@ -291,7 +322,129 @@ const ChatMessage = ({ message, currentUserId }) => {
     );
 };
 
-// ✅ FIX 1: Normalization function with requestedToSpeak preservation
+// Confirm Modal Component for Speaker Requests
+const ConfirmModal = ({ visible, title, message, confirmText, cancelText = "Decline", onConfirm, onCancel }) => {
+    if (!visible) return null;
+
+    return (
+        <Modal
+            transparent={true}
+            visible={visible}
+            animationType="fade"
+            onRequestClose={onCancel}
+        >
+            <View style={tw`flex-1 bg-black/70 justify-center items-center p-4`}>
+                <View style={tw`bg-gray-900 rounded-3xl w-full max-w-sm border border-white/10`}>
+                    <View style={tw`p-6 items-center`}>
+                        <View style={tw`w-16 h-16 rounded-full bg-blue-500/20 items-center justify-center mb-4`}>
+                            <Ionicons name="hand-left" size={32} color="#3b82f6" />
+                        </View>
+
+                        <PoppinsTextBold style={tw`text-xl text-white mb-2 text-center`}>
+                            {title}
+                        </PoppinsTextBold>
+
+                        <PoppinsText style={tw`text-sm text-white/70 mb-6 text-center`}>
+                            {message}
+                        </PoppinsText>
+
+                        <View style={tw`flex-row gap-3 w-full`}>
+                            <TouchableOpacity
+                                style={tw`flex-1 bg-red-500 py-4 rounded-2xl items-center`}
+                                onPress={onCancel}
+                            >
+                                <PoppinsTextSemibold style={tw`text-white`}>
+                                    {cancelText}
+                                </PoppinsTextSemibold>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={tw`flex-1 bg-emerald-500 py-4 rounded-2xl items-center`}
+                                onPress={onConfirm}
+                            >
+                                <PoppinsTextSemibold style={tw`text-white`}>
+                                    {confirmText}
+                                </PoppinsTextSemibold>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
+};
+
+// Moderation Modal Component
+const ModerationModal = ({ visible, target, onClose, onDemote, onKick }) => {
+    if (!visible || !target) return null;
+
+    return (
+        <Modal
+            transparent={true}
+            visible={visible}
+            animationType="fade"
+            onRequestClose={onClose}
+        >
+            <View style={tw`flex-1 bg-black/70 justify-center items-center p-4`}>
+                <View style={tw`bg-gray-900 rounded-3xl w-full max-w-sm border border-white/10 p-6`}>
+                    <View style={tw`items-center mb-4`}>
+                        <View style={tw`w-16 h-16 rounded-full bg-amber-500/20 items-center justify-center mb-4`}>
+                            <Ionicons name="settings" size={32} color="#f59e0b" />
+                        </View>
+
+                        <PoppinsTextBold style={tw`text-xl text-white mb-2 text-center`}>
+                            Moderate User
+                        </PoppinsTextBold>
+
+                        <PoppinsText style={tw`text-sm text-white/70 mb-6 text-center`}>
+                            Select an action for {target.name}
+                        </PoppinsText>
+                    </View>
+
+                    {/* If Speaker → show Demote */}
+                    {target.isSpeaker && (
+                        <TouchableOpacity
+                            style={tw`bg-amber-500 py-4 rounded-2xl items-center mb-3`}
+                            onPress={() => {
+                                onDemote?.(target.userId);
+                                onClose();
+                            }}
+                        >
+                            <PoppinsTextSemibold style={tw`text-white`}>
+                                Demote to Listener
+                            </PoppinsTextSemibold>
+                        </TouchableOpacity>
+                    )}
+
+                    {/* Kick */}
+                    <TouchableOpacity
+                        style={tw`bg-red-500 py-4 rounded-2xl items-center mb-3`}
+                        onPress={() => {
+                            onKick?.(target.userId);
+                            onClose();
+                        }}
+                    >
+                        <PoppinsTextSemibold style={tw`text-white`}>
+                            Kick Out
+                        </PoppinsTextSemibold>
+                    </TouchableOpacity>
+
+                    {/* Cancel */}
+                    <TouchableOpacity
+                        style={tw`bg-white/10 py-4 rounded-2xl items-center`}
+                        onPress={onClose}
+                    >
+                        <PoppinsTextSemibold style={tw`text-white`}>
+                            Cancel
+                        </PoppinsTextSemibold>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </Modal>
+    );
+};
+
+// ✅ FIX #4: Safer Avatar Normalization
 const normalizeUser = (u) => {
     if (!u) return null;
 
@@ -300,10 +453,13 @@ const normalizeUser = (u) => {
         return {
             _id: u._id,
             name: u.profile.fullName ?? "Unknown",
-            avatar: u.profile.avatar?.url ?? null,
+            avatar:
+                typeof u.profile.avatar === "string"
+                    ? u.profile.avatar
+                    : u.profile.avatar?.url ?? null,
             isConnected: u.isConnected ?? true,
             isMuted: u.isMuted ?? false,
-            requestedToSpeak: u.requestedToSpeak ?? u.isRequestingSpeaker ?? false, // ✅ Preserve request state
+            // 🔴 REMOVED: requestedToSpeak - now from Redux voiceRequests only
         };
     }
 
@@ -312,7 +468,7 @@ const normalizeUser = (u) => {
         return {
             ...u,
             isMuted: u.isMuted ?? false,
-            requestedToSpeak: u.requestedToSpeak ?? u.isRequestingSpeaker ?? false, // ✅ Preserve request state
+            // 🔴 REMOVED: requestedToSpeak - now from Redux voiceRequests only
         };
     }
 
@@ -323,7 +479,6 @@ const normalizeUser = (u) => {
         avatar: null,
         isConnected: true,
         isMuted: false,
-        requestedToSpeak: false,
     };
 };
 
@@ -336,6 +491,7 @@ export default function VoiceRoomInterface(props) {
         onRequestToSpeak,
         onApproveSpeaker,
         onDemoteSpeaker,
+        onRemoveUser,
         onMuteUser,
         onUnmuteUser,
         onSendChatMessage,
@@ -343,18 +499,88 @@ export default function VoiceRoomInterface(props) {
         onLeave,
         onEnableChat,
         onDisableChat,
+        onDeclineSpeaker,
+        // ✅ NEW PROPS for output mute control
+        isOutputMuted,
+        onToggleOutputMute,
     } = props;
 
+    // ✅ NEW: Redux dispatch and toast selector
+    const dispatch = useDispatch();
+    const chatToasts = useSelector(s => s.community.chatToasts || []);
+
+    // ✅ FIX #2: Dynamic width for rotation support
+    const { width } = useWindowDimensions();
+    const [columns, setColumns] = useState(4);
+
+    useEffect(() => {
+        let next;
+
+        if (width < 400) next = 2;
+        else if (width < 600) next = 3;
+        else if (width < 900) next = 4;
+        else next = 6;
+
+        setColumns(prev => (prev !== next ? next : prev));
+    }, [width]);
+
     const flatListRef = useRef(null);
+
+    // ✅ Toast animation and state
+    const [visibleToast, setVisibleToast] = useState(null);
+    const toastAnim = useRef(new Animated.Value(0)).current;
+
+    // ✅ Toast effect
+    useEffect(() => {
+        if (!chatToasts.length) return;
+
+        const latest = chatToasts[chatToasts.length - 1];
+        setVisibleToast(latest);
+
+        Animated.timing(toastAnim, {
+            toValue: 1,
+            duration: 250,
+            useNativeDriver: true,
+        }).start();
+
+        const timer = setTimeout(() => {
+            Animated.timing(toastAnim, {
+                toValue: 0,
+                duration: 250,
+                useNativeDriver: true,
+            }).start(() => {
+                dispatch(clearVoiceChatToast(latest._id));
+                setVisibleToast(null);
+            });
+        }, 6000);
+
+        return () => clearTimeout(timer);
+    }, [chatToasts]);
+
+    // ✅ FIX #1: Stable Animated value using useRef
+    const panelAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        panelAnim.setValue(width);
+    }, []);
 
     const room = voiceState?.room || {};
     const instance = voiceState?.instance || {};
     const myId = currentUser?._id || null;
 
-    // ✅ Use Redux voiceState for chatEnabled (single source of truth)
+    // Get voice requests from Redux (ephemeral state)
+    const voiceRequests = useSelector(s => s.community.voiceRequests || []);
+
+    // Track current pending speaker request
+    const [pendingRequest, setPendingRequest] = useState(null);
+
+    // Track moderation target
+    const [moderationTarget, setModerationTarget] = useState(null);
+
+    // Use Redux voiceState for chatEnabled (single source of truth)
     const chatEnabled = voiceState?.chatEnabled ?? true;
 
-    // ✅ Memoized calculations for performance
+    // Memoized calculations for performance - MUST come BEFORE the effect that uses isHost
     const {
         allParticipants,
         rawSpeakers,
@@ -391,7 +617,7 @@ export default function VoiceRoomInterface(props) {
         if (hostSpeaker) sorted.push(hostSpeaker);
         sorted.push(...otherSpeakers);
 
-        const listenerList = participants.filter(p => 
+        const listenerList = participants.filter(p =>
             !speakers.some(s => s._id === p._id)
         );
 
@@ -407,7 +633,12 @@ export default function VoiceRoomInterface(props) {
         const isUserListener = listenerList.some(u => u?._id === myId);
 
         const hostUserObj = room?.host ?? null;
-        const hostAvatarUrl = hostUserObj?.profile?.avatar?.url ?? null;
+
+        // ✅ FIX #5: Safer Host Avatar Extraction
+        const hostAvatarUrl =
+            typeof hostUserObj?.profile?.avatar === "string"
+                ? hostUserObj.profile.avatar
+                : hostUserObj?.profile?.avatar?.url ?? null;
 
         return {
             allParticipants: participants,
@@ -425,13 +656,53 @@ export default function VoiceRoomInterface(props) {
             hostUser: hostUserObj,
             hostAvatar: hostAvatarUrl,
         };
-    }, [instance, room, voiceState?.messages, myId]);
+    }, [
+        instance?.participants,
+        instance?.speakers,
+        room?.host,
+        voiceState?.messages,
+        myId
+    ]);
 
-    const [isMicMuted, setIsMicMuted] = useState(false);
-    const [isOutputMuted, setIsOutputMuted] = useState(false);
+    // ✅ FIX #3: Fix Stale Closure in Pending Request Effect
+    useEffect(() => {
+        if (!isHost) return;
+
+        if (!voiceRequests.length) {
+            setPendingRequest(null);
+            return;
+        }
+
+        const first = voiceRequests[0];
+
+        setPendingRequest(prev =>
+            !prev || prev.userId !== first.userId
+                ? first
+                : prev
+        );
+    }, [voiceRequests, isHost]);
+
+    // Use props.isMuted as single source of truth for mic
+    const isMicMuted = props.isMuted ?? false;
+
+    // ✅ FIX #7: Output mute is now controlled by LiveKit (removed local state)
     const [chatInput, setChatInput] = useState('');
     const [activePanel, setActivePanel] = useState(null);
-    const [panelAnim] = useState(new Animated.Value(width));
+
+    // Update panelAnim when width changes (for rotation)
+    useEffect(() => {
+        if (activePanel) {
+            // If panel is open, animate to new width position
+            Animated.timing(panelAnim, {
+                toValue: 0,
+                duration: 0, // Instant position correction
+                useNativeDriver: true,
+            }).start();
+        } else {
+            // Reset to off-screen position
+            panelAnim.setValue(width);
+        }
+    }, [width, activePanel]);
 
     // Scroll to bottom on new messages
     useEffect(() => {
@@ -477,18 +748,26 @@ export default function VoiceRoomInterface(props) {
         }
     };
 
+    // ✅ FIX #6: Prevent Double Request-To-Speak Spam
     const handleRequestToSpeak = () => {
-        onRequestToSpeak();
+        if (!isListener) return;
+
+        const alreadyRequested = voiceRequests.some(
+            r => String(r.userId) === String(myId)
+        );
+
+        if (alreadyRequested) return;
+
+        onRequestToSpeak?.();
     };
 
     const handleLeaveRoom = () => {
         onLeave();
     };
 
-    // ✅ FIX 5: Pass intended mute state to callback
+    // Let LiveKit be source of truth for mute state
     const toggleSelfMute = () => {
         const next = !isMicMuted;
-        setIsMicMuted(next);
         onMuteSelf?.(next);
     };
 
@@ -500,9 +779,10 @@ export default function VoiceRoomInterface(props) {
 
         return (
             <FlatList
+                key={`speakers-grid-${columns}`}
                 data={sortedSpeakers}
                 keyExtractor={(item) => item._id}
-                numColumns={numColumns}
+                numColumns={columns}
                 contentContainerStyle={tw`p-4`}
                 renderItem={({ item }) => (
                     <View style={tw`flex-1 min-w-[120px] max-w-[150px] m-2`}>
@@ -522,6 +802,9 @@ export default function VoiceRoomInterface(props) {
                                 item.isMuted
                                     ? onUnmuteUser(item._id)
                                     : onMuteUser(item._id)
+                            }
+                            onModerate={(userId, name, isSpeaker) =>
+                                setModerationTarget({ userId, name, isSpeaker })
                             }
                         />
                     </View>
@@ -555,7 +838,7 @@ export default function VoiceRoomInterface(props) {
         <SafeAreaView style={tw`flex-1 bg-indigo-950`}>
             <StatusBar barStyle="light-content" backgroundColor="#1e1b4b" />
 
-            {/* Top Header - ✅ FIX 2: Fixed dynamic padding */}
+            {/* Top Header */}
             <View style={[tw`bg-black/50 border-b border-white/10`, { paddingTop: headerPadTop }]}>
                 <View style={tw`flex-row items-center justify-between px-4 py-4`}>
                     <TouchableOpacity
@@ -567,13 +850,13 @@ export default function VoiceRoomInterface(props) {
 
                     <View style={tw`flex-1 flex-row items-center mx-3`}>
                         <View style={tw`relative`}>
-                            <Avatar 
-                                user={{ 
+                            <Avatar
+                                user={{
                                     name: room?.host?.profile?.fullName || "Host",
-                                    avatar: hostAvatar 
-                                }} 
-                                size="w-14 h-14" 
-                                textSize="text-xl" 
+                                    avatar: hostAvatar
+                                }}
+                                size="w-14 h-14"
+                                textSize="text-xl"
                             />
                             <View style={tw`absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-amber-500 border-2 border-white items-center justify-center`}>
                                 <Ionicons name="mic-circle" size={14} color="#fff" />
@@ -611,11 +894,11 @@ export default function VoiceRoomInterface(props) {
                                 size={24}
                                 color={activePanel === 'listeners' ? '#fff' : '#d1d5db'}
                             />
-                            <PoppinsText 
+                            <PoppinsText
                                 style={[
                                     tw`text-xs mt-0.5`,
-                                    activePanel === 'listeners' 
-                                        ? { color: '#fff' } 
+                                    activePanel === 'listeners'
+                                        ? { color: '#fff' }
                                         : { color: 'rgba(255, 255, 255, 0.8)' }
                                 ]}
                             >
@@ -623,30 +906,31 @@ export default function VoiceRoomInterface(props) {
                             </PoppinsText>
                         </TouchableOpacity>
 
+                        {/* ✅ FIX #1: Allow Host To Open Chat Even When Disabled */}
                         <TouchableOpacity
                             style={tw.style(
                                 'w-12 h-12 rounded-full items-center justify-center',
                                 activePanel === 'chat' ? 'bg-blue-500' : 'bg-white/10',
-                                !chatEnabled && 'bg-white/5'
+                                !chatEnabled && !canModerate && 'bg-white/5'
                             )}
                             onPress={() => togglePanel('chat')}
-                            disabled={!chatEnabled}
+                            disabled={!chatEnabled && !canModerate}
                         >
                             <Ionicons
                                 name="chatbubbles"
                                 size={24}
                                 color={
                                     activePanel === 'chat' ? '#fff' :
-                                        !chatEnabled ? '#6b7280' : '#d1d5db'
+                                        !chatEnabled && !canModerate ? '#6b7280' : '#d1d5db'
                                 }
                             />
-                            <PoppinsText 
+                            <PoppinsText
                                 style={[
                                     tw`text-xs mt-0.5`,
-                                    activePanel === 'chat' 
-                                        ? { color: '#fff' } 
-                                        : !chatEnabled 
-                                            ? { color: 'rgba(255, 255, 255, 0.4)' } 
+                                    activePanel === 'chat'
+                                        ? { color: '#fff' }
+                                        : !chatEnabled && !canModerate
+                                            ? { color: 'rgba(255, 255, 255, 0.4)' }
                                             : { color: 'rgba(255, 255, 255, 0.8)' }
                                 ]}
                             >
@@ -661,6 +945,67 @@ export default function VoiceRoomInterface(props) {
             <View style={tw`flex-1`}>
                 {renderSpeakersGrid()}
             </View>
+
+            {/* ✅ NEW: Bottom Floating Toast (Google Meet Style) */}
+            {visibleToast && (
+                <Animated.View
+                    style={[
+                        tw`absolute left-4 right-4 bg-black/80 border border-white/10 rounded-2xl flex-row items-center p-3`,
+                        {
+                            bottom: 110,
+                            opacity: toastAnim,
+                            transform: [
+                                {
+                                    translateY: toastAnim.interpolate({
+                                        inputRange: [0, 1],
+                                        outputRange: [20, 0],
+                                    }),
+                                },
+                            ],
+                            zIndex: 10001,
+                            elevation: 30,
+                        },
+                    ]}
+                >
+                    <SmallAvatar
+                        user={{
+                            name: visibleToast.userName,
+                            avatar: visibleToast.avatar,
+                        }}
+                    />
+
+                    <View style={tw`flex-1 ml-3`}>
+                        <View style={tw`flex-row items-center`}>
+                            <PoppinsTextSemibold style={tw`text-xs text-white mr-2`}>
+                                {visibleToast.userName}
+                            </PoppinsTextSemibold>
+
+                            {visibleToast.role === "host" && (
+                                <View style={tw`bg-amber-500 px-2 py-0.5 rounded-full`}>
+                                    <PoppinsText style={tw`text-[9px] text-white`}>
+                                        HOST
+                                    </PoppinsText>
+                                </View>
+                            )}
+
+                            {visibleToast.role === "speaker" && (
+                                <View style={tw`bg-violet-600 px-2 py-0.5 rounded-full`}>
+                                    <PoppinsText style={tw`text-[9px] text-white`}>
+                                        SPEAKER
+                                    </PoppinsText>
+                                </View>
+                            )}
+                        </View>
+
+                        <PoppinsText
+                            style={tw`text-xs text-white/80 mt-0.5`}
+                            numberOfLines={1}
+                        >
+                            {visibleToast.message}
+                        </PoppinsText>
+                    </View>
+                </Animated.View>
+            )}
 
             {/* Side Panel - FIXED OVERLAY STRUCTURE */}
             {activePanel && (
@@ -696,7 +1041,6 @@ export default function VoiceRoomInterface(props) {
                             },
                         ]}
                     >
-                        {/* ✅ FIX 2: Fixed dynamic padding */}
                         <View style={[tw`flex-1`, { paddingTop: panelPadTop }]}>
                             {activePanel === 'listeners' && (
                                 <>
@@ -714,7 +1058,7 @@ export default function VoiceRoomInterface(props) {
                                             <Ionicons name="close" size={24} color="#fff" />
                                         </TouchableOpacity>
                                     </View>
-                                    
+
                                     {/* Speakers Section */}
                                     {sortedSpeakers.length > 0 && (
                                         <>
@@ -723,7 +1067,7 @@ export default function VoiceRoomInterface(props) {
                                                     Speakers ({sortedSpeakers.length})
                                                 </PoppinsTextSemibold>
                                             </View>
-                                            <ScrollView 
+                                            <ScrollView
                                                 style={tw`max-h-64`}
                                                 showsVerticalScrollIndicator={false}
                                                 nestedScrollEnabled={true}
@@ -736,25 +1080,27 @@ export default function VoiceRoomInterface(props) {
                                                             name: speaker.name,
                                                             avatar: speaker.avatar,
                                                             isConnected: speaker.isConnected,
-                                                            isRequestingSpeaker: false,
                                                         }}
+                                                        isRequesting={false}
                                                         isHostView={isHost}
                                                         currentUserId={myId}
                                                         onApprove={() => onApproveSpeaker(speaker._id)}
-                                                        onRemove={() => onDemoteSpeaker(speaker._id)}
+                                                        onModerate={(userId, name, isSpeaker) =>
+                                                            setModerationTarget({ userId, name, isSpeaker })
+                                                        }
                                                     />
                                                 ))}
                                             </ScrollView>
                                             <View style={tw`px-4 pt-4 pb-2 border-t border-white/10`}>
                                                 <PoppinsTextSemibold style={tw`text-sm text-white/80 mb-3`}>
                                                     Listeners ({listeners.length})
-                                                    {connectedListenersCount < listeners.length && 
+                                                    {connectedListenersCount < listeners.length &&
                                                         ` • ${connectedListenersCount} connected`}
                                                 </PoppinsTextSemibold>
                                             </View>
                                         </>
                                     )}
-                                    
+
                                     <PoppinsText style={tw`text-xs text-white/60 px-4 py-2`}>
                                         People currently in the room
                                     </PoppinsText>
@@ -763,21 +1109,30 @@ export default function VoiceRoomInterface(props) {
                                         data={listeners}
                                         keyExtractor={(item) => item._id}
                                         contentContainerStyle={tw`p-4 pt-0`}
-                                        renderItem={({ item }) => (
-                                            <ListenerCard
-                                                listener={{
-                                                    userId: item._id,
-                                                    name: item.name,
-                                                    avatar: item.avatar,
-                                                    isConnected: item.isConnected,
-                                                    isRequestingSpeaker: item.requestedToSpeak, // ✅ Now works
-                                                }}
-                                                isHostView={isHost}
-                                                currentUserId={myId}
-                                                onApprove={() => onApproveSpeaker(item._id)}
-                                                onRemove={() => onDemoteSpeaker(item._id)}
-                                            />
-                                        )}
+                                        renderItem={({ item }) => {
+                                            // ✅ Check if this listener has a pending request
+                                            const hasRequest = voiceRequests.some(
+                                                r => String(r.userId) === String(item._id)
+                                            );
+
+                                            return (
+                                                <ListenerCard
+                                                    listener={{
+                                                        userId: item._id,
+                                                        name: item.name,
+                                                        avatar: item.avatar,
+                                                        isConnected: item.isConnected,
+                                                    }}
+                                                    isRequesting={hasRequest}
+                                                    isHostView={isHost}
+                                                    currentUserId={myId}
+                                                    onApprove={() => onApproveSpeaker(item._id)}
+                                                    onModerate={(userId, name, isSpeaker) =>
+                                                        setModerationTarget({ userId, name, isSpeaker: false })
+                                                    }
+                                                />
+                                            );
+                                        }}
                                         ListHeaderComponent={sortedSpeakers.length > 0 ? null : undefined}
                                     />
                                 </>
@@ -827,9 +1182,9 @@ export default function VoiceRoomInterface(props) {
                                     <FlatList
                                         ref={flatListRef}
                                         data={messages}
-                                        // ✅ FIX 4: Safe key extraction with fallbacks
-                                        keyExtractor={(item, index) => 
-                                            item._id ?? item.id ?? `msg-${item.timestamp ?? Date.now()}-${index}`
+                                        // ✅ FIX #3: Safer keyExtractor - uses index as stable fallback
+                                        keyExtractor={(item, index) =>
+                                            item._id ?? item.id ?? `msg-${index}`
                                         }
                                         contentContainerStyle={tw`p-4`}
                                         renderItem={({ item }) => (
@@ -855,34 +1210,61 @@ export default function VoiceRoomInterface(props) {
                                             </View>
                                         }
                                     />
-
                                     {chatEnabled && (
-                                        <View style={tw`flex-row p-4 border-t border-white/10 gap-2`}>
-                                            <TextInput
-                                                style={[
-                                                    tw`flex-1 bg-white/10 border border-white/20 rounded-3xl px-4 py-3 text-white text-sm`,
-                                                    { fontFamily: 'Poppins-Regular' }
-                                                ]}
-                                                value={chatInput}
-                                                onChangeText={setChatInput}
-                                                placeholder="Type a message..."
-                                                placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                                                maxLength={200}
-                                                multiline={false}
-                                            />
-                                            <TouchableOpacity
-                                                style={tw.style(
-                                                    'flex-row items-center bg-violet-500 px-5 py-3 rounded-3xl gap-2',
-                                                    !chatInput.trim() && 'opacity-50'
-                                                )}
-                                                onPress={handleSendMessage}
-                                                disabled={!chatInput.trim()}
-                                            >
-                                                <Ionicons name="arrow-forward" size={20} color="#fff" />
-                                                <PoppinsTextSemibold style={tw`text-sm text-white`}>
-                                                    Send
-                                                </PoppinsTextSemibold>
-                                            </TouchableOpacity>
+                                        <View
+                                            style={[
+                                                tw`border-t border-white/10`,
+                                                {
+                                                    paddingHorizontal: 12,
+                                                    paddingVertical: 12,
+                                                },
+                                            ]}
+                                        >
+                                            <View style={tw`flex-row items-center`}>
+                                                <TextInput
+                                                    style={[
+                                                        {
+                                                            flex: 1,
+                                                            minHeight: 44,
+                                                            backgroundColor: "rgba(255,255,255,0.08)",
+                                                            borderWidth: 1,
+                                                            borderColor: "rgba(255,255,255,0.15)",
+                                                            borderRadius: 24,
+                                                            paddingHorizontal: 14,
+                                                            paddingVertical: 10,
+                                                            fontFamily: "Poppins-Regular",
+                                                            color: "#fff",
+                                                            marginRight: 8, // 🔥 Instead of gap
+                                                        },
+                                                    ]}
+                                                    value={chatInput}
+                                                    onChangeText={setChatInput}
+                                                    placeholder="Type a message..."
+                                                    placeholderTextColor="rgba(255,255,255,0.5)"
+                                                    maxLength={200}
+                                                    multiline={false}
+                                                />
+
+                                                <TouchableOpacity
+                                                    style={[
+                                                        {
+                                                            height: 44,
+                                                            paddingHorizontal: 16,
+                                                            borderRadius: 24,
+                                                            backgroundColor: "#7c3aed", // violet-600 exact
+                                                            justifyContent: "center",
+                                                            alignItems: "center",
+                                                            flexShrink: 0, // 🔥 Prevent shrink distortion
+                                                            opacity: chatInput.trim() ? 1 : 0.5,
+                                                        },
+                                                    ]}
+                                                    onPress={handleSendMessage}
+                                                    disabled={!chatInput.trim()}
+                                                    activeOpacity={0.8}
+                                                >
+                                                    <Ionicons name="arrow-forward" size={18} color="#fff" />
+                                                </TouchableOpacity>
+                                            </View>
                                         </View>
                                     )}
                                 </>
@@ -891,6 +1273,48 @@ export default function VoiceRoomInterface(props) {
                     </Animated.View>
                 </View>
             )}
+
+            {/* ✅ FIX #2: Properly Decline Speaker Request */}
+            {isHost && (
+                <ConfirmModal
+                    visible={Boolean(pendingRequest)}
+                    title="Speaker Request"
+                    message={
+                        pendingRequest
+                            ? `${pendingRequest.participant?.profile?.fullName || "User"} wants to speak`
+                            : ""
+                    }
+                    confirmText="Approve"
+                    cancelText="Decline"
+                    onCancel={() => {
+                        if (!pendingRequest) return;
+                        onDeclineSpeaker?.(pendingRequest.userId);
+                        setPendingRequest(null); // closes immediately
+                    }}
+                    onConfirm={() => {
+                        if (!pendingRequest) return;
+                        onApproveSpeaker?.(pendingRequest.userId);
+                        // 🔴 REMOVED: dispatch(voiceSpeakerApproved(...))
+                        // Only backend call, Redux will sync via voice:instance:sync
+                        setPendingRequest(null); // closes immediately
+                    }}
+                />
+            )}
+
+            {/* Moderation Modal - Pure actions, no Redux mutations */}
+            <ModerationModal
+                visible={Boolean(moderationTarget)}
+                target={moderationTarget}
+                onClose={() => setModerationTarget(null)}
+                onDemote={(userId) => {
+                    onDemoteSpeaker?.(userId);
+                    // No Redux dispatch - wait for backend sync
+                }}
+                onKick={(userId) => {
+                    onRemoveUser?.(userId);
+                    // No Redux dispatch - wait for backend sync
+                }}
+            />
 
             {/* Bottom Controls with mute toggle */}
             <View style={tw`bg-black/50 border-t border-white/10 py-4`}>
@@ -911,12 +1335,13 @@ export default function VoiceRoomInterface(props) {
                         />
                     </TouchableOpacity>
 
+                    {/* ✅ FIX #7: Output mute controlled by LiveKit */}
                     <TouchableOpacity
                         style={tw.style(
                             'w-14 h-14 rounded-full bg-white/10 items-center justify-center',
                             isOutputMuted && 'bg-red-500/30'
                         )}
-                        onPress={() => setIsOutputMuted(!isOutputMuted)}
+                        onPress={() => onToggleOutputMute?.()}
                     >
                         <Ionicons
                             name={isOutputMuted ? "volume-mute" : "volume-high"}

@@ -90,7 +90,6 @@
     "redux-persist": "^6.0.0",
     "socket.io-client": "^4.8.3",
     "twrnc": "^4.11.1",
-    "undefined": "emoji-mart/data",
     "validator": "^13.15.23"
   },
   "private": true

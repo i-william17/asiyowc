@@ -26,6 +26,18 @@
    - ✅ HARDENING: Eager joinedRef setting moved inside success handler
    - ✅ HARDENING: Reconnect handler uses instanceId check instead of joinedRef
    - ✅ HARDENING: Development-only console logs
+   - ✅ ADDED: voice:instance:sync handler for authoritative state updates
+   - ✅ FIXED: Removed delta mutations (voice:user:joined, voice:user:left, etc.)
+   - ✅ FIXED: Pure authoritative state replacement (no merging)
+   - ✅ FIXED: Removed instance from dependency array to prevent listener rebinding
+   - ✅ ADDED: voice:kicked handler for immediate navigation
+   - ✅ ADDED: voice:force:mute handler for WebRTC control
+   - ✅ ADDED: voice:force:unmute handler for WebRTC control
+   - ✅ ADDED: voice:terminate:rtc handler for immediate WebRTC cleanup
+   - ✅ FIXED: Renamed internal onKicked to handleKicked to prevent prop shadowing
+   - ✅ FIXED: Removed duplicate voice:user:kicked handler
+   - ✅ FIXED: Added window existence check for CustomEvent dispatch
+   - ✅ ADDED: voice:chat:toast handler for bottom overlay notifications
 ===================================================== */
 
 import { useEffect, useRef, useCallback, useState } from "react";
@@ -39,24 +51,23 @@ import { loadVoiceSounds, playJoin, playLeave, playReconnect } from "../utils/vo
 
 import {
     voiceJoined,
-    voiceLeft,
+    // voiceLeft,
 
-    voiceUserJoined,
-    voiceUserLeft,
+    // 🔴 REMOVED: voiceUserJoined, voiceUserLeft (now from sync only)
+    // 🔴 REMOVED: voiceSpeakerApproved, voiceSpeakerDemoted (now from sync only)
+    // 🔴 REMOVED: voiceUserMuted, voiceUserUnmuted (now from sync only)
 
     voiceSpeakerRequested,
-    voiceSpeakerApproved,
-    voiceSpeakerDemoted,
     voiceSpeakerDeclined,
 
+    voiceInstanceSynced,
     voiceStageLocked,
     voiceStageUnlocked,
 
-    voiceUserMuted,
-    voiceUserUnmuted,
     voiceUserSpeaking,
 
     voiceChatMessageReceived,
+    voiceChatToastReceived, // ✅ ADDED: Toast action
     voiceChatDisabled,
     voiceChatEnabled,
     voiceChatUserMuted,
@@ -83,7 +94,8 @@ export function useVoiceSocket({
     instanceId,
     enabled = true,
     token,
-    localUserId
+    localUserId,
+    onKicked, // Optional callback for navigation
 }) {
     /* =====================================================
        INTERNAL REFS & STATE
@@ -109,6 +121,9 @@ export function useVoiceSocket({
     const hasEverConnectedRef = useRef(false);
     const soundsLoadedRef = useRef(false);
 
+    const previousSpeakersRef = useRef([]);
+    const previousParticipantsRef = useRef([]);
+
     // ===== HARDENING REFS =====
     const joinInFlightRef = useRef(false);   // prevents duplicate join emits
     const didJoinOkRef = useRef(false);      // true only after successful join
@@ -121,6 +136,7 @@ export function useVoiceSocket({
         soundsLoadedRef.current = true;
     }, [enabled]);
 
+    // We still need instance for sound effects but NOT for dependencies
     const instance = useSelector((s) => s.community.instance);
 
     /* =====================================================
@@ -147,7 +163,7 @@ export function useVoiceSocket({
         const socket = socketRef.current;
         if (!socket) return;
         if (!instanceId) return;
-        
+
         // 🔴 FIX #1: Check both joinedRef and joinInFlightRef
         if (joinedRef.current || joinInFlightRef.current) return;
 
@@ -220,7 +236,7 @@ export function useVoiceSocket({
          */
         if (!enabled) return;
         if (!instanceId) return;
-        
+
         // 🔴 FIX #1: Don't set joinedRef here - let joinInstance handle it on success
         if (joinedRef.current || joinInFlightRef.current) return;
 
@@ -315,7 +331,7 @@ export function useVoiceSocket({
     useEffect(() => {
         const socket = socketRef.current;
         if (!socket) return;
-        
+
         // 🔴 FIX #2: Check instanceId, not joinedRef
         if (!instanceId) return;
 
@@ -388,6 +404,17 @@ export function useVoiceSocket({
 
     /* =====================================================
        SOCKET EVENT BINDINGS
+       ✅ ADDED: voice:instance:sync handler for authoritative state updates
+       🔴 FIXED: Removed all delta mutation handlers (now only sync for structure)
+       🔴 FIXED: Removed instance from dependency array to prevent rebinding
+       ✅ ADDED: voice:kicked handler for immediate navigation
+       ✅ ADDED: voice:force:mute handler for WebRTC control
+       ✅ ADDED: voice:force:unmute handler for WebRTC control
+       ✅ ADDED: voice:terminate:rtc handler for immediate WebRTC cleanup
+       🔴 FIXED: Renamed internal onKicked to handleKicked to prevent prop shadowing
+       🔴 FIXED: Removed duplicate voice:user:kicked handler
+       🔴 FIXED: Added window existence check for CustomEvent dispatch
+       ✅ ADDED: voice:chat:toast handler for bottom overlay notifications
     ===================================================== */
 
     useEffect(() => {
@@ -397,76 +424,173 @@ export function useVoiceSocket({
         const socket = socketRef.current;
 
         /* =====================================================
-           USER PRESENCE - Using named handlers for proper cleanup
+           AUTHORITATIVE STATE SYNC (ONLY STRUCTURAL UPDATES)
+           ✅ Pure replacement, no merging
         ===================================================== */
-        
-        const onUserJoined = ({ userId, role, participant, shouldCreateOffer }) => {
-            if (!participant?._id) return;
+        const onInstanceSync = ({
+            instanceId: syncInstanceId,
+            speakers,
+            participants,
+            chatEnabled,
+            lockedStage,
+        }) => {
+            if (!syncInstanceId || syncInstanceId !== instanceId) return;
 
-            dispatch(voiceUserJoined(participant));
+            const newSpeakers = speakers || [];
+            const newParticipants = participants || [];
 
-            // ✅ Check both participants AND speakers arrays
-            const alreadyPresent =
-                instance?.participants?.some(
-                    (p) => String(p._id) === String(participant._id)
-                ) ||
-                instance?.speakers?.some(
-                    (p) => String(p._id) === String(participant._id)
-                );
+            const prevSpeakers = previousSpeakersRef.current || [];
+            const prevParticipants = previousParticipantsRef.current || [];
 
-            // 🔊 play sound ONLY for real new joins, not reconnects
-            if (!alreadyPresent && participant._id !== localUserId) {
-                playJoin();
+            // Convert to ID sets
+            const prevIds = new Set([
+                ...prevSpeakers.map(u => String(u._id)),
+                ...prevParticipants.map(u => String(u._id)),
+            ]);
+
+            const newIds = new Set([
+                ...newSpeakers.map(u => String(u._id)),
+                ...newParticipants.map(u => String(u._id)),
+            ]);
+
+            // Detect joins
+            for (const id of newIds) {
+                if (!prevIds.has(id) && id !== String(localUserId)) {
+                    playJoin();
+                }
             }
 
-            // ✅ WebRTC hook listens directly to voice:user:joined
-        };
-
-        const onRoomHydrated = ({ room, instance }) => {
-            dispatch(voiceJoined({
-                room,
-                instance,
-                reconnected: true,
-            }));
-        };
-
-        const onUserLeft = ({ userId }) => {
-            dispatch(voiceUserLeft({ userId }));
-
-            // 🔊 DO NOT play sound for self
-            if (userId !== localUserId) {
-                playLeave();
+            // Detect leaves
+            for (const id of prevIds) {
+                if (!newIds.has(id) && id !== String(localUserId)) {
+                    playLeave();
+                }
             }
 
-            // ✅ WebRTC hook listens directly to voice:user:left
-        };
+            // Store for next comparison
+            previousSpeakersRef.current = newSpeakers;
+            previousParticipantsRef.current = newParticipants;
 
-        const onRoomEnded = () => {
-            dispatch(voiceRoomEnded());
-        };
-
-        const onHostChanged = ({ userId }) => {
-            dispatch(voiceHostChanged({ userId }));
+            dispatch(
+                voiceInstanceSynced({
+                    instanceId: syncInstanceId,
+                    speakers: newSpeakers,
+                    participants: newParticipants,
+                    chatEnabled,
+                    lockedStage,
+                })
+            );
         };
 
         /* =====================================================
-           SPEAKER / STAGE CONTROL
+           KICK HANDLER - Immediate navigation
+           🔴 FIXED: Renamed to handleKicked to avoid prop shadowing
         ===================================================== */
+        const handleKicked = ({ instanceId: kickedInstanceId }) => {
+            if (kickedInstanceId !== instanceId) return;
 
-        const onSpeakerRequested = ({ userId, meta }) => {
-            dispatch(voiceSpeakerRequested({ userId, meta }));
+            if (process.env.NODE_ENV === "development") {
+                console.log("[voice] kicked from instance:", instanceId);
+            }
+
+            // Mark as left to prevent further emits
+            leftRef.current = true;
+            didJoinOkRef.current = false;
+            joinedRef.current = false;
+
+            // Clear heartbeat
+            if (heartbeatRef.current) {
+                clearInterval(heartbeatRef.current);
+                heartbeatRef.current = null;
+            }
+
+            // Dispatch user removal
+            dispatch(voiceUserRemoved({ userId: localUserId }));
+
+            // Optional callback for navigation
+            onKicked?.();
         };
 
-        const onSpeakerApproved = ({ userId }) => {
-            dispatch(voiceSpeakerApproved({ userId }));
+        /* =====================================================
+           FORCE MUTE/UNMUTE HANDLERS - For WebRTC control
+           🔴 FIXED: Added window existence check
+        ===================================================== */
+        const onForceMute = ({ instanceId: muteInstanceId }) => {
+            if (muteInstanceId !== instanceId) return;
+
+            if (process.env.NODE_ENV === "development") {
+                console.log("[voice] force mute received");
+            }
+
+            // ✅ Safe dispatch with window check
+            if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                    new CustomEvent("voice:force:mute", { 
+                        detail: { instanceId } 
+                    })
+                );
+            }
+        };
+
+        const onForceUnmute = ({ instanceId: unmuteInstanceId }) => {
+            if (unmuteInstanceId !== instanceId) return;
+
+            if (process.env.NODE_ENV === "development") {
+                console.log("[voice] force unmute received");
+            }
+
+            if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                    new CustomEvent("voice:force:unmute", { 
+                        detail: { instanceId } 
+                    })
+                );
+            }
+        };
+
+        /* =====================================================
+           TERMINATE RTC HANDLER - Immediate WebRTC cleanup
+           🔴 FIXED: Added window existence check
+        ===================================================== */
+        const onTerminateRTC = ({ instanceId: terminateInstanceId }) => {
+            if (terminateInstanceId !== instanceId) return;
+
+            if (process.env.NODE_ENV === "development") {
+                console.log("[voice] terminate RTC received");
+            }
+
+            if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                    new CustomEvent("voice:terminate:rtc", { 
+                        detail: { instanceId } 
+                    })
+                );
+            }
+        };
+
+        /* =====================================================
+           EPHEMERAL EVENTS (Non-structural)
+           These are fine because they don't affect core membership
+        ===================================================== */
+
+        const onSpeakerRequested = ({ participant, meta }) => {
+            if (!participant?._id) return;
+
+            dispatch(
+                voiceSpeakerRequested({
+                    userId: participant._id,
+                    participant,
+                    meta,
+                })
+            );
         };
 
         const onSpeakerDeclined = ({ userId }) => {
             dispatch(voiceSpeakerDeclined({ userId }));
         };
 
-        const onSpeakerDemoted = ({ userId }) => {
-            dispatch(voiceSpeakerDemoted({ userId }));
+        const onUserSpeaking = ({ userId, isSpeaking }) => {
+            dispatch(voiceUserSpeaking({ userId, isSpeaking }));
         };
 
         const onStageLocked = () => {
@@ -477,28 +601,13 @@ export function useVoiceSocket({
             dispatch(voiceStageUnlocked());
         };
 
-        /* =====================================================
-           AUDIO SIGNALING (NO WEBRTC)
-        ===================================================== */
-
-        const onUserMuted = ({ userId }) => {
-            dispatch(voiceUserMuted({ userId }));
-        };
-
-        const onUserUnmuted = ({ userId }) => {
-            dispatch(voiceUserUnmuted({ userId }));
-        };
-
-        const onUserSpeaking = ({ userId, isSpeaking }) => {
-            dispatch(voiceUserSpeaking({ userId, isSpeaking }));
-        };
-
-        /* =====================================================
-           CHAT EVENTS
-        ===================================================== */
-
         const onChatMessage = (payload) => {
             dispatch(voiceChatMessageReceived(payload));
+        };
+
+        // ✅ ADDED: Toast notification handler
+        const onChatToast = (payload) => {
+            dispatch(voiceChatToastReceived(payload));
         };
 
         const onChatDisabled = () => {
@@ -517,10 +626,6 @@ export function useVoiceSocket({
             dispatch(voiceChatUserUnmuted({ userId }));
         };
 
-        /* =====================================================
-           RECORDING EVENTS
-        ===================================================== */
-
         const onRecordingStarted = () => {
             dispatch(voiceRecordingStarted());
         };
@@ -529,98 +634,78 @@ export function useVoiceSocket({
             dispatch(voiceRecordingReady({ replayUrl }));
         };
 
-        /* =====================================================
-           MODERATION EVENTS
-        ===================================================== */
-
-        const onUserKicked = ({ userId }) => {
-            dispatch(voiceUserRemoved({ userId }));
+        const onRoomEnded = () => {
+            dispatch(voiceRoomEnded());
         };
 
-        const onUserBanned = ({ userId }) => {
-            dispatch(voiceUserBanned({ userId }));
+        const onHostChanged = ({ userId }) => {
+            dispatch(voiceHostChanged({ userId }));
         };
 
         /* =====================================================
            REGISTER ALL LISTENERS
+           🔴 FIXED: Removed duplicate voice:user:kicked handler
+           ✅ ADDED: voice:chat:toast listener
         ===================================================== */
 
-        // User presence
-        socket.on("voice:user:joined", onUserJoined);
-        socket.on("voice:room:hydrated", onRoomHydrated);
-        socket.on("voice:user:left", onUserLeft);
-        socket.on("voice:room:ended", onRoomEnded);
-        socket.on("voice:host:changed", onHostChanged);
+        // Authoritative state sync (only structural source of truth)
+        socket.on("voice:instance:sync", onInstanceSync);
 
-        // Speaker/stage control
+        // Moderation events
+        socket.on("voice:kicked", handleKicked);
+        socket.on("voice:force:mute", onForceMute);
+        socket.on("voice:force:unmute", onForceUnmute);
+        socket.on("voice:terminate:rtc", onTerminateRTC);
+
+        // Ephemeral events (non-structural)
         socket.on("voice:speaker:requested", onSpeakerRequested);
-        socket.on("voice:speaker:approved", onSpeakerApproved);
         socket.on("voice:speaker:declined", onSpeakerDeclined);
-        socket.on("voice:speaker:demoted", onSpeakerDemoted);
+        socket.on("voice:user:speaking", onUserSpeaking);
         socket.on("voice:stage:locked", onStageLocked);
         socket.on("voice:stage:unlocked", onStageUnlocked);
-
-        // Audio signaling
-        socket.on("voice:user:muted", onUserMuted);
-        socket.on("voice:user:unmuted", onUserUnmuted);
-        socket.on("voice:user:speaking", onUserSpeaking);
-
-        // Chat events
         socket.on("voice:chat:message", onChatMessage);
+        socket.on("voice:chat:toast", onChatToast); // ✅ ADDED: Toast listener
         socket.on("voice:chat:disabled", onChatDisabled);
         socket.on("voice:chat:enabled", onChatEnabled);
         socket.on("voice:chat:user:muted", onChatUserMuted);
         socket.on("voice:chat:user:unmuted", onChatUserUnmuted);
-
-        // Recording events
         socket.on("voice:recording:started", onRecordingStarted);
         socket.on("voice:recording:ready", onRecordingReady);
-
-        // Moderation events
-        socket.on("voice:user:kicked", onUserKicked);
-        socket.on("voice:user:banned", onUserBanned);
+        socket.on("voice:room:ended", onRoomEnded);
+        socket.on("voice:host:changed", onHostChanged);
 
         /* =====================================================
            CLEANUP - Using named handlers for each event
         ===================================================== */
 
         return () => {
-            // User presence
-            socket.off("voice:user:joined", onUserJoined);
-            socket.off("voice:room:hydrated", onRoomHydrated);
-            socket.off("voice:user:left", onUserLeft);
-            socket.off("voice:room:ended", onRoomEnded);
-            socket.off("voice:host:changed", onHostChanged);
+            // Authoritative state sync
+            socket.off("voice:instance:sync", onInstanceSync);
 
-            // Speaker/stage control
+            // Moderation events
+            socket.off("voice:kicked", handleKicked);
+            socket.off("voice:force:mute", onForceMute);
+            socket.off("voice:force:unmute", onForceUnmute);
+            socket.off("voice:terminate:rtc", onTerminateRTC);
+
+            // Ephemeral events
             socket.off("voice:speaker:requested", onSpeakerRequested);
-            socket.off("voice:speaker:approved", onSpeakerApproved);
             socket.off("voice:speaker:declined", onSpeakerDeclined);
-            socket.off("voice:speaker:demoted", onSpeakerDemoted);
+            socket.off("voice:user:speaking", onUserSpeaking);
             socket.off("voice:stage:locked", onStageLocked);
             socket.off("voice:stage:unlocked", onStageUnlocked);
-
-            // Audio signaling
-            socket.off("voice:user:muted", onUserMuted);
-            socket.off("voice:user:unmuted", onUserUnmuted);
-            socket.off("voice:user:speaking", onUserSpeaking);
-
-            // Chat events
             socket.off("voice:chat:message", onChatMessage);
+            socket.off("voice:chat:toast", onChatToast); // ✅ ADDED: Toast cleanup
             socket.off("voice:chat:disabled", onChatDisabled);
             socket.off("voice:chat:enabled", onChatEnabled);
             socket.off("voice:chat:user:muted", onChatUserMuted);
             socket.off("voice:chat:user:unmuted", onChatUserUnmuted);
-
-            // Recording events
             socket.off("voice:recording:started", onRecordingStarted);
             socket.off("voice:recording:ready", onRecordingReady);
-
-            // Moderation events
-            socket.off("voice:user:kicked", onUserKicked);
-            socket.off("voice:user:banned", onUserBanned);
+            socket.off("voice:room:ended", onRoomEnded);
+            socket.off("voice:host:changed", onHostChanged);
         };
-    }, [enabled, dispatch, instance, localUserId]);
+    }, [enabled, dispatch, localUserId, instanceId, onKicked]); // 🔴 FIXED: Removed instance from deps!
 
     /* =====================================================
        EMIT HELPER
@@ -629,14 +714,22 @@ export function useVoiceSocket({
 
     const emit = useCallback(
         (event, payload = {}) => {
-            // ✅ Safety: Don't emit if no instanceId
+            // ✅ Safety: Don't emit if no instanceId or we've been kicked/left
             if (!instanceId) {
                 if (process.env.NODE_ENV === "development") {
                     console.warn(`[voice] Attempted to emit ${event} without instanceId`);
                 }
                 return;
             }
-            
+
+            // Don't emit if we've been kicked or manually left
+            if (leftRef.current || !didJoinOkRef.current) {
+                if (process.env.NODE_ENV === "development") {
+                    console.warn(`[voice] Attempted to emit ${event} after leave/kick`);
+                }
+                return;
+            }
+
             socketRef.current?.emit(event, {
                 instanceId,
                 ...payload,
@@ -700,6 +793,8 @@ export function useVoiceSocket({
 
             if (didJoinOkRef.current) {
                 emit("voice:leave");
+                didJoinOkRef.current = false;
+                joinedRef.current = false;
             }
         },
 
@@ -712,5 +807,5 @@ export function useVoiceSocket({
             emit("voice:moderation:kick", { userId }),
         banUser: (userId) =>
             emit("voice:moderation:ban", { userId }),
-    };   
+    };
 }

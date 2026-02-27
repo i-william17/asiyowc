@@ -1,6 +1,32 @@
 // models/Group.js
 const mongoose = require('mongoose');
 
+/* =====================================================
+   PRIVATE GROUP INVITE TOKENS
+===================================================== */
+const inviteTokenSchema = new mongoose.Schema(
+  {
+    tokenHash: {
+      type: String,
+      required: true
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    },
+    expiresAt: {
+      type: Date,
+      default: null
+    }
+  },
+  { _id: false }
+);
+
 const groupSchema = new mongoose.Schema(
   {
     name: {
@@ -12,7 +38,7 @@ const groupSchema = new mongoose.Schema(
 
     description: {
       type: String,
-      maxlength: 500
+      maxlength: 1000
     },
 
     avatar: {
@@ -50,12 +76,6 @@ const groupSchema = new mongoose.Schema(
       }
     ],
 
-    /**
-     * 🔥 SINGLE GROUP CHAT (AUTHORITATIVE)
-     * - Created ONCE when group is created
-     * - Reused by all members
-     * - Users gain access when they join the group
-     */
     chat: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Chat',
@@ -63,11 +83,20 @@ const groupSchema = new mongoose.Schema(
       index: true
     },
 
-
     privacy: {
       type: String,
-      enum: ['public', 'private', 'invite', 'system'],
+      enum: ['public', 'private', 'system'],
       default: 'public'
+    },
+
+    /**
+     * 🔐 PRIVATE GROUP INVITE LINKS
+     * - Used only for private groups
+     * - Stored as hashed tokens
+     */
+    inviteTokens: {
+      type: [inviteTokenSchema],
+      default: []
     },
 
     posts: [

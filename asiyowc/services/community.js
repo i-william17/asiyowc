@@ -57,11 +57,43 @@ export const communityService = {
     }).then(json);
   },
 
-  joinGroup: (groupId, token) => {
+  createGroup: (payload, token) => {
+    if (!payload?.name || payload.name.trim().length < 2) {
+      throw new Error("Group name required");
+    }
+
+    const cleanPayload = {
+      name: payload.name.trim(),
+      description: payload.description || "",
+      avatar: payload.avatar || null,
+      privacy: payload.privacy || "public",
+    };
+
+    return fetch(`${server}/community/groups`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify(cleanPayload),
+    }).then(json);
+  },
+
+  joinGroup: (groupId, token, inviteToken = null) => {
     const id = normalizeId(groupId);
     if (!id) throw new Error("Invalid group id");
 
     return fetch(`${server}/community/groups/${id}/join`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify(
+        inviteToken ? { inviteToken } : {}
+      ),
+    }).then(json);
+  },
+
+  generateGroupInviteLink: (groupId, token) => {
+    const id = normalizeId(groupId);
+    if (!id) throw new Error("Invalid group id");
+
+    return fetch(`${server}/community/groups/${id}/invite-link`, {
       method: "POST",
       headers: headers(token),
     }).then(json);
@@ -88,6 +120,15 @@ export const communityService = {
     }).then(json);
   },
 
+  deleteGroup: (groupId, token) => {
+    const id = normalizeId(groupId);
+    if (!id) throw new Error("Invalid group id");
+
+    return fetch(`${server}/community/groups/${id}`, {
+      method: "DELETE",
+      headers: headers(token),
+    }).then(json);
+  },
   /* ============================================================
      GROUP CHAT (🔥 FIXED + ALIGNED)
   ============================================================ */
@@ -261,6 +302,16 @@ export const communityService = {
       method: "POST",
       headers: headers(token),
       body: JSON.stringify(payload),
+    }).then(json);
+  },
+
+  deleteChat: (chatId, token) => {
+    const id = normalizeId(chatId);
+    if (!id) throw new Error("Invalid chat id");
+
+    return fetch(`${server}/community/chats/${id}`, {
+      method: "DELETE",
+      headers: headers(token),
     }).then(json);
   },
 
@@ -507,6 +558,29 @@ export const communityService = {
   /* ============================================================
      VOICE
   ============================================================ */
+  /* ============================================================
+     VOICE
+  ============================================================ */
+
+  createVoice: (payload, token) => {
+    if (!payload?.title || payload.title.trim().length < 2) {
+      throw new Error("Voice title required");
+    }
+
+    const cleanPayload = {
+      title: payload.title.trim(),
+      ...(payload.group && { group: normalizeId(payload.group) }),
+      ...(payload.hub && { hub: normalizeId(payload.hub) }),
+      ...(payload.startsAt && { startsAt: payload.startsAt }),
+      ...(payload.endsAt && { endsAt: payload.endsAt }),
+    };
+
+    return fetch(`${server}/community/voice`, {
+      method: "POST",
+      headers: headers(token),
+      body: JSON.stringify(cleanPayload),
+    }).then(json);
+  },
 
   getVoices: (token) =>
     fetch(`${server}/community/voice`, {
@@ -539,6 +613,16 @@ export const communityService = {
       method: "PUT",
       headers: headers(token),
       body: JSON.stringify(payload || {}),
+    }).then(json);
+  },
+
+  deleteVoice: (voiceId, token) => {
+    const id = normalizeId(voiceId);
+    if (!id) throw new Error("Invalid voice id");
+
+    return fetch(`${server}/community/voice/${id}`, {
+      method: "DELETE",
+      headers: headers(token),
     }).then(json);
   },
 

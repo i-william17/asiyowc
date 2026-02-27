@@ -36,6 +36,7 @@ import {
   updateMessageReceipt,
   clearSelectedChat,
   reportContent,
+  deleteChat,
   updateBlockedUsers,
 } from "../../store/slices/communitySlice";
 
@@ -257,6 +258,9 @@ export default function ChatInterface({ chatId }) {
 
   /* ================= REACTION MODAL ================= */
   const [reactionModalMessageId, setReactionModalMessageId] = useState(null);
+
+  const [confirmDeleteChatVisible, setConfirmDeleteChatVisible] = useState(false);
+  const [deletingChat, setDeletingChat] = useState(false);
 
   const isBlocked = useMemo(() => {
     const blocked = Array.isArray(selectedChat?.blockedUsers)
@@ -1895,7 +1899,7 @@ export default function ChatInterface({ chatId }) {
 
                 {/* ================= DELETE CHAT ================= */}
                 <Pressable
-                  onPress={handleDeleteChat}
+                  onPress={() => setConfirmDeleteChatVisible(true)}
                   style={tw`flex-row items-center justify-between px-4 py-4 bg-red-100 border border-red-200 rounded-2xl mt-6`}
                 >
                   <View style={tw`flex-row items-center`}>
@@ -2174,6 +2178,32 @@ export default function ChatInterface({ chatId }) {
               setContextMessage(null);
             }
           );
+        }}
+      />
+
+      <ConfirmModal
+        visible={confirmDeleteChatVisible}
+        title="Delete chat?"
+        message="This chat will be permanently removed from your conversations."
+        confirmText="Delete"
+        destructive
+        loading={deletingChat}
+        onCancel={() => setConfirmDeleteChatVisible(false)}
+        onConfirm={async () => {
+          if (deletingChat) return;
+
+          try {
+            setDeletingChat(true);
+
+            await dispatch(deleteChat(chatId)).unwrap();
+
+            setConfirmDeleteChatVisible(false);
+            router.back();
+          } catch (err) {
+            console.warn("Delete chat failed:", err);
+          } finally {
+            setDeletingChat(false);
+          }
         }}
       />
 

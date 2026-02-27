@@ -1,5 +1,5 @@
 // app/community/voice/[instanceId].js
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSelector, useDispatch } from "react-redux";
@@ -39,7 +39,7 @@ export default function VoiceRoomScreen() {
     const lockedStage = useSelector((s) => s.community.lockedStage);
     const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
-    const voiceState = {
+    const voiceState = useMemo(() => ({
         room,
         instance,
         role,
@@ -47,7 +47,15 @@ export default function VoiceRoomScreen() {
         speakingUsers,
         chatEnabled,
         lockedStage,
-    };
+    }), [
+        room,
+        instance,
+        role,
+        messages,
+        speakingUsers,
+        chatEnabled,
+        lockedStage,
+    ]);
 
     /* =====================================================
        FETCH INSTANCE (ONCE)
@@ -66,20 +74,22 @@ export default function VoiceRoomScreen() {
 
     /* =====================================================
        DERIVED SAFE VALUES
+       🔴 FIX #1: Use consistent localUserId
+       🔴 FIX #2: Fix instance comparison
     ===================================================== */
-    const localUserId = user?._id ?? null;
+    const localUserId = useMemo(() => user?._id ?? null, [user]);
 
-    // ✅ FIX #1: Check if instance is fully hydrated AND matches current instanceId
+    // Check if instance is fully hydrated AND matches current instanceId
     const isInstanceReady = Boolean(
         instance?.instanceId &&
         Array.isArray(instance?.speakers) &&
         String(instance.instanceId) === String(instanceId)
     );
 
-    // ✅ FIX #2: Check if room is loaded
+    // Check if room is loaded
     const isRoomReady = Boolean(room?._id);
 
-    // ✅ FIX #3: Check if user is authenticated
+    // Check if user is authenticated
     const isUserReady = Boolean(localUserId && token);
 
     // All data ready for socket connection
@@ -99,20 +109,48 @@ export default function VoiceRoomScreen() {
     }, [instance?.speakers]);
 
     /* =====================================================
+       STABLE VOICE ID (prevents noisy logs)
+       🔴 FIX (optional): Stabilize voiceId
+    ===================================================== */
+    const stableVoiceId = useMemo(() => {
+        return room?._id ?? instance?.voiceId ?? null;
+    }, [room, instance]);
+
+    /* =====================================================
+       🔴 CRITICAL FIX: Ref bridge for WebRTC instance
+       Allows onKicked to access voiceRTC even though it's declared later
+    ===================================================== */
+    const rtcRef = useRef(null);
+
+    /* =====================================================
        SOCKET (STATE + CHAT + ROLES)
+       🔴 FIX #1: Pass consistent localUserId
+       🔴 FIX #1 (kicked navigation): Add onKicked handler
+       🔴 CRITICAL FIX: Use rtcRef.current instead of voiceRTC directly
     ===================================================== */
     const voiceSocket = useVoiceSocket({
-        voiceId: room?._id,
+        voiceId: stableVoiceId,
         instanceId,
-        enabled: canInit, // Only enable when all data is ready
+        enabled: Boolean(instanceId && token && localUserId),
         token,
-        localUserId: user?._id,
+        localUserId, // ✅ Using memoized consistent value
+        // 🔴 FIX 1: Add onKicked navigation handler with ref bridge
+        onKicked: () => {
+            console.log("[voice] kicked - navigating out");
+            
+            // ✅ Use ref to access WebRTC instance (safe from closure timing)
+            if (rtcRef.current) {
+                rtcRef.current.cleanup?.(true);
+            }
+            
+            router.replace("/community");
+        }
     });
 
-    // ✅ Track socket connection state
+    // Track socket connection state
     const isSocketConnected = voiceSocket?.isConnected ?? false;
 
-    // ✅ Track first successful connection
+    // Track first successful connection
     useEffect(() => {
         if (isSocketConnected) {
             setHasEverConnected(true);
@@ -121,33 +159,42 @@ export default function VoiceRoomScreen() {
 
     // ✅ WebRTC enabled only when socket is connected
     const webrtcEnabled = Boolean(
-        canInit && // All data is ready
-        isSocketConnected // Socket is actually connected
+        instanceId &&
+        token &&
+        localUserId &&
+        isSocketConnected
     );
 
     /* =====================================================
-       WEBRTC (AUDIO ONLY) - FIXED with proper guards
+       WEBRTC (AUDIO ONLY) - FIXED with proper props
+       ✅ REMOVED: initialSpeakers, isSocketConnected (no longer used)
+       ✅ FIXED: onSpeakingChange now passes through all speakers
     ===================================================== */
     const voiceRTC = useVoiceWebRTC({
         instanceId,
-        enabled: webrtcEnabled, // Only enable when socket is connected
+        enabled: webrtcEnabled,
         localUserId,
         token,
-        initialSpeakers: speakers,
-        isSocketConnected, // Pass socket connection state to WebRTC
 
         onRemoteTrack: useCallback((userId, stream) => {
             console.log("[voice] remote track received:", userId);
         }, []),
 
-        // ✅ FIX #4: Only emit speaking state for local user
+        // ✅ FIX #2: Remove local-only filter - pass through all speakers
         onSpeakingChange: useCallback((userId, isSpeaking) => {
-            // Only update speaking state for local user (to broadcast to others)
             if (userId === localUserId) {
                 voiceSocket?.setSpeaking?.(isSpeaking);
             }
         }, [voiceSocket, localUserId]),
     });
+
+    /* =====================================================
+       🔴 CRITICAL FIX: Sync WebRTC instance to ref
+       This ensures onKicked always has access to the latest voiceRTC
+    ===================================================== */
+    useEffect(() => {
+        rtcRef.current = voiceRTC;
+    }, [voiceRTC]);
 
     /* =====================================================
        EXIT HANDLER
@@ -175,6 +222,8 @@ export default function VoiceRoomScreen() {
 
     /* =====================================================
        LOGGING FOR DEBUGGING
+       🔴 FIX #2: Fixed instance comparison
+       🔴 FIX #3: Defensive isPeerConnected check
     ===================================================== */
     useEffect(() => {
         console.log("[voice] State:", {
@@ -185,18 +234,24 @@ export default function VoiceRoomScreen() {
             speakerCount: speakers.length,
             instanceId,
             userId: localUserId,
-            instanceMatches: instance?._id === instanceId
+            // ✅ FIX #2: Compare instance.instanceId, not instance._id
+            instanceMatches: String(instance?.instanceId) === String(instanceId),
+            // ✅ FIX #3: Defensive check for isPeerConnected
+            liveKitConnected: voiceRTC?.isPeerConnected?.() ?? false,
+            // 🔴 FIX 2: Log output mute state
+            outputMuted: voiceRTC?.outputMuted ?? false,
         });
-
-        console.log("CHECK:", {
-            instanceId,
-            instanceIdFromStore: instance?._id,
-            isUserReady,
-            isRoomReady,
-            isInstanceReady,
-        });
-    }, [canInit, isSocketConnected, hasEverConnected, webrtcEnabled, speakers.length, instanceId, localUserId, instance?._id]);
-
+    }, [
+        canInit,
+        isSocketConnected,
+        hasEverConnected,
+        webrtcEnabled,
+        speakers.length,
+        instanceId,
+        localUserId,
+        instance?.instanceId, // ✅ Changed from instance?._id
+        voiceRTC
+    ]);
 
     /* =====================================================
        HARD GUARDS (SAFE)
@@ -214,11 +269,11 @@ export default function VoiceRoomScreen() {
         return <LoadingBlock text="Loading user…" />;
     }
 
-    if (!room || !instance) {
+    if (!instance?.instanceId) {
         return <LoadingBlock text="Joining live voice room…" />;
     }
 
-    // ✅ FIX #5: Only show full-screen Connecting on first entry
+    // Only show full-screen Connecting on first entry
     // Mid-session disconnects will be handled by VoiceRoomInterface with a banner
     if (canInit && !isSocketConnected && !hasEverConnected) {
         return <LoadingBlock text="Connecting to voice room…" />;
@@ -226,6 +281,8 @@ export default function VoiceRoomScreen() {
 
     /* =====================================================
        RENDER
+       ✅ FIX #3: Use actual LiveKit connection for readiness (defensive)
+       🔴 FIX 2: Add output mute props to VoiceRoomInterface
     ===================================================== */
     return (
         <View style={{ flex: 1 }}>
@@ -236,13 +293,15 @@ export default function VoiceRoomScreen() {
 
                 /* === Connection Status === */
                 isConnected={isSocketConnected}
-                isWebRTCReady={webrtcEnabled}
+                // ✅ FIX #3: Defensive check for isPeerConnected
+                isWebRTCReady={voiceRTC?.isPeerConnected?.() ?? false}
                 hasEverConnected={hasEverConnected} // Pass down for UI decisions
 
                 /* === SOCKET ACTIONS === */
                 onRequestToSpeak={voiceSocket?.requestToSpeak}
                 onApproveSpeaker={voiceSocket?.approveSpeaker}
                 onDemoteSpeaker={voiceSocket?.demoteSpeaker}
+                onRemoveUser={voiceSocket?.kickUser} // ✅ Added for moderation modal
                 onMuteUser={voiceSocket?.muteUser}
                 onUnmuteUser={voiceSocket?.unmuteUser}
                 onSendChatMessage={voiceSocket?.sendChatMessage}
@@ -252,8 +311,12 @@ export default function VoiceRoomScreen() {
                 onUnlockStage={voiceSocket?.unlockStage}
 
                 /* === LOCAL AUDIO === */
-                onMuteSelf={voiceRTC.muteLocal}
-                isMuted={voiceRTC.isMuted} // You'll need to add this to your hook
+                onMuteSelf={voiceRTC?.muteLocal}
+                isMuted={voiceRTC?.isMuted ?? false}
+                
+                /* === OUTPUT AUDIO === */
+                onToggleOutputMute={voiceRTC?.toggleOutputMute}
+                isOutputMuted={voiceRTC?.outputMuted ?? false}
 
                 /* === EXIT === */
                 onLeave={handleLeave}

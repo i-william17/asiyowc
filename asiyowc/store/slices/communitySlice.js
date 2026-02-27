@@ -196,19 +196,61 @@ export const fetchVoiceInstance = createAsyncThunk(
 /* ===========================
    JOIN / LEAVE GROUP
 =========================== */
+export const createGroup = createAsyncThunk(
+  "community/createGroup",
+  async (payload, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+
+      const res = await communityService.createGroup(
+        payload,
+        token
+      );
+
+      return res?.data;
+    } catch (e) {
+      return rejectWithValue(
+        e?.message || "Failed to create group"
+      );
+    }
+  }
+);
+
 export const joinGroup = createAsyncThunk(
   "community/joinGroup",
-  async (groupId, { getState, rejectWithValue }) => {
+  async ({ groupId, inviteToken = null }, { getState, rejectWithValue }) => {
     try {
       const res = await communityService.joinGroup(
         groupId,
-        getState().auth.token
+        getState().auth.token,
+        inviteToken
       );
 
-      console.log("📌 JOIN GROUP RESPONSE:", res);
       return res?.data;
     } catch (e) {
-      return rejectWithValue(e?.message || "Failed to join group");
+      return rejectWithValue(
+        e?.message || "Failed to join group"
+      );
+    }
+  }
+);
+
+export const generateGroupInviteLink = createAsyncThunk(
+  "community/generateGroupInviteLink",
+  async (groupId, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+
+      const res = await communityService.generateGroupInviteLink(
+        groupId,
+        token
+      );
+
+      return res?.data; // { inviteToken, inviteLink }
+    } catch (e) {
+      return rejectWithValue(
+        e?.message || "Failed to generate invite link"
+      );
     }
   }
 );
@@ -224,6 +266,39 @@ export const leaveGroup = createAsyncThunk(
       return res?.data;
     } catch (e) {
       return rejectWithValue(e?.message || "Failed to leave group");
+    }
+  }
+);
+
+export const deleteChat = createAsyncThunk(
+  "community/deleteChat",
+  async (chatId, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+      await communityService.deleteChat(chatId, token);
+      return chatId;
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  }
+);
+
+export const deleteGroup = createAsyncThunk(
+  "community/deleteGroup",
+  async (groupId, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+
+      const res = await communityService.deleteGroup(
+        groupId,
+        token
+      );
+
+      return { groupId };
+    } catch (e) {
+      return rejectWithValue(
+        e?.message || "Failed to delete group"
+      );
     }
   }
 );
@@ -425,6 +500,52 @@ export const reactHubUpdate = createAsyncThunk(
 );
 
 /* ===========================
+   CREATE VOICE ROOM
+=========================== */
+export const createVoiceRoom = createAsyncThunk(
+  "community/createVoiceRoom",
+  async (payload, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+
+      if (!token) throw new Error("Auth token missing");
+
+      const res = await communityService.createVoice(
+        payload,
+        token
+      );
+
+      return res?.data; // backend returns { success, data }
+    } catch (e) {
+      return rejectWithValue(
+        e?.message || "Failed to create voice room"
+      );
+    }
+  }
+);
+
+export const deleteVoiceRoom = createAsyncThunk(
+  "community/deleteVoiceRoom",
+  async (voiceId, { getState, rejectWithValue }) => {
+    try {
+      const token = getState().auth.token;
+
+      const res = await communityService.deleteVoice(
+        voiceId,
+        token
+      );
+
+      return {
+        voiceId,
+        data: res?.data,
+      };
+    } catch (e) {
+      return rejectWithValue(e?.message || "Failed to delete room");
+    }
+  }
+);
+
+/* ===========================
    REPORT CONTENT
 =========================== */
 export const reportContent = createAsyncThunk(
@@ -497,6 +618,10 @@ const communitySlice = createSlice({
     voiceRequests: [],
     lastHeartbeat: null,
     voiceChatMessages: [],
+    /* =====================
+   VOICE TOASTS (EPHEMERAL)
+===================== */
+    chatToasts: [],
     voiceErrors: null, // ✅ Added missing field
 
     /* =====================
@@ -779,6 +904,7 @@ const communitySlice = createSlice({
        - ✅ Source tracking for approvals/demotions
        - ✅ SpeakingUsers cleanup
        - ✅ Data integrity protection
+       - ✅ FIXED: All filtering now uses req.userId
     ===================================================== */
     voiceJoined: (state, action) => {
       const { room, instance, role, chatEnabled, lockedStage, reconnected } =
@@ -879,88 +1005,91 @@ const communitySlice = createSlice({
       delete state.speakingUsers[uid];
     },
 
+    voiceInstanceSynced: (state, action) => {
+      const {
+        instanceId,
+        speakers,
+        participants,
+        chatEnabled,
+        lockedStage,
+      } = action.payload;
+
+      if (!state.instance) return;
+
+      state.instance.instanceId = instanceId;
+      state.instance.speakers = speakers || [];
+      state.instance.participants = participants || [];
+      state.chatEnabled = chatEnabled ?? state.chatEnabled;
+      state.lockedStage = lockedStage ?? state.lockedStage;
+    },
+
     voiceSpeakerRequested: (state, action) => {
       if (!state.instance) return;
 
-      const userId = String(action.payload.userId);
+      const { userId, participant } = action.payload;
 
-      const exists = state.voiceRequests.includes(userId);
+      const exists = state.voiceRequests.some(
+        r => String(r.userId) === String(userId)
+      );
+
       if (!exists) {
-        state.voiceRequests.push(userId);
+        state.voiceRequests.push({
+          userId,
+          participant,
+        });
       }
     },
 
+    // ✅ FIXED: Correct filtering using req.userId
     voiceSpeakerDeclined: (state, action) => {
       const userId = String(action.payload.userId);
 
       state.voiceRequests = state.voiceRequests.filter(
-        id => String(id) !== userId
+        (req) => String(req.userId) !== userId
       );
     },
 
-    // ✅ FIX 3: Optimized - no unnecessary speaker removal/readdition
+    // ✅ FIXED: Correct filtering using req.userId
     voiceSpeakerApproved: (state, action) => {
       if (!state.instance) return;
 
-      // ✅ Safety guards
       state.instance.speakers = state.instance.speakers || [];
       state.instance.participants = state.instance.participants || [];
 
       const userId = String(action.payload.userId);
 
-      // If user is already a speaker, just clear request and return
-      const existingSpeaker = state.instance.speakers.find(
-        s => String(s._id) === userId
-      );
-
-      if (existingSpeaker) {
-        state.voiceRequests = state.voiceRequests.filter(id => id !== userId);
-        return;
-      }
-
-      // Find user in participants
-      const existingParticipant = state.instance.participants.find(
+      // 🔍 Find participant
+      const participant = state.instance.participants.find(
         p => String(p._id) === userId
       );
 
-      if (!existingParticipant) return;
+      if (!participant) return;
 
-      // Remove from participants
-      state.instance.participants = state.instance.participants.filter(
-        p => String(p._id) !== userId
+      // 🟢 If already a speaker, just clear request
+      const alreadySpeaker = state.instance.speakers.some(
+        s => String(s._id) === userId
       );
 
-      // Add to speakers
-      state.instance.speakers.push(existingParticipant);
+      if (!alreadySpeaker) {
+        state.instance.speakers.push(participant);
+      }
 
-      state.voiceRequests = state.voiceRequests.filter(id => id !== userId);
+      // 🧹 Clear raise hand request - FIXED filtering
+      state.voiceRequests = state.voiceRequests.filter(
+        (req) => String(req.userId) !== userId
+      );
     },
 
     voiceSpeakerDemoted: (state, action) => {
       if (!state.instance) return;
 
-      // ✅ Safety guards
       state.instance.speakers = state.instance.speakers || [];
-      state.instance.participants = state.instance.participants || [];
 
       const userId = String(action.payload.userId);
 
-      const user = state.instance.speakers.find(s => String(s._id) === userId);
-      if (!user) return;
-
-      // Remove from speakers
       state.instance.speakers = state.instance.speakers.filter(
         s => String(s._id) !== userId
       );
-
-      // Add to participants (prevent duplicates)
-      const existsInParticipants = state.instance.participants.some(
-        p => String(p._id) === userId
-      );
-
-      if (!existsInParticipants) {
-        state.instance.participants.push(user);
-      }
     },
 
     voiceStageLocked: (state) => {
@@ -981,7 +1110,7 @@ const communitySlice = createSlice({
         list?.find(p => String(p._id) === String(action.payload.userId));
 
       let user = findUser(state.instance.participants) ||
-                 findUser(state.instance.speakers);
+        findUser(state.instance.speakers);
 
       if (user) user.isMuted = true;
     },
@@ -996,7 +1125,7 @@ const communitySlice = createSlice({
         list?.find(p => String(p._id) === String(action.payload.userId));
 
       let user = findUser(state.instance.participants) ||
-                 findUser(state.instance.speakers);
+        findUser(state.instance.speakers);
 
       if (user) user.isMuted = false;
     },
@@ -1011,7 +1140,37 @@ const communitySlice = createSlice({
 
     voiceChatMessageReceived: (state, action) => {
       if (!state.chatEnabled) return;
-      state.voiceChatMessages.push(action.payload);
+
+      const msg = action.payload;
+      if (!msg?._id) return;
+
+      const exists = state.messages.some(
+        (m) => String(m._id) === String(msg._id)
+      );
+
+      if (!exists) {
+        state.messages.push(msg);
+      }
+    },
+
+    voiceChatToastReceived: (state, action) => {
+      const toast = action.payload;
+      if (!toast?._id) return;
+
+      const exists = state.chatToasts.some(
+        (t) => String(t._id) === String(toast._id)
+      );
+
+      if (!exists) {
+        state.chatToasts.push(toast);
+      }
+    },
+
+    clearVoiceChatToast: (state, action) => {
+      const toastId = String(action.payload);
+      state.chatToasts = state.chatToasts.filter(
+        (t) => String(t._id) !== toastId
+      );
     },
 
     voiceChatDisabled: (state) => {
@@ -1063,40 +1222,48 @@ const communitySlice = createSlice({
       }
     },
 
+    // ✅ FIXED: Correct filtering using req.userId
     voiceUserRemoved: (state, action) => {
       const userId = String(action.payload.userId);
-      
+
       if (state.instance) {
         state.instance.speakers = state.instance.speakers?.filter(
           s => String(s._id) !== userId
         ) || [];
-        
+
         state.instance.participants = state.instance.participants?.filter(
           p => String(p._id) !== userId
         ) || [];
       }
-      
-      state.voiceRequests = state.voiceRequests.filter(id => id !== userId);
-      
+
+      // FIXED: Correct filtering
+      state.voiceRequests = state.voiceRequests.filter(
+        (req) => String(req.userId) !== userId
+      );
+
       // ✅ Clean up speakingUsers
       delete state.speakingUsers[userId];
     },
 
+    // ✅ FIXED: Correct filtering using req.userId
     voiceUserBanned: (state, action) => {
       const userId = String(action.payload.userId);
-      
+
       if (state.instance) {
         state.instance.speakers = state.instance.speakers?.filter(
           s => String(s._id) !== userId
         ) || [];
-        
+
         state.instance.participants = state.instance.participants?.filter(
           p => String(p._id) !== userId
         ) || [];
       }
-      
-      state.voiceRequests = state.voiceRequests.filter(id => id !== userId);
-      
+
+      // FIXED: Correct filtering
+      state.voiceRequests = state.voiceRequests.filter(
+        (req) => String(req.userId) !== userId
+      );
+
       // ✅ Clean up speakingUsers
       delete state.speakingUsers[userId];
     },
@@ -1325,24 +1492,122 @@ const communitySlice = createSlice({
         state.error = action.payload || "Failed to load hub";
       })
 
-      .addCase(joinHub.fulfilled, (state, action) => {
+      .addCase(createGroup.pending, (state) => {
+        state.loadingDetail = true;
+        state.error = null;
+      })
+
+      .addCase(createGroup.fulfilled, (state, action) => {
+        state.loadingDetail = false;
+
+        // backend returns: { success, message, data: group }
+        const wrapper = action.payload;
+        const group = wrapper?.data || wrapper; // fallback if service changes
+
+        if (!group?._id) return;
+
+        // ✅ normalize to match getGroups()
+        const normalized = {
+          _id: group._id,
+          name: group.name,
+          description: group.description,
+          avatar: group.avatar,
+          privacy: group.privacy,
+
+          // in group doc: members is array of {user, joinedAt}
+          membersCount: Array.isArray(group.members) ? group.members.length : 1,
+          isMember: true, // creator is always a member
+
+          // in createGroup: group.chat exists
+          chatId: group.chat || null,
+        };
+
+        // ✅ insert or replace if exists
+        const existsIdx = state.groups.findIndex(
+          (g) => String(g._id) === String(normalized._id)
+        );
+
+        if (existsIdx >= 0) {
+          state.groups[existsIdx] = { ...state.groups[existsIdx], ...normalized };
+        } else {
+          state.groups.unshift(normalized);
+        }
+
+        state.selectedGroup = normalized;
+      })
+
+      .addCase(createGroup.rejected, (state, action) => {
+        state.loadingDetail = false;
+        state.error = action.payload || "Failed to create group";
+      })
+
+      .addCase(joinGroup.fulfilled, (state, action) => {
         const payload = action.payload;
         if (!payload?._id) return;
 
-        if (state.selectedHub?._id === payload._id) {
-          state.selectedHub.isMember = true;
-          state.selectedHub.membersCount = payload.membersCount;
+        // 1️⃣ Update selectedGroup if open
+        if (state.selectedGroup?._id === payload._id) {
+          state.selectedGroup.isMember = true;
+          state.selectedGroup.membersCount = payload.membersCount;
         }
 
-        state.hubs = state.hubs.map((hub) =>
-          String(hub._id) === String(payload._id)
+        // 2️⃣ Update groups list
+        state.groups = state.groups.map((group) =>
+          String(group._id) === String(payload._id)
             ? {
-              ...hub,
+              ...group,
               isMember: true,
               membersCount: payload.membersCount,
             }
-            : hub
+            : group
         );
+      })
+
+      .addCase(deleteGroup.pending, (state) => {
+        state.loadingDetail = true;
+        state.error = null;
+      })
+
+      .addCase(deleteGroup.fulfilled, (state, action) => {
+        state.loadingDetail = false;
+
+        const { groupId } = action.payload;
+
+        // Remove from groups list
+        state.groups = state.groups.filter(
+          (g) => String(g._id) !== String(groupId)
+        );
+
+        // Clear selectedGroup if open
+        if (state.selectedGroup?._id === groupId) {
+          state.selectedGroup = null;
+        }
+      })
+
+      .addCase(deleteGroup.rejected, (state, action) => {
+        state.loadingDetail = false;
+        state.error = action.payload || "Failed to delete group";
+      })
+
+      .addCase(deleteChat.fulfilled, (state, action) => {
+        const id = String(action.payload);
+
+        state.chats = state.chats.filter(
+          (c) => String(c._id) !== id
+        );
+
+        if (state.selectedChat?._id === id) {
+          state.selectedChat = null;
+        }
+      })
+
+      .addCase(generateGroupInviteLink.fulfilled, (state, action) => {
+        const { inviteLink, inviteToken } = action.payload || {};
+
+        if (state.selectedGroup) {
+          state.selectedGroup.inviteLink = inviteLink;
+          state.selectedGroup.inviteToken = inviteToken;
+        }
       })
 
       .addCase(leaveHub.fulfilled, (state, action) => {
@@ -1449,6 +1714,73 @@ const communitySlice = createSlice({
         }
       })
 
+      /* =====================================================
+   CREATE VOICE ROOM
+===================================================== */
+
+      .addCase(createVoiceRoom.pending, (state) => {
+        state.loadingDetail = true;
+        state.error = null;
+      })
+
+      .addCase(createVoiceRoom.fulfilled, (state, action) => {
+        state.loadingDetail = false;
+
+        const newVoice = action.payload;
+        if (!newVoice?._id) return;
+
+        // ✅ Add to voices list (top)
+        state.voices.unshift(newVoice);
+
+        // Optional: auto-select newly created room
+        // state.selectedVoice = newVoice;
+      })
+
+      .addCase(createVoiceRoom.rejected, (state, action) => {
+        state.loadingDetail = false;
+        state.error = action.payload || "Failed to create room";
+      })
+
+      .addCase(deleteVoiceRoom.pending, (state) => {
+        state.loadingDetail = true;
+        state.error = null;
+      })
+
+      .addCase(deleteVoiceRoom.fulfilled, (state, action) => {
+        state.loadingDetail = false;
+
+        const { voiceId } = action.payload;
+
+        // 1️⃣ Remove from voices list
+        state.voices = state.voices.filter(
+          (v) => String(v._id) !== String(voiceId)
+        );
+
+        // 2️⃣ If currently inside that room → fully reset session
+        if (state.room?._id === voiceId) {
+          state.room = null;
+          state.instance = null;
+          state.role = null;
+          state.chatEnabled = true;
+          state.lockedStage = false;
+          state.messages = [];
+          state.speakingUsers = {};
+          state.voiceRequests = [];
+          state.voiceChatMessages = [];
+        }
+
+        // 3️⃣ Clear selectedVoice if open in details screen
+        if (state.selectedVoice?._id === voiceId) {
+          state.selectedVoice = null;
+        }
+      })
+
+      .addCase(deleteVoiceRoom.rejected, (state, action) => {
+        state.loadingDetail = false;
+        state.error = action.payload || "Failed to delete room";
+      })
+
+
       // report
       .addCase(reportContent.pending, (state) => {
         state.reportLoading = true;
@@ -1487,6 +1819,7 @@ export const {
   voiceLeft,
   voiceUserJoined,
   voiceUserLeft,
+  voiceInstanceSynced,
   voiceSpeakerRequested,
   voiceSpeakerApproved,
   voiceSpeakerDeclined,
@@ -1497,6 +1830,8 @@ export const {
   voiceUserUnmuted,
   voiceUserSpeaking,
   voiceChatMessageReceived,
+  voiceChatToastReceived,
+  clearVoiceChatToast,
   voiceChatDisabled,
   voiceChatEnabled,
   voiceRoomEnded,
