@@ -233,6 +233,27 @@ const PostCard = ({
     })();
   }, []);
 
+const handleOpenLink = async (url) => {
+  if (!url) return;
+
+  let finalUrl = url.trim();
+
+  if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+    finalUrl = `https://${finalUrl}`;
+  }
+
+  try {
+    const supported = await Linking.canOpenURL(finalUrl);
+    if (supported) {
+      await Linking.openURL(finalUrl);
+    } else {
+      showSnackbar('Cannot open this link', 'error');
+    }
+  } catch (e) {
+    showSnackbar('Failed to open link', 'error');
+  }
+};
+
   // ===== Video Audio Fix =====
   // useEffect(() => {
   //   (async () => {
@@ -418,7 +439,7 @@ const PostCard = ({
           return next;
         });
 
-        setCommentCount((prev) => prev);
+        setCommentCount((prev) => prev + 1);
       }
 
       setCommentText('');
@@ -564,6 +585,11 @@ const PostCard = ({
         shadowRadius: 14,
         shadowOffset: { width: 0, height: 6 },
         elevation: 4,
+
+        // 👇 WEB ONLY CENTERING
+        alignSelf: Platform.OS === 'web' ? 'center' : undefined,
+        width: Platform.OS === 'web' ? '100%' : undefined,
+        maxWidth: Platform.OS === 'web' ? 850 : undefined,
       }}
     >
       {/* ================= HEADER ================= */}
@@ -639,6 +665,44 @@ const PostCard = ({
           >
             {post.content.text}
           </Text>
+        ) : null}
+
+        {/* ================= LINK ================= */}
+        {post.type === 'link' && post.content?.linkUrl ? (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => handleOpenLink(post.content.linkUrl)}
+            style={{
+              marginTop: 14,
+              padding: 16,
+              borderRadius: 16,
+              borderWidth: 1,
+              borderColor: '#E5E7EB',
+              backgroundColor: '#F9FAFB',
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: 'Poppins-SemiBold',
+                fontSize: 14,
+                color: '#6A1B9A',
+                marginBottom: 6,
+              }}
+            >
+              Open Link
+            </Text>
+
+            <Text
+              numberOfLines={2}
+              style={{
+                fontFamily: 'Poppins-Regular',
+                fontSize: 13,
+                color: '#374151',
+              }}
+            >
+              {post.content.linkUrl}
+            </Text>
+          </TouchableOpacity>
         ) : null}
 
         {/* ================= IMAGE ================= */}
@@ -984,7 +1048,7 @@ const PostCard = ({
                     </TouchableOpacity>
 
                     {/* Share to Social Media */}
-                    <TouchableOpacity
+                    {/* <TouchableOpacity
                       onPress={shareToSocialMedia}
                       style={{
                         flex: 1,
@@ -1022,10 +1086,10 @@ const PostCard = ({
                       >
                         Share to Social
                       </Text>
-                    </TouchableOpacity>
+                    </TouchableOpacity> */}
 
                     {/* Share to Chats */}
-                    <TouchableOpacity
+                    {/* <TouchableOpacity
                       onPress={shareToChats}
                       style={{
                         flex: 1,
@@ -1063,10 +1127,10 @@ const PostCard = ({
                       >
                         Share to Chats
                       </Text>
-                    </TouchableOpacity>
+                    </TouchableOpacity> */}
 
                     {/* Share to Groups */}
-                    <TouchableOpacity
+                    {/* <TouchableOpacity
                       onPress={shareToGroups}
                       style={{
                         flex: 1,
@@ -1104,7 +1168,7 @@ const PostCard = ({
                       >
                         Share to Groups
                       </Text>
-                    </TouchableOpacity>
+                    </TouchableOpacity> */}
                   </View>
                 </View>
               </View>
@@ -1191,6 +1255,7 @@ const PostCard = ({
       </Modal>
 
       {/* ================= COMMENTS MODAL ================= */}
+      {/* ================= COMMENTS MODAL ================= */}
       <Modal visible={commentsVisible} animationType="slide" transparent>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -1198,22 +1263,35 @@ const PostCard = ({
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }}>
+
+            {/* ✅ BACKDROP — separate layer */}
             <Pressable
               onPress={closeComments}
               style={{
-                flex: 1,
-                justifyContent: 'center',
-                alignItems: 'center',
-                padding: 20,
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
               }}
+            />
+
+            {/* ✅ MODAL WRAPPER */}
+            <View
+              style={{
+                flex: 1,
+                padding: 20,
+                justifyContent: 'center',
+              }}
+              pointerEvents="box-none"
             >
-              <Pressable
-                onPress={(e) => e.stopPropagation()}
+              <View
                 style={{
                   width: '100%',
                   maxWidth: 520,
-                  height: '80%',
-                  maxHeight: 700,
+                  height: Platform.OS === 'web' ? 700 : '90%',
+                  alignSelf: 'center',
+                  marginTop: Platform.OS === 'web' ? 40 : 80,
                 }}
               >
                 <View
@@ -1230,6 +1308,7 @@ const PostCard = ({
                     elevation: 20,
                   }}
                 >
+
                   {/* ================= HEADER ================= */}
                   <View
                     style={{
@@ -1365,9 +1444,17 @@ const PostCard = ({
                     </View>
                   )}
 
-                  {/* ================= SCROLLABLE CONTENT AREA ================= */}
-                  <View style={{ flex: 1, minHeight: 0 }}>
-                    {/* COMMENTS LIST */}
+                  {/* ================= COMMENTS LIST ================= */}
+                  <View
+                    style={{
+                      flex: 1,
+                      minHeight: 0,
+                      ...(Platform.OS === 'web' && {
+                        overflowY: 'auto',   // 🔥 THIS forces browser scrollbar
+                        overflowX: 'hidden',
+                      }),
+                    }}
+                  >
                     {commentsLoading ? (
                       <View
                         style={{
@@ -1394,12 +1481,13 @@ const PostCard = ({
                         keyExtractor={(item) => String(item._id)}
                         refreshing={commentsRefreshing}
                         onRefresh={() => loadComments(false)}
-                        showsVerticalScrollIndicator={true}
                         keyboardShouldPersistTaps="handled"
-                        nestedScrollEnabled={true}
-                        style={{ flex: 1 }}
+                        keyboardDismissMode="on-drag"
+                        showsVerticalScrollIndicator={true} // 🔥 Always true
+                        style={{
+                          flex: Platform.OS === 'web' ? undefined : 1, // 🔥 Important
+                        }}
                         contentContainerStyle={{
-                          flexGrow: 1,
                           paddingVertical: 12,
                         }}
                         renderItem={({ item }) => (
@@ -1424,52 +1512,11 @@ const PostCard = ({
                             />
                           </View>
                         )}
-                        ListEmptyComponent={
-                          <View
-                            style={{
-                              flex: 1,
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              paddingVertical: 40,
-                              backgroundColor: '#FFFFFF',
-                              minHeight: 300,
-                            }}
-                          >
-                            <Ionicons name="chatbubbles-outline" size={44} color="#9CA3AF" />
-                            <Text
-                              style={{
-                                marginTop: 14,
-                                fontFamily: 'Poppins-Medium',
-                                fontSize: 16,
-                                color: '#4B5563',
-                              }}
-                            >
-                              No comments yet
-                            </Text>
-                            <Text
-                              style={{
-                                marginTop: 6,
-                                fontFamily: 'Poppins-Regular',
-                                fontSize: 14,
-                                color: '#9CA3AF',
-                                textAlign: 'center',
-                                paddingHorizontal: 40,
-                              }}
-                            >
-                              Be the first to share your thoughts
-                            </Text>
-                          </View>
-                        }
-                        ItemSeparatorComponent={() => <View style={{ height: 0 }} />}
-                        onLayout={(e) => {
-                          // Ensure proper layout measurement
-                          const { height } = e.nativeEvent.layout;
-                        }}
                       />
                     )}
                   </View>
 
-                  {/* ================= COMPOSER (FIXED AT BOTTOM) ================= */}
+                  {/* ================= COMPOSER ================= */}
                   <View
                     style={{
                       borderTopWidth: 1,
@@ -1536,9 +1583,11 @@ const PostCard = ({
                       </TouchableOpacity>
                     </View>
                   </View>
+
                 </View>
-              </Pressable>
-            </Pressable>
+              </View>
+            </View>
+
           </View>
         </KeyboardAvoidingView>
       </Modal>

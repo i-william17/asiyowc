@@ -36,8 +36,8 @@ const POST_TYPES = [
 
 const VISIBILITY = [
   { id: 'public', label: 'Public', icon: 'earth' },
-  { id: 'group', label: 'Group', icon: 'people' },
-  { id: 'hub', label: 'Hub', icon: 'business' }
+  // { id: 'group', label: 'Group', icon: 'people' },
+  // { id: 'hub', label: 'Hub', icon: 'business' }
 ];
 
 // File size limits in bytes
@@ -251,12 +251,12 @@ const CreatePostModal = ({ visible, onClose }) => {
   };
 
   /* ================= LOAD GROUPS & HUBS ================= */
-  useEffect(() => {
-    if (visible) {
-      loadGroups();
-      loadHubs();
-    }
-  }, [visible]);
+  // useEffect(() => {
+  //   if (visible) {
+  //     loadGroups();
+  //     loadHubs();
+  //   }
+  // }, [visible]);
 
   useEffect(() => {
     let mounted = true;

@@ -165,6 +165,102 @@ function extractMedia(req) {
 }
 
 /* =========================================================================
+  FEED RANKING HELPER
+  - Uses recency decay
+  - Uses engagement weight
+======================================================================== */
+/* =========================================================================
+  ADVANCED FEED RANKING HELPER
+  - Recency decay
+  - Engagement weight
+  - Engagement velocity
+  - User interest matching
+  - Controlled randomness
+======================================================================== */
+
+function calculatePostScore(post, user = null) {
+  /* =========================
+     1️⃣ RECENCY SCORE (Time Decay)
+  ========================= */
+
+  const now = Date.now();
+  const createdAt = new Date(post.createdAt).getTime();
+  const hoursOld = (now - createdAt) / (1000 * 60 * 60);
+
+  const RECENCY_HALF_LIFE = 24; // 24h half-life
+  const recencyScore = Math.pow(0.5, hoursOld / RECENCY_HALF_LIFE) * 100;
+
+  /* =========================
+     2️⃣ ENGAGEMENT SCORE
+  ========================= */
+
+  const likes = post.likesCount || 0;
+  const comments = post.commentsCount || 0;
+  const shares = post.sharesCount || 0;
+
+  const engagementScore =
+    (likes * 2) +
+    (comments * 4) +
+    (shares * 6);
+
+  /* =========================
+     3️⃣ ENGAGEMENT VELOCITY
+     (engagement per hour)
+  ========================= */
+
+  let velocityScore = 0;
+
+  if (hoursOld > 0) {
+    const totalEngagement = likes + comments + shares;
+    const engagementPerHour = totalEngagement / hoursOld;
+
+    // Soft cap so it doesn't explode
+    velocityScore = Math.min(engagementPerHour * 10, 50);
+  }
+
+  /* =========================
+     4️⃣ USER INTEREST MATCHING
+     (lightweight version)
+  ========================= */
+
+  let interestScore = 0;
+
+  if (user && user.feedPreferences) {
+    // Example structure:
+    // user.feedPreferences = {
+    //   preferredTypes: ['video', 'image']
+    // }
+
+    if (
+      user.feedPreferences.preferredTypes &&
+      user.feedPreferences.preferredTypes.includes(post.type)
+    ) {
+      interestScore = 20;
+    }
+  }
+
+  /* =========================
+     5️⃣ CONTROLLED RANDOMNESS
+     (very small noise)
+  ========================= */
+
+  const randomnessScore = Math.random() * 5; // tiny shuffle factor
+
+  /* =========================
+     FINAL SCORE
+  ========================= */
+
+  const FINAL_SCORE =
+    (recencyScore * 0.5) +
+    (engagementScore * 0.3) +
+    (velocityScore * 0.1) +
+    (interestScore * 0.08) +
+    randomnessScore;
+
+  return FINAL_SCORE;
+}
+
+/* =========================================================================
   CREATE POST
 ======================================================================== */
 exports.createPost = async (req, res) => {
@@ -776,6 +872,9 @@ exports.getComments = async (req, res) => {
 /* =========================================================================
   GET COMMUNITY FEED (public + group + hub + own posts)
 ======================================================================== */
+/* =========================================================================
+  GET COMMUNITY FEED (Ranked: Recency + Engagement)
+======================================================================== */
 exports.getFeed = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -812,19 +911,43 @@ exports.getFeed = async (req, res) => {
 
     if (type) query.type = type;
 
-    const posts = await Post.find(query)
+    /* =========================
+       1️⃣ Fetch Candidate Pool
+       (Larger pool before ranking)
+    ========================= */
+
+    const candidates = await Post.find(query)
       .populate({
         path: 'author',
         select: 'profile.fullName profile.avatar'
       })
       .populate('sharedTo.groups', 'name avatar privacy')
       .populate('sharedTo.hubs', 'name type region')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
+      .lean()
+      .limit(200); // important: rank from a bigger pool
 
-    const normalized = posts.map(p => {
+    /* =========================
+       2️⃣ Rank Posts
+    ========================= */
+
+    const ranked = candidates
+      .map(post => ({
+        ...post,
+        __score: calculatePostScore(post)
+      }))
+      .sort((a, b) => b.__score - a.__score);
+
+    /* =========================
+       3️⃣ Apply Pagination AFTER Ranking
+    ========================= */
+
+    const paginated = ranked.slice(skip, skip + limit);
+
+    /* =========================
+       4️⃣ Normalize Output
+    ========================= */
+
+    const normalized = paginated.map(p => {
       const likesArray = p.reactions?.likes || [];
       const hasLiked = likesArray.some(
         id => String(id) === String(userId)
@@ -854,11 +977,12 @@ exports.getFeed = async (req, res) => {
         pages: Math.ceil(total / limit)
       }
     });
+
   } catch (error) {
-    console.error('[FEED ERROR]', error);
+    console.error('[FEED RANKING ERROR]', error);
     return res.status(500).json({
       success: false,
-      message: 'Error fetching feed',
+      message: 'Error fetching ranked feed',
       error: error.message
     });
   }

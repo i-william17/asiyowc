@@ -6,14 +6,16 @@ import {
   View
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Platform } from 'react-native';
 
 const filters = [
   { id: 'all', label: 'All', icon: 'apps-outline' },
   { id: 'text', label: 'Text', icon: 'text-outline' },
   { id: 'image', label: 'Images', icon: 'image-outline' },
   { id: 'video', label: 'Videos', icon: 'videocam-outline' },
-  { id: 'program', label: 'Programs', icon: 'school-outline' },
-  { id: 'hub', label: 'Hubs', icon: 'earth-outline' }
+  { id: 'link', label: 'Links', icon: 'link-outline' },
+  // { id: 'program', label: 'Programs', icon: 'school-outline' },
+  // { id: 'hub', label: 'Hubs', icon: 'earth-outline' }
 ];
 
 const FeedFilters = ({ active, onChange }) => {
@@ -21,7 +23,11 @@ const FeedFilters = ({ active, onChange }) => {
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={{ paddingVertical: 4 }}
+      contentContainerStyle={{
+        paddingVertical: 4,
+        width: Platform.OS === 'web' ? '100vw' : undefined,
+        justifyContent: Platform.OS === 'web' ? 'center' : 'flex-start',
+      }}
     >
       {filters.map(filter => {
         const isActive = active === filter.id;
@@ -64,3 +70,6 @@ const FeedFilters = ({ active, onChange }) => {
 };
 
 export default FeedFilters;
+
+// { id: 'program', label: 'Programs', icon: 'school-outline' },
+// { id: 'hub', label: 'Hubs', icon: 'earth-outline' }

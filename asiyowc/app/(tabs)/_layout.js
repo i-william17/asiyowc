@@ -20,14 +20,71 @@ export default function TabLayout() {
     dispatch(fetchUserProfile());
   }, []);
 
+  // ⏰ Dynamic Greeting Based on Time
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+
+    const morning = [
+      "Rise Boldly",
+      "Own Today",
+      "You Matter",
+      "You Belong",
+      "Shine on",
+      "Radiate Strength",
+      "Lead Forward",
+    ];
+
+    const afternoon = [
+      "Keep Winning",
+      "Keep Going",
+      "You’re Growing",
+      "Stay Powerful",
+      "Command Growth",
+      "Drive Impact",
+      "Making Moves",
+      "Proud Progress",
+      "Steady Wins",
+    ];
+
+    const evening = [
+      "Well Done",
+      "Evening Reflection",
+      "Own Progress",
+      "Reset & Rewind",
+      "Inner Authority",
+      "Growth Noticed",
+      "Celebrate Yourself",
+      "You did it",
+    ];
+
+    const night = [
+      "Tomorrow awaits",
+      "Sleep Peacefully",
+      "You’re Enough",
+      "Be Gentle",
+      "Stay Hopeful",
+      "Feel Proud",
+      "Stay Strong",
+      "You’re Growing",
+    ];
+
+    const pickRandom = (arr) =>
+      arr[Math.floor(Math.random() * arr.length)];
+
+    if (hour >= 5 && hour < 12) return pickRandom(morning);
+    if (hour >= 12 && hour < 17) return pickRandom(afternoon);
+    if (hour >= 17 && hour < 21) return pickRandom(evening);
+    return pickRandom(night);
+  };
+
   // ⭐ Loading State
- if (!user) {
-   return (
-     <View style={tw`flex-1 bg-white`}>
-       <ShimmerLoader />
-     </View>
-   );
- }
+  if (!user) {
+    return (
+      <View style={tw`flex-1 bg-white`}>
+        <ShimmerLoader />
+      </View>
+    );
+  }
   return (
     <>
       {/* ================= MAIN TAB NAVIGATION ================= */}
@@ -69,13 +126,13 @@ export default function TabLayout() {
               />
             ),
             headerTitle: () => (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginLeft: 18 }}>
                 {avatar ? (
                   <Image
                     source={{ uri: avatar }}
                     style={{
-                      width: 38,
-                      height: 38,
+                      width: 40,
+                      height: 40,
                       borderRadius: 19,
                       borderWidth: 2,
                       borderColor: "white",
@@ -84,8 +141,8 @@ export default function TabLayout() {
                 ) : (
                   <View
                     style={{
-                      width: 38,
-                      height: 38,
+                      width: 40,
+                      height: 40,
                       borderRadius: 19,
                       backgroundColor: "#FFD700",
                       justifyContent: "center",
@@ -108,21 +165,21 @@ export default function TabLayout() {
                   style={{
                     color: "#FFFFFF",
                     fontFamily: "Poppins-Bold",
-                    fontSize: 20,
+                    fontSize: 18,
                   }}
                 >
-                  Welcome, {firstName}
+                  {getGreeting()}, {firstName}
                 </Text>
               </View>
             ),
-            headerRight: () => (
-              <TouchableOpacity
-                style={{ marginRight: 18 }}
-                onPress={() => router.push("/modals/notifications")}
-              >
-                <Ionicons name="notifications" size={28} color="#FFD700" />
-              </TouchableOpacity>
-            ),
+            // headerRight: () => (
+            //   <TouchableOpacity
+            //     style={{ marginRight: 18 }}
+            //     onPress={() => router.push("/modals/notifications")}
+            //   >
+            //     <Ionicons name="notifications" size={28} color="#FFD700" />
+            //   </TouchableOpacity>
+            // ),
             tabBarIcon: ({ color, size }) => (
               <Ionicons name="home" size={size} color={color} />
             ),

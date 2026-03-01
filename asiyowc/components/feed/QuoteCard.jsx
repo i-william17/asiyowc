@@ -1,7 +1,7 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Animated } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { PHOEBE_ASIYO_QUOTES } from '../../constants/phoebeAsiyoQuotes';
+import React, { useMemo, useRef, useState, useEffect } from "react";
+import { View, Text, TouchableOpacity, Animated, Easing } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { PHOEBE_ASIYO_QUOTES } from "../../constants/phoebeAsiyoQuotes";
 
 const QuoteCard = () => {
   const quote = useMemo(() => {
@@ -10,74 +10,77 @@ const QuoteCard = () => {
   }, []);
 
   const [collapsed, setCollapsed] = useState(false);
+  const [measuredHeight, setMeasuredHeight] = useState(0);
+  const [didMeasure, setDidMeasure] = useState(false);
 
-  const animatedHeight = useRef(new Animated.Value(1)).current;
-  const animatedOpacity = useRef(new Animated.Value(1)).current;
+  // Animate actual pixel height (more reliable than 0..1 interpolation on web)
+  const heightAnim = useRef(new Animated.Value(0)).current;
+  const opacityAnim = useRef(new Animated.Value(1)).current;
 
-  const collapse = () => {
+  // When we first measure, initialize height to expanded height.
+  useEffect(() => {
+    if (didMeasure && measuredHeight > 0) {
+      heightAnim.setValue(measuredHeight);
+      opacityAnim.setValue(1);
+    }
+  }, [didMeasure, measuredHeight, heightAnim, opacityAnim]);
+
+  const runAnim = (toCollapsed) => {
+    if (!didMeasure || measuredHeight <= 0) {
+      // Fallback: still toggle even if measurement isn't ready
+      setCollapsed(toCollapsed);
+      return;
+    }
+
+    setCollapsed(toCollapsed);
+
     Animated.parallel([
-      Animated.timing(animatedHeight, {
-        toValue: 0,
+      Animated.timing(heightAnim, {
+        toValue: toCollapsed ? 0 : measuredHeight,
         duration: 260,
-        useNativeDriver: false,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false, // height can't use native driver
       }),
-      Animated.timing(animatedOpacity, {
-        toValue: 0,
-        duration: 180,
-        useNativeDriver: false,
+      Animated.timing(opacityAnim, {
+        toValue: toCollapsed ? 0 : 1,
+        duration: toCollapsed ? 160 : 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false, // keep consistent across web/mobile
       }),
-    ]).start(() => setCollapsed(true));
+    ]).start();
   };
 
-  const expand = () => {
-    Animated.parallel([
-      Animated.timing(animatedHeight, {
-        toValue: 1,
-        duration: 260,
-        useNativeDriver: false,
-      }),
-      Animated.timing(animatedOpacity, {
-        toValue: 1,
-        duration: 220,
-        useNativeDriver: false,
-      }),
-    ]).start(() => setCollapsed(false));
-  };
-
-  const contentHeight = animatedHeight.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 140],
-  });
+  const collapse = () => runAnim(true);
+  const expand = () => runAnim(false);
 
   return (
     <View
       style={{
-        backgroundColor: '#6A1B9A',
-        borderRadius: 20,
-        marginBottom: 22,
-        overflow: 'hidden',
+        backgroundColor: "#6A1B9A",
+        borderRadius: 18, // slightly smaller
+        marginBottom: 18, // slightly smaller
+        overflow: "hidden",
         elevation: 3,
       }}
     >
       {/* HEADER */}
       <View
         style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: 18,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          paddingHorizontal: 16,
+          paddingVertical: 16, // reduced
         }}
       >
-        {/* Opening Quote (Golden) */}
         <MaterialCommunityIcons
           name="format-quote-open"
-          size={28}
+          size={26}
           color="#FACC15"
         />
 
-        {/* Chevron Controls (Golden) */}
         {collapsed ? (
-          <TouchableOpacity onPress={expand}>
+          <TouchableOpacity onPress={expand} hitSlop={10}>
             <MaterialCommunityIcons
               name="chevron-down"
               size={28}
@@ -85,7 +88,7 @@ const QuoteCard = () => {
             />
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity onPress={collapse}>
+          <TouchableOpacity onPress={collapse} hitSlop={10}>
             <MaterialCommunityIcons
               name="chevron-up"
               size={28}
@@ -95,48 +98,104 @@ const QuoteCard = () => {
         )}
       </View>
 
+      {/* MEASURER (invisible) - only used once to get real content height */}
+      {!didMeasure && (
+        <View
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            opacity: 0,
+            zIndex: -1,
+            paddingHorizontal: 16,
+            paddingBottom: 24,
+          }}
+          pointerEvents="none"
+          onLayout={(e) => {
+            const h = e?.nativeEvent?.layout?.height ?? 0;
+            if (h > 0) {
+              setMeasuredHeight(h);
+              setDidMeasure(true);
+            }
+          }}
+        >
+          <Text
+            style={{
+              color: "#FFFFFF",
+              fontFamily: "Poppins-Regular",
+              fontSize: 18, // slightly smaller
+              lineHeight: 25, // slightly tighter
+              fontStyle: "italic",
+              marginBottom: 14, // reduced
+            }}
+          >
+            {quote.text}
+          </Text>
+
+          <Text
+            style={{
+              color: "rgba(255,255,255,0.9)",
+              fontFamily: "Poppins-SemiBold",
+              fontSize: 14, // slightly smaller
+              marginBottom: 12,
+            }}
+          >
+            — {quote.author}
+          </Text>
+
+          <MaterialCommunityIcons
+            name="format-quote-close"
+            size={26}
+            color="#FACC15"
+            style={{
+              position: "absolute",
+              bottom: 8,
+              right: 12,
+            }}
+          />
+        </View>
+      )}
+
       {/* COLLAPSIBLE CONTENT */}
       <Animated.View
         style={{
-          height: contentHeight,
-          opacity: animatedOpacity,
-          paddingHorizontal: 18,
+          height: didMeasure ? heightAnim : "auto",
+          opacity: opacityAnim,
+          paddingHorizontal: 16,
+          paddingBottom: 24,
         }}
       >
-        {/* Quote Text */}
         <Text
           style={{
-            color: '#FFFFFF',
-            fontFamily: 'Poppins-Regular',
-            fontSize: 16,
-            lineHeight: 26,
-            fontStyle: 'italic',
-            marginBottom: 14,
+            color: "#FFFFFF",
+            fontFamily: "Poppins-Regular",
+            fontSize: 15,
+            lineHeight: 25,
+            fontStyle: "italic",
+            marginBottom: 12,
           }}
         >
           {quote.text}
         </Text>
 
-        {/* Author */}
         <Text
           style={{
-            color: 'rgba(255,255,255,0.9)',
-            fontFamily: 'Poppins-SemiBold',
-            fontSize: 14,
+            color: "rgba(255,255,255,0.9)",
+            fontFamily: "Poppins-SemiBold",
+            fontSize: 13,
           }}
         >
           — {quote.author}
         </Text>
 
-        {/* Closing Quote (Golden) */}
         <MaterialCommunityIcons
           name="format-quote-close"
-          size={28}
+          size={26}
           color="#FACC15"
           style={{
-            position: 'absolute',
-            bottom: 12,
-            right: 14,
+            position: "absolute",
+            bottom: 8,
+            right: 12,
           }}
         />
       </Animated.View>

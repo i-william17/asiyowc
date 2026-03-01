@@ -10,7 +10,7 @@ import {
   Animated,
   Modal,
   Pressable,
-  PanResponder,
+  // PanResponder,
   Dimensions,
   ActivityIndicator,
   StyleSheet,
@@ -170,82 +170,82 @@ const FeedScreen = () => {
   /* ==========================================================
      PAN RESPONDER FOR SWIPE GESTURE
   ========================================================== */
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        // Only respond to horizontal swipes from left edge
-        const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
-        const isFromLeftEdge = evt.nativeEvent.pageX < 50; // Start from left 50px
-        return isHorizontalSwipe && isFromLeftEdge;
-      },
-      onPanResponderGrant: (evt) => {
-        swipeStartX.current = evt.nativeEvent.pageX;
-        lastSwipeTime.current = Date.now();
-        setSwipeActive(true);
-        setShowSwipeIndicator(true);
-      },
-      onPanResponderMove: (evt, gestureState) => {
-        const swipeDistance = gestureState.dx;
-        const normalizedProgress = Math.min(Math.max(swipeDistance / 150, 0), 1);
+  // const panResponder = useRef(
+  //   PanResponder.create({
+  //     onStartShouldSetPanResponder: () => true,
+  //     onMoveShouldSetPanResponder: (evt, gestureState) => {
+  //       // Only respond to horizontal swipes from left edge
+  //       const isHorizontalSwipe = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+  //       const isFromLeftEdge = evt.nativeEvent.pageX < 50; // Start from left 50px
+  //       return isHorizontalSwipe && isFromLeftEdge;
+  //     },
+  //     onPanResponderGrant: (evt) => {
+  //       swipeStartX.current = evt.nativeEvent.pageX;
+  //       lastSwipeTime.current = Date.now();
+  //       setSwipeActive(true);
+  //       setShowSwipeIndicator(true);
+  //     },
+  //     onPanResponderMove: (evt, gestureState) => {
+  //       const swipeDistance = gestureState.dx;
+  //       const normalizedProgress = Math.min(Math.max(swipeDistance / 150, 0), 1);
 
-        if (swipeDistance > 0) {
-          swipeProgress.setValue(normalizedProgress);
-        }
-      },
-      onPanResponderRelease: (evt, gestureState) => {
-        const swipeDistance = gestureState.dx;
-        const swipeVelocity = gestureState.vx;
-        const swipeDuration = Date.now() - lastSwipeTime.current;
+  //       if (swipeDistance > 0) {
+  //         swipeProgress.setValue(normalizedProgress);
+  //       }
+  //     },
+  //     onPanResponderRelease: (evt, gestureState) => {
+  //       const swipeDistance = gestureState.dx;
+  //       const swipeVelocity = gestureState.vx;
+  //       const swipeDuration = Date.now() - lastSwipeTime.current;
 
-        // Conditions to trigger reels screen:
-        // 1. Swipe distance > 80px OR
-        // 2. Fast swipe (> 0.5 velocity) OR
-        // 3. Long swipe (> 150px) with normal speed
-        if (
-          swipeDistance > 80 ||
-          (swipeVelocity > 0.5 && swipeDistance > 40) ||
-          (swipeDistance > 150 && swipeDuration < 500)
-        ) {
-          // Animate to completion and navigate
-          Animated.timing(swipeProgress, {
-            toValue: 1,
-            duration: 200,
-            useNativeDriver: true,
-          }).start(() => {
-            // Navigate to reels screen
-            router.push('/more/reel');
-            // Reset after navigation
-            setTimeout(() => {
-              swipeProgress.setValue(0);
-              setShowSwipeIndicator(false);
-              setSwipeActive(false);
-            }, 300);
-          });
-        } else {
-          // Reset swipe animation
-          Animated.timing(swipeProgress, {
-            toValue: 0,
-            duration: 200,
-            useNativeDriver: true,
-          }).start(() => {
-            setShowSwipeIndicator(false);
-            setSwipeActive(false);
-          });
-        }
-      },
-      onPanResponderTerminate: () => {
-        Animated.timing(swipeProgress, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }).start(() => {
-          setShowSwipeIndicator(false);
-          setSwipeActive(false);
-        });
-      },
-    })
-  ).current;
+  //       // Conditions to trigger reels screen:
+  //       // 1. Swipe distance > 80px OR
+  //       // 2. Fast swipe (> 0.5 velocity) OR
+  //       // 3. Long swipe (> 150px) with normal speed
+  //       if (
+  //         swipeDistance > 80 ||
+  //         (swipeVelocity > 0.5 && swipeDistance > 40) ||
+  //         (swipeDistance > 150 && swipeDuration < 500)
+  //       ) {
+  //         // Animate to completion and navigate
+  //         Animated.timing(swipeProgress, {
+  //           toValue: 1,
+  //           duration: 200,
+  //           useNativeDriver: true,
+  //         }).start(() => {
+  //           // Navigate to reels screen
+  //           router.push('/more/reel');
+  //           // Reset after navigation
+  //           setTimeout(() => {
+  //             swipeProgress.setValue(0);
+  //             setShowSwipeIndicator(false);
+  //             setSwipeActive(false);
+  //           }, 300);
+  //         });
+  //       } else {
+  //         // Reset swipe animation
+  //         Animated.timing(swipeProgress, {
+  //           toValue: 0,
+  //           duration: 200,
+  //           useNativeDriver: true,
+  //         }).start(() => {
+  //           setShowSwipeIndicator(false);
+  //           setSwipeActive(false);
+  //         });
+  //       }
+  //     },
+  //     onPanResponderTerminate: () => {
+  //       Animated.timing(swipeProgress, {
+  //         toValue: 0,
+  //         duration: 200,
+  //         useNativeDriver: true,
+  //       }).start(() => {
+  //         setShowSwipeIndicator(false);
+  //         setSwipeActive(false);
+  //       });
+  //     },
+  //   })
+  // ).current;
 
   /* ==========================================================
      LOAD FEED
@@ -367,7 +367,7 @@ const FeedScreen = () => {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#f8fafc' }}>
       {/* ================= SWIPE INDICATOR ================= */}
-      <SwipeIndicator progress={swipeProgress} isVisible={showSwipeIndicator} />
+      {/* <SwipeIndicator progress={swipeProgress} isVisible={showSwipeIndicator} /> */}
 
       {/* ================= DELETE CONFIRM MODAL ================= */}
       <Modal visible={deleteConfirmVisible} transparent animationType="fade">
@@ -506,7 +506,7 @@ const FeedScreen = () => {
       {/* ================= MAIN CONTENT WITH SWIPE HANDLER ================= */}
       <View
         style={{ flex: 1 }}
-        {...panResponder.panHandlers}
+        // {...panResponder.panHandlers}
       >
         {/* ================= HEADER ================= */}
         <View
