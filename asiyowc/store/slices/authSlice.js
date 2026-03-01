@@ -32,12 +32,10 @@ export const restoreToken = createAsyncThunk(
       const storedToken = await secureStore.getItem('token');
       console.log("Stored token:", storedToken);
 
-      const storedOnboarding = await secureStore.getItem('onboarding');
       const storedHasRegistered = await secureStore.getItem('hasRegistered');
 
       return {
         token: storedToken || null,
-        onboarding: storedOnboarding ? JSON.parse(storedOnboarding) : null,
         hasRegistered: storedHasRegistered === 'true',
       };
     } catch {
@@ -144,7 +142,6 @@ const authSlice = createSlice({
   reducers: {
     setOnboardingData: (state, action) => {
       state.onboardingData = action.payload;
-      secureStore.setItem('onboarding', JSON.stringify(action.payload));
     },
 
     clearError: (state) => {
@@ -162,7 +159,6 @@ const authSlice = createSlice({
 
       secureStore.removeItem('token');
       secureStore.removeItem('userId');
-      secureStore.removeItem('onboarding');
       secureStore.removeItem('hasRegistered');
     },
 
@@ -189,7 +185,6 @@ const authSlice = createSlice({
           state.isAuthenticated = !!action.payload.token;
         }
 
-        state.onboardingData = action.payload.onboarding;
         state.hasRegistered = action.payload.hasRegistered;
         state.appLoaded = true;
       })
@@ -208,9 +203,13 @@ const authSlice = createSlice({
 
       .addCase(registerUser.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.data.user;
+        state.user = action.payload?.data?.user || null;
         state.hasRegistered = true;
         state.isAuthenticated = false;
+
+        // 🔥 Clear onboarding state after successful registration
+        state.onboardingData = null;
+
       })
 
       .addCase(registerUser.rejected, (state, action) => {

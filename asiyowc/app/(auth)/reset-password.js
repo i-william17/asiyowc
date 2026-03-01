@@ -1,3 +1,4 @@
+// app/(auth)/reset-password.js
 import React, { useState } from 'react';
 import {
   View,
@@ -7,6 +8,8 @@ import {
   Alert,
   ScrollView,
   TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useForm, Controller } from 'react-hook-form';
@@ -17,7 +20,7 @@ import LottieLoader from '../../components/animations/LottieLoader';
 import AnimatedButton from '../../components/ui/AnimatedButton';
 import tw from '../../utils/tw';
 
-const ResetPasswordScreen = () => {
+export default function ResetPasswordScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const [loading, setLoading] = useState(false);
@@ -70,55 +73,161 @@ const ResetPasswordScreen = () => {
   };
 
   return (
-    <SafeAreaView style={tw`flex-1 bg-white`}>
-      <LinearGradient
-        colors={['#6A1B9A', '#8E24AA']}
-        style={tw`h-40 rounded-b-3xl`}
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      {/* HEADER - FULL WIDTH - OUTSIDE SCROLLVIEW */}
+      <View
+        style={{
+          backgroundColor: '#6A1B9A',
+          height: 170,
+          borderBottomLeftRadius: 40,
+          borderBottomRightRadius: 40,
+          shadowColor: '#000',
+          shadowOpacity: 0.25,
+          shadowRadius: 15,
+          elevation: 12,
+        }}
       >
-        <View style={tw`flex-1 justify-center items-center`}>
-          <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-white mt-5`]}>Asiyo Women Connect App</Text>
-          <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white opacity-90 mt-5`]}>New Password</Text>
-        </View>
-      </LinearGradient>
+        <LinearGradient
+          colors={['#4A148C', '#6A1B9A']}
+          style={{
+            flex: 1,
+            borderBottomLeftRadius: 40,
+            borderBottomRightRadius: 40,
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <Text
+            style={{
+              fontFamily: 'Poppins-Bold',
+              fontSize: 22,
+              color: '#FFFFFF',
+              marginTop: 10,
+            }}
+          >
+            New Password
+          </Text>
 
-      <ScrollView 
-        style={tw`flex-1 px-6 py-8`}
+          <Text
+            style={{
+              fontFamily: 'Poppins-Regular',
+              color: 'rgba(255,255,255,0.85)',
+              marginTop: 6,
+            }}
+          >
+            Secure your account
+          </Text>
+        </LinearGradient>
+      </View>
+
+      {/* SCROLLABLE CONTENT - WITH PADDING ONLY */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingHorizontal: 24,
+          paddingTop: 24,
+          paddingBottom: 60,
+        }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
-        <View style={tw`items-center mb-8`}>
-          <LottieLoader type="success" size={120} />
-        </View>
-
-        <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-purple-900 mb-2`]}>
-          Create New Password
-        </Text>
-        <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-base text-center text-gray-600 mb-8`]}>
-          Enter your new password below
-        </Text>
-
-        {/* ⭐ SUCCESS MESSAGE */}
-        {successMsg && (
-          <View style={tw`p-4 mb-4 rounded-xl bg-green-100`}>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-green-700 text-center`]}>
-              {successMsg}
-            </Text>
+        {/* CENTERED CONTAINER (WEB FIX) */}
+        <View
+          style={{
+            width: '100%',
+            maxWidth: 420,
+            alignSelf: 'center',
+          }}
+        >
+          <View style={{ alignItems: 'center', marginBottom: 24 }}>
+            <LottieLoader
+              type="success"
+              size={Platform.OS === 'web' ? 100 : 120}
+            />
           </View>
-        )}
 
-        {/* ⭐ ERROR MESSAGE */}
-        {errorMsg && (
-          <View style={tw`p-4 mb-4 rounded-xl bg-red-100`}>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-red-700 text-center`]}>
-              {errorMsg}
-            </Text>
-          </View>
-        )}
+          <Text
+            style={{
+              fontFamily: 'Poppins-Bold',
+              fontSize: 22,
+              color: '#6A1B9A',
+              textAlign: 'center',
+              marginBottom: 6,
+            }}
+          >
+            Create New Password
+          </Text>
 
-        <View style={tw`space-y-4 mb-6`}>
-          
+          <Text
+            style={{
+              fontFamily: 'Poppins-Light',
+              fontSize: 14,
+              color: '#6B7280',
+              textAlign: 'center',
+              marginBottom: 28,
+            }}
+          >
+            Enter your new password below
+          </Text>
+
+          {/* SUCCESS */}
+          {successMsg && (
+            <View
+              style={{
+                backgroundColor: '#DCFCE7',
+                borderRadius: 16,
+                padding: 14,
+                marginBottom: 16,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Medium',
+                  fontSize: 14,
+                  color: '#166534',
+                  textAlign: 'center',
+                }}
+              >
+                {successMsg}
+              </Text>
+            </View>
+          )}
+
+          {/* ERROR */}
+          {errorMsg && (
+            <View
+              style={{
+                backgroundColor: '#FEE2E2',
+                borderRadius: 16,
+                padding: 14,
+                marginBottom: 16,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Medium',
+                  fontSize: 14,
+                  color: '#991B1B',
+                  textAlign: 'center',
+                }}
+              >
+                {errorMsg}
+              </Text>
+            </View>
+          )}
+
           {/* PASSWORD FIELD */}
-          <View>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
+          <View style={{ marginBottom: 20 }}>
+            <Text
+              style={{
+                fontFamily: 'Poppins-Medium',
+                fontSize: 13,
+                color: '#374151',
+                marginBottom: 6,
+              }}
+            >
               New Password
             </Text>
 
@@ -128,48 +237,76 @@ const ResetPasswordScreen = () => {
                 required: 'Password is required',
                 minLength: {
                   value: 8,
-                  message: 'Password must be at least 8 characters'
-                }
+                  message: 'Password must be at least 8 characters',
+                },
               }}
               render={({ field: { onChange, onBlur, value } }) => (
-                <View style={tw`relative`}>
+                <View style={{ position: 'relative' }}>
                   <TextInput
-                    style={[
-                      tw`border-2 border-gray-200 rounded-2xl px-4 py-4 text-base pr-12`,
-                      errors.password && tw`border-red-500`
-                    ]}
+                    style={{
+                      borderWidth: 2,
+                      borderColor: errors.password
+                        ? '#EF4444'
+                        : '#E5E7EB',
+                      borderRadius: 16,
+                      paddingHorizontal: 16,
+                      paddingVertical: 12,
+                      paddingRight: 48,
+                      fontFamily: 'Poppins-Regular',
+                      fontSize: 14,
+                      color: '#111827',
+                    }}
                     placeholder="Enter new password"
                     placeholderTextColor="#9CA3AF"
+                    secureTextEntry={!showPassword}
+                    autoComplete="password-new"
                     onBlur={onBlur}
                     onChangeText={onChange}
                     value={value}
-                    secureTextEntry={!showPassword}
-                    autoComplete="password-new"
                   />
                   <TouchableOpacity
-                    style={tw`absolute right-4 top-4`}
+                    style={{
+                      position: 'absolute',
+                      right: 16,
+                      top: 14,
+                    }}
                     onPress={() => setShowPassword(!showPassword)}
                   >
-                    <Ionicons 
-                      name={showPassword ? "eye-off" : "eye"} 
-                      size={20} 
-                      color="#6B7280" 
+                    <Ionicons
+                      name={showPassword ? 'eye-off' : 'eye'}
+                      size={20}
+                      color="#6B7280"
                     />
                   </TouchableOpacity>
                 </View>
               )}
               name="password"
             />
+
             {errors.password && (
-              <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-red-500 text-sm mt-1`]}>
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Regular',
+                  fontSize: 12,
+                  color: '#EF4444',
+                  marginTop: 4,
+                }}
+              >
                 {errors.password.message}
               </Text>
             )}
           </View>
 
-          {/* CONFIRM PASSWORD FIELD */}
-          <View>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
+          {/* CONFIRM PASSWORD */}
+          <View style={{ marginBottom: 24 }}>
+            <Text
+              style={{
+                fontFamily: 'Poppins-Medium',
+                fontSize: 13,
+                color: '#374151',
+                marginBottom: 6,
+              }}
+            >
               Confirm Password
             </Text>
 
@@ -177,31 +314,49 @@ const ResetPasswordScreen = () => {
               control={control}
               rules={{
                 required: 'Please confirm your password',
-                validate: value => value === password || 'Passwords do not match'
+                validate: value =>
+                  value === password || 'Passwords do not match',
               }}
               render={({ field: { onChange, onBlur, value } }) => (
-                <View style={tw`relative`}>
+                <View style={{ position: 'relative' }}>
                   <TextInput
-                    style={[
-                      tw`border-2 border-gray-200 rounded-2xl px-4 py-4 text-base pr-12`,
-                      errors.confirmPassword && tw`border-red-500`
-                    ]}
+                    style={{
+                      borderWidth: 2,
+                      borderColor: errors.confirmPassword
+                        ? '#EF4444'
+                        : '#E5E7EB',
+                      borderRadius: 16,
+                      paddingHorizontal: 16,
+                      paddingVertical: 12,
+                      paddingRight: 48,
+                      fontFamily: 'Poppins-Regular',
+                      fontSize: 14,
+                      color: '#111827',
+                    }}
                     placeholder="Confirm new password"
                     placeholderTextColor="#9CA3AF"
+                    secureTextEntry={!showConfirmPassword}
+                    autoComplete="password-new"
                     onBlur={onBlur}
                     onChangeText={onChange}
                     value={value}
-                    secureTextEntry={!showConfirmPassword}
-                    autoComplete="password-new"
                   />
                   <TouchableOpacity
-                    style={tw`absolute right-4 top-4`}
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    style={{
+                      position: 'absolute',
+                      right: 16,
+                      top: 14,
+                    }}
+                    onPress={() =>
+                      setShowConfirmPassword(!showConfirmPassword)
+                    }
                   >
-                    <Ionicons 
-                      name={showConfirmPassword ? "eye-off" : "eye"} 
-                      size={20} 
-                      color="#6B7280" 
+                    <Ionicons
+                      name={
+                        showConfirmPassword ? 'eye-off' : 'eye'
+                      }
+                      size={20}
+                      color="#6B7280"
                     />
                   </TouchableOpacity>
                 </View>
@@ -210,35 +365,38 @@ const ResetPasswordScreen = () => {
             />
 
             {errors.confirmPassword && (
-              <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-red-500 text-sm mt-1`]}>
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Regular',
+                  fontSize: 12,
+                  color: '#EF4444',
+                  marginTop: 4,
+                }}
+              >
                 {errors.confirmPassword.message}
               </Text>
             )}
           </View>
 
+          <AnimatedButton
+            title="Reset Password"
+            onPress={handleSubmit(handlePasswordReset)}
+            variant="primary"
+            size="lg"
+            loading={loading}
+            fullWidth
+            style={{ marginBottom: 12 }}
+          />
+
+          <AnimatedButton
+            title="Back to Login"
+            onPress={() => router.replace('/(auth)/login')}
+            variant="secondary"
+            size="md"
+            fullWidth
+          />
         </View>
-
-        <AnimatedButton
-          title="Reset Password"
-          onPress={handleSubmit(handlePasswordReset)}
-          variant="primary"
-          size="lg"
-          loading={loading}
-          style={tw`mb-4`}
-          fullWidth
-        />
-
-        <AnimatedButton
-          title="Back to Login"
-          onPress={() => router.replace('/(auth)/login')}
-          variant="secondary"
-          size="md"
-          fullWidth
-        />
-
       </ScrollView>
     </SafeAreaView>
   );
 };
-
-export default ResetPasswordScreen;

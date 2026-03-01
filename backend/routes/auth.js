@@ -4,6 +4,7 @@ const {
   register,
   login,
   verifyEmail,
+  resendEmailOTP,
   setup2FA,
   verify2FA,
   forgotPassword,
@@ -34,6 +35,7 @@ router.post('/login', authLimiter, loginValidation, handleValidationErrors, logi
 router.get('/me', auth, getMe);
 
 router.post('/verify-email', verifyEmail);
+router.post('/resend-email-otp', resendEmailOTP);
 router.post('/verify-reset', verifyResetToken);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);

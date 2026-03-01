@@ -1,3 +1,4 @@
+// app/(auth)/onboarding.js
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -18,10 +19,20 @@ import LottieLoader from '../../components/animations/LottieLoader';
 import AnimatedButton from '../../components/ui/AnimatedButton';
 import AnimatedBackground from '../../components/animations/AnimatedBackground';
 import { MaterialIcons, FontAwesome5, Ionicons, Feather } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 import tw from '../../utils/tw';
 import { Platform } from 'react-native';
 
 const { width } = Dimensions.get('window');
+
+// Brand color constants for consistency
+const BRAND = {
+  primary: '#6A1B9A',
+  dark: '#4A148C',
+  light: '#F3E8FF',
+  accent: '#8E24AA',
+  success: '#16A34A',
+};
 
 const OnboardingScreen = () => {
   const router = useRouter();
@@ -29,12 +40,19 @@ const OnboardingScreen = () => {
   const [step, setStep] = useState(1);
   const [selectedInterests, setSelectedInterests] = useState([]);
   const [selectedRole, setSelectedRole] = useState('');
-  const Container = Platform.OS === 'web' ? View : SafeAreaView;
+  const Container =
+    Platform.OS === 'web'
+      ? View
+      : Platform.OS === 'ios'
+        ? SafeAreaView
+        : View; // Android uses View
+  const isWeb = Platform.OS === 'web';
 
   const fadeAnim = useState(new Animated.Value(1))[0];
   const slideAnim = useState(new Animated.Value(0))[0];
   const progressAnim = useState(new Animated.Value(0))[0];
   const contentRef = useRef(null);
+  const { height: screenHeight } = Dimensions.get('window');
 
   const quotes = [
     {
@@ -56,14 +74,14 @@ const OnboardingScreen = () => {
   ];
 
   const interests = [
-    { id: 'leadership', name: 'Leadership', icon: 'crown', library: FontAwesome5, color: '#8B5CF6' },
-    { id: 'finance', name: 'Finance', icon: 'trending-up', library: Feather, color: '#10B981' },
-    { id: 'health', name: 'Health & Wellness', icon: 'favorite', library: MaterialIcons, color: '#EF4444' },
-    { id: 'advocacy', name: 'Advocacy', icon: 'megaphone', library: Ionicons, color: '#F59E0B' },
-    { id: 'entrepreneurship', name: 'Entrepreneurship', icon: 'briefcase', library: Feather, color: '#6366F1' },
-    { id: 'education', name: 'Education', icon: 'graduation-cap', library: FontAwesome5, color: '#EC4899' },
-    { id: 'technology', name: 'Technology', icon: 'cpu', library: Feather, color: '#06B6D4' },
-    { id: 'arts', name: 'Arts & Culture', icon: 'palette', library: MaterialIcons, color: '#8B5CF6' },
+    { id: 'leadership', name: 'Leadership', icon: 'crown', library: FontAwesome5 },
+    { id: 'finance', name: 'Finance', icon: 'trending-up', library: Feather },
+    { id: 'health', name: 'Health & Wellness', icon: 'favorite', library: MaterialIcons },
+    { id: 'advocacy', name: 'Advocacy', icon: 'megaphone', library: Ionicons },
+    { id: 'entrepreneurship', name: 'Entrepreneurship', icon: 'briefcase', library: Feather },
+    { id: 'education', name: 'Education', icon: 'graduation-cap', library: FontAwesome5 },
+    { id: 'technology', name: 'Technology', icon: 'cpu', library: Feather },
+    { id: 'arts', name: 'Arts & Culture', icon: 'palette', library: MaterialIcons },
   ];
 
   const roles = [
@@ -71,7 +89,7 @@ const OnboardingScreen = () => {
       id: 'mentor',
       name: 'Mentor',
       description: 'Guide and support other women',
-      gradient: ['#6A1B9A', '#8E24AA'],
+      gradient: [BRAND.dark, BRAND.primary],
       icon: 'people',
       library: MaterialIcons
     },
@@ -79,7 +97,7 @@ const OnboardingScreen = () => {
       id: 'entrepreneur',
       name: 'Entrepreneur',
       description: 'Building businesses and ventures',
-      gradient: ['#FFD700', '#FBC02D'],
+      gradient: [BRAND.primary, BRAND.accent],
       icon: 'business',
       library: MaterialIcons
     },
@@ -87,7 +105,7 @@ const OnboardingScreen = () => {
       id: 'advocate',
       name: 'Advocate',
       description: 'Championing causes and rights',
-      gradient: ['#FF6B6B', '#FF8E53'],
+      gradient: [BRAND.dark, BRAND.primary],
       icon: 'gavel',
       library: MaterialIcons
     },
@@ -95,7 +113,7 @@ const OnboardingScreen = () => {
       id: 'changemaker',
       name: 'Changemaker',
       description: 'Driving social impact',
-      gradient: ['#4ECDC4', '#44A08D'],
+      gradient: [BRAND.primary, BRAND.accent],
       icon: 'public',
       library: MaterialIcons
     },
@@ -103,11 +121,10 @@ const OnboardingScreen = () => {
       id: 'learner',
       name: 'Learner',
       description: 'Get up and going',
-      gradient: ['#2563EB', '#06B6D4'], // blue → teal
+      gradient: [BRAND.dark, BRAND.primary],
       icon: 'book',
       library: MaterialIcons
     }
-
   ];
 
   // Enhanced step navigation with smooth transitions
@@ -199,7 +216,7 @@ const OnboardingScreen = () => {
       role: selectedRole,
       completed: true
     }));
-    router.push('/(auth)/login');
+    router.push('/(auth)/register');
   };
 
   const getAnimationType = () => {
@@ -225,10 +242,10 @@ const OnboardingScreen = () => {
             style={[
               tw`w-8 h-8 rounded-full items-center justify-center border-2 mx-2`,
               stepNumber === step
-                ? tw`bg-purple-600 border-purple-600`
+                ? { backgroundColor: BRAND.primary, borderColor: BRAND.primary }
                 : stepNumber < step
-                  ? tw`bg-green-500 border-green-500`
-                  : tw`bg-white border-gray-300`,
+                  ? { backgroundColor: BRAND.success, borderColor: BRAND.success }
+                  : { backgroundColor: '#FFFFFF', borderColor: '#D1D5DB' }
             ]}
           >
             {stepNumber < step ? (
@@ -236,7 +253,7 @@ const OnboardingScreen = () => {
             ) : (
               <Text style={[
                 { fontFamily: 'Poppins-Medium' },
-                stepNumber === step ? tw`text-white` : tw`text-gray-400`
+                stepNumber === step ? { color: '#FFFFFF' } : { color: '#9CA3AF' }
               ]}>
                 {stepNumber}
               </Text>
@@ -246,7 +263,7 @@ const OnboardingScreen = () => {
             <View
               style={[
                 tw`w-8 h-0.5`,
-                stepNumber < step ? tw`bg-green-500` : tw`bg-gray-300`
+                stepNumber < step ? { backgroundColor: BRAND.success } : { backgroundColor: '#D1D5DB' }
               ]}
             />
           )}
@@ -256,6 +273,9 @@ const OnboardingScreen = () => {
   );
 
   const renderStep = () => {
+    const numColumns = isWeb ? 3 : 2;
+    const cardWidth = isWeb ? '31%' : '48%';
+
     switch (step) {
       case 1:
         return (
@@ -267,7 +287,10 @@ const OnboardingScreen = () => {
               />
             </View>
 
-            <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-gray-900 mb-10 text-center`]}>
+            <Text style={[
+              { fontFamily: 'Poppins-Bold', fontSize: 26, color: BRAND.primary, textAlign: 'center' },
+              tw`mb-10`
+            ]}>
               Asiyo Women Connect App
             </Text>
 
@@ -286,7 +309,7 @@ const OnboardingScreen = () => {
               size="lg"
             />
 
-            {/* ⭐ NEW — Skip to Login Link */}
+            {/* Skip to Login Link */}
             <TouchableOpacity
               onPress={() => router.push('/(auth)/login')}
               style={tw`mt-6`}
@@ -295,43 +318,15 @@ const OnboardingScreen = () => {
                 { fontFamily: 'Poppins-Medium' },
                 tw`text-sm text-black text-center`
               ]}>
-                Already registered? <Text style={tw`text-purple-900 underline`}>Move to Login</Text>
+                Already registered? <Text style={{ color: BRAND.primary, textDecorationLine: 'underline' }}>Move to Login</Text>
               </Text>
             </TouchableOpacity>
-          </View>
-        );
-
-        return (
-          <View style={tw`flex-1 justify-center items-center`}>
-            <View style={tw`items-center mb-6`}>
-              <Image
-                source={require('../../assets/images/asiyo-nobg.png')}
-                style={tw`w-40 h-40 rounded-full mb-4`}
-              />
-            </View>
-            <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-gray-900 mb-10 text-center`]}>
-              Asiyo Women Connect App
-            </Text>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-base text-gray-600 mb-6 text-center leading-6`]}>
-              {quotes[0].text}
-            </Text>
-            <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-sm text-gray-500 mb-8 text-center italic`]}>
-              — {quotes[0].author}
-            </Text>
-            <AnimatedButton
-              title="Join the Sisterhood"
-              onPress={handleNext}
-              variant="primary"
-              size="lg"
-            />
           </View>
         );
 
       case 2:
         return (
           <View style={tw`flex-1`}>
-            <View style={tw`items-center mb-4`}>
-            </View>
             <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-gray-900 mb-3`]}>
               Professional Interests
             </Text>
@@ -352,31 +347,44 @@ const OnboardingScreen = () => {
                     <TouchableOpacity
                       key={interest.id}
                       style={[
-                        tw`w-[48%] mb-4 p-5 rounded-xl border-2 transition-all duration-200`,
-                        isSelected
-                          ? tw`border-purple-500 bg-purple-50 shadow-sm`
-                          : tw`border-gray-200 bg-white hover:border-gray-300`
+                        {
+                          width: cardWidth,
+                          marginBottom: 16,
+                          paddingVertical: 18,
+                          paddingHorizontal: 12,
+                          borderRadius: 16,
+                          borderWidth: 1.5,
+                          borderColor: isSelected ? BRAND.primary : '#E5E7EB',
+                          backgroundColor: isSelected ? BRAND.light : '#FFFFFF',
+                          shadowColor: '#000',
+                          shadowOpacity: 0.04,
+                          shadowRadius: 8,
+                          elevation: 2,
+                        }
                       ]}
                       onPress={() => toggleInterest(interest.id)}
                     >
                       <View style={tw`items-center`}>
                         <View style={[
-                          tw`w-14 h-14 rounded-full items-center justify-center mb-3 transition-all duration-200`,
                           {
-                            backgroundColor: isSelected ? interest.color : '#F8FAFC',
-                            transform: [{ scale: isSelected ? 1.05 : 1 }]
+                            width: 44,
+                            height: 44,
+                            borderRadius: 22,
+                            backgroundColor: isSelected ? BRAND.primary : '#F3F4F6',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginBottom: 10,
                           }
                         ]}>
                           <IconComponent
                             name={interest.icon}
-                            size={26}
-                            color={isSelected ? '#FFFFFF' : interest.color}
+                            size={20}
+                            color={isSelected ? '#FFFFFF' : BRAND.primary}
                           />
                         </View>
                         <Text style={[
-                          { fontFamily: 'Poppins-SemiBold' },
-                          tw`text-base text-center leading-5`,
-                          isSelected ? tw`text-purple-700` : tw`text-gray-700`
+                          { fontFamily: 'Poppins-Medium', fontSize: 13, textAlign: 'center' },
+                          isSelected ? { color: BRAND.primary } : { color: '#374151' }
                         ]}>
                           {interest.name}
                         </Text>
@@ -408,8 +416,6 @@ const OnboardingScreen = () => {
       case 3:
         return (
           <View style={tw`flex-1`}>
-            <View style={tw`items-center mb-4`}>
-            </View>
             <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-gray-900 mb-3`]}>
               Professional Role
             </Text>
@@ -434,7 +440,11 @@ const OnboardingScreen = () => {
                     <LinearGradient
                       colors={role.gradient}
                       style={[
-                        tw`p-6 rounded-xl transition-all duration-200`,
+                        {
+                          paddingVertical: 18,
+                          paddingHorizontal: 18,
+                          borderRadius: 20,
+                        },
                         isSelected && tw`border-4 border-white shadow-lg`,
                         !isSelected && tw`opacity-90`
                       ]}
@@ -444,17 +454,28 @@ const OnboardingScreen = () => {
                       <View style={tw`flex-row items-center`}>
                         <View style={tw`flex-row items-center flex-1`}>
                           <View style={[
-                            tw`w-12 h-12 rounded-full bg-white bg-opacity-20 items-center justify-center mr-4 transition-all duration-200`,
-                            isSelected && tw`bg-opacity-30`
+                            {
+                              width: 40,
+                              height: 40,
+                              borderRadius: 20,
+                              backgroundColor: 'rgba(255,255,255,0.2)',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              marginRight: 16,
+                            },
+                            isSelected && { backgroundColor: 'rgba(255,255,255,0.3)' }
                           ]}>
                             <IconComponent
                               name={role.icon}
-                              size={24}
+                              size={20}
                               color="#FFFFFF"
                             />
                           </View>
                           <View style={tw`flex-1`}>
-                            <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-white text-xl mb-1`]}>
+                            <Text style={[
+                              { fontFamily: 'Poppins-SemiBold', fontSize: 16, color: '#FFFFFF' },
+                              tw`mb-1`
+                            ]}>
                               {role.name}
                             </Text>
                             <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white text-opacity-90 text-sm leading-5`]}>
@@ -513,10 +534,10 @@ const OnboardingScreen = () => {
             <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-lg text-center text-gray-600 mb-6 leading-7`]}>
               You're now ready to connect with professional women worldwide, access exclusive resources, and accelerate your growth.
             </Text>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-base text-center text-purple-700 mb-2 italic`]}>
+            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-base text-center mb-2 italic`, { color: BRAND.primary }]}>
               "{quotes[3].text}"
             </Text>
-            <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-sm text-center text-purple-600 mb-12`]}>
+            <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-sm text-center mb-12`, { color: BRAND.accent }]}>
               — {quotes[3].author}
             </Text>
 
@@ -533,6 +554,12 @@ const OnboardingScreen = () => {
 
   return (
     <Container style={tw`flex-1 bg-white`}>
+      <StatusBar 
+        style="light" 
+        translucent 
+        backgroundColor="transparent" 
+      />
+      
       {Platform.OS !== 'web' && (
         <AnimatedBackground
           type="floating"
@@ -541,18 +568,28 @@ const OnboardingScreen = () => {
         />
       )}
 
-      {/* Enhanced Header with Professional Gradient */}
-      <LinearGradient
-        colors={['#1E3A8A', '#3730A3', '#6A1B9A']}
-        style={[
-          tw`h-60 rounded-b-3xl shadow-lg`,
-          Platform.OS === 'web' ? { marginTop: 0 } : tw`mt-[-750]`,
-        ]}
-
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      >
-        <View style={tw`flex-1 justify-center items-center pt-8`}>
+      {/* Enhanced Header with Professional Gradient - Clean Version */}
+<LinearGradient
+  colors={[BRAND.dark, BRAND.primary, BRAND.accent]}
+  style={[
+    {
+      height: screenHeight * 0.18,
+      borderBottomLeftRadius: 32,
+      borderBottomRightRadius: 32,
+      marginTop: Platform.OS === 'android' ? -600 : 0, // 👈 THIS
+      shadowColor: '#000',
+      shadowOpacity: 0.15,
+      shadowRadius: 10,
+      elevation: 8,
+    }
+  ]}
+  start={{ x: 0, y: 0 }}
+  end={{ x: 1, y: 1 }}
+>
+        <View style={[
+          tw`flex-1 justify-center items-center`,
+          { paddingTop: Platform.OS === 'android' ? 10 : 32 }
+        ]}>
           <LottieLoader
             type={getAnimationType()}
             size={140}
@@ -561,7 +598,14 @@ const OnboardingScreen = () => {
       </LinearGradient>
 
       {/* Enhanced Progress Section */}
-      <View style={tw`px-6 -mt-8 mb-6`}>
+      <View
+        style={[
+          tw`px-6 mb-6`,
+          {
+            marginTop: Platform.OS === 'web' ? -32 : -60,
+          },
+        ]}
+      >
         <View style={tw`bg-white rounded-2xl p-6 shadow-lg border border-gray-100`}>
           <StepIndicator />
 
@@ -579,12 +623,21 @@ const OnboardingScreen = () => {
               Step {step} of 4
             </Text>
           </View>
-
         </View>
       </View>
 
-      {/* Main Content Area */}
-      <View style={tw`flex-1 px-6 pb-8`}>
+      {/* Main Content Area - Responsive Web Polish */}
+      <View
+        style={[
+          tw`flex-1 pb-8`,
+          {
+            paddingHorizontal: isWeb ? 80 : 24,
+            maxWidth: isWeb ? 900 : '100%',
+            alignSelf: 'center',
+            width: '100%',
+          }
+        ]}
+      >
         <Animated.View
           style={[
             tw`flex-1`,

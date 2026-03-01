@@ -2,20 +2,35 @@
 const jwt = require('jsonwebtoken');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const User = require('../models/User');
 const { sendEmail } = require('../utils/email.js'); // EMAIL ONLY NOW
+const { redisClient } = require('../config/redis');
 
 /* ==========================================================
-   JWT GENERATOR
+   JWT GENERATOR (HARDENED with tokenVersion)
 ========================================================== */
-const generateToken = (userId) => {
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
-    expiresIn: '30d',
-  });
+const generateToken = (user) => {
+  return jwt.sign(
+    {
+      id: user._id,
+      version: user.tokenVersion || 0
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: '30d' }
+  );
 };
 
 /* ==========================================================
-   REGISTER USER
+   HELPER: Normalize Email
+========================================================== */
+const normalizeEmail = (email) => {
+  return email.toLowerCase().trim();
+};
+
+/* ==========================================================
+   REGISTER USER (UPDATED - Redis First)
 ========================================================== */
 exports.register = async (req, res) => {
   try {
@@ -23,65 +38,87 @@ exports.register = async (req, res) => {
 
     console.log('📥 Registration request:', req.body);
 
-    const existingUser = await User.findOne({
-      $or: [{ email }, { phone }],
-    });
-
-    if (existingUser) {
+    // 🔹 FIX 2 - Basic input validation
+    if (!email || !password) {
       return res.status(400).json({
         success: false,
-        message: 'User already exists with this email or phone',
+        message: "Email and password are required",
       });
     }
 
-    // 1️⃣ Create new user (hasRegistered stays default=false)
-    const user = await User.create({
-      email,
-      password,
-      profile,
-      phone,
-      interests: interests || []
-    });
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters long",
+      });
+    }
 
-    // 2️⃣ Mark as registered
-    user.hasRegistered = true;
+    // 🔹 FIX 1 - Normalize email
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
 
-    // 3️⃣ Generate verification code
-    const emailCode = user.generateEmailVerificationCode();
+    const normalizedEmail = normalizeEmail(email);
 
-    // 4️⃣ Save user
-    await user.save();
+    // 🔹 Block ONLY if verified user exists
+    const existingUser = await User.findOne({ email: normalizedEmail });
 
-    // 5️⃣ Send verification email
+    if (existingUser && existingUser.isVerified?.email) {
+      return res.status(400).json({
+        success: false,
+        message: "User already exists",
+      });
+    }
+
+    // 🔹 Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // 🔹 Hash OTP before storing
+    const hashedOtp = crypto
+      .createHash("sha256")
+      .update(otp)
+      .digest("hex");
+
+    const redisKey = `register:${normalizedEmail}`;
+
+    // 🔹 Overwrite allowed (retry safe)
+    await redisClient.set(
+      redisKey,
+      JSON.stringify({
+        email: normalizedEmail,
+        password: password,
+        profile,
+        phone,
+        interests: interests || [],
+        otp: hashedOtp,
+      }),
+      {
+        EX: 600, // 10 min TTL
+      }
+    );
+
+    // 🔹 Send email
     try {
       await sendEmail({
-        to: email,
-        subject: 'Verify Your Email - Asiyo Global Women Connect',
+        to: normalizedEmail,
+        subject: "Verify Your Email - Asiyo Global Women Connect",
         html: `
           <h2>Email Verification</h2>
-          <p>Your Asiyo verification code is:</p>
-          <h1 style="font-size: 32px; letter-spacing: 4px;">${emailCode}</h1>
-          <p>This code expires in 10 minutes.</p>
+          <h1 style="font-size: 32px; letter-spacing: 4px;">${otp}</h1>
+          <p>Expires in 10 minutes</p>
         `,
       });
-
       console.log("📧 Verification email sent successfully");
     } catch (emailErr) {
       console.error("❌ Email sending FAILED:", emailErr.message);
     }
 
-    // 6️⃣ Send response
     return res.status(201).json({
       success: true,
-      message: 'Registration successful. Please verify your email.',
-      data: {
-        user: {
-          id: user._id,
-          email: user.email,
-          profile: user.profile,
-          hasRegistered: true  // ⭐ Return it to frontend
-        }
-      }
+      message: "Verification code sent",
     });
 
   } catch (error) {
@@ -93,16 +130,223 @@ exports.register = async (req, res) => {
   }
 };
 
+/* ==========================================================
+   VERIFY EMAIL (UPDATED - Creates Mongo User)
+========================================================== */
+exports.verifyEmail = async (req, res) => {
+  try {
+    const { email, token } = req.body;
 
+    // 🔹 FIX 1 - Normalize email
+    const normalizedEmail = normalizeEmail(email);
+
+    // 🔹 FIX 3 - OTP Brute Force Protection
+    const attemptsKey = `register_attempts:${normalizedEmail}`;
+    const attempts = await redisClient.incr(attemptsKey);
+
+    if (attempts === 1) {
+      await redisClient.expire(attemptsKey, 600); // 10 minutes
+    }
+
+    if (attempts > 5) {
+      return res.status(429).json({
+        success: false,
+        message: "Too many attempts. Please register again.",
+      });
+    }
+
+    const redisKey = `register:${normalizedEmail}`;
+    const tempData = await redisClient.get(redisKey);
+
+    if (!tempData) {
+      return res.status(400).json({
+        success: false,
+        message: "Registration expired. Please register again.",
+      });
+    }
+
+    const parsed = JSON.parse(tempData);
+
+    const hashedInputOtp = crypto
+      .createHash("sha256")
+      .update(token)
+      .digest("hex");
+
+    if (hashedInputOtp !== parsed.otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid verification code",
+      });
+    }
+
+    // 🔹 Check for existing user one more time (race condition protection)
+    let user = await User.findOne({ email: normalizedEmail });
+
+    if (user && user.isVerified?.email) {
+      await redisClient.del(redisKey);
+      await redisClient.del(attemptsKey);
+      return res.status(400).json({
+        success: false,
+        message: "User already verified",
+      });
+    }
+
+    if (user) {
+      // Update existing unverified user
+      user.password = parsed.password;
+      user.profile = parsed.profile;
+      user.phone = parsed.phone;
+      user.interests = parsed.interests;
+      user.isVerified = { email: true };
+      user.hasRegistered = true;
+      user.tokenVersion = 0;
+      await user.save();
+    } else {
+      // 🔹 Create verified user in MongoDB
+      user = await User.create({
+        email: normalizedEmail,
+        password: parsed.password,
+        profile: parsed.profile,
+        phone: parsed.phone,
+        interests: parsed.interests,
+        isVerified: { email: true },
+        hasRegistered: true,
+        tokenVersion: 0,
+      });
+    }
+
+    // 🔹 Delete Redis records
+    await redisClient.del(redisKey);
+    await redisClient.del(attemptsKey);
+
+    const jwtToken = generateToken(user);
+
+    return res.json({
+      success: true,
+      message: "Email verified successfully",
+      data: {
+        user: {
+          id: user._id,
+          email: user.email,
+          profile: user.profile,
+          hasRegistered: true
+        },
+        token: jwtToken,
+      },
+    });
+
+  } catch (error) {
+    console.error('❌ Verify email error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 /* ==========================================================
-   LOGIN
+   RESEND EMAIL OTP (REGISTRATION)
+========================================================== */
+exports.resendEmailOTP = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    const normalizedEmail = normalizeEmail(email);
+    const redisKey = `register:${normalizedEmail}`;
+    const cooldownKey = `register_resend:${normalizedEmail}`;
+
+    // 🔒 Cooldown protection (60 seconds)
+    const cooldown = await redisClient.get(cooldownKey);
+    if (cooldown) {
+      return res.status(429).json({
+        success: false,
+        message: "Please wait before requesting another code.",
+      });
+    }
+
+    const tempData = await redisClient.get(redisKey);
+
+    if (!tempData) {
+      return res.status(400).json({
+        success: false,
+        message: "Registration expired. Please register again.",
+      });
+    }
+
+    const parsed = JSON.parse(tempData);
+
+    // 🔹 Generate new OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const hashedOtp = crypto
+      .createHash("sha256")
+      .update(otp)
+      .digest("hex");
+
+    // 🔹 Update Redis with new OTP and reset TTL
+    await redisClient.set(
+      redisKey,
+      JSON.stringify({
+        ...parsed,
+        otp: hashedOtp,
+      }),
+      { EX: 600 } // reset 10 min
+    );
+
+    // 🔹 Set cooldown key
+    await redisClient.set(cooldownKey, "1", { EX: 60 });
+
+    // 🔹 Send new email
+    await sendEmail({
+      to: normalizedEmail,
+      subject: "Verify Your Email - Asiyo Global Women Connect",
+      html: `
+        <h2>Email Verification</h2>
+        <h1 style="font-size: 32px; letter-spacing: 4px;">${otp}</h1>
+        <p>Expires in 10 minutes</p>
+      `,
+    });
+
+    return res.json({
+      success: true,
+      message: "Verification code resent successfully",
+    });
+
+  } catch (error) {
+    console.error("❌ resendEmailOTP error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/* ==========================================================
+   LOGIN (HARDENED)
 ========================================================== */
 exports.login = async (req, res) => {
   try {
     const { email, password, twoFactorCode } = req.body;
 
-    const user = await User.findOne({ email }).select('+password');
+    // 🔹 FIX 2 - Basic input validation
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    // 🔹 FIX 1 - Normalize email
+    const normalizedEmail = normalizeEmail(email);
+
+    const user = await User.findOne({ email: normalizedEmail }).select('+password');
 
     if (!user || !(await user.correctPassword(password, user.password))) {
       return res.status(401).json({
@@ -115,6 +359,14 @@ exports.login = async (req, res) => {
       return res.status(403).json({
         success: false,
         message: 'Please verify your email before logging in.',
+      });
+    }
+
+    // 🔹 Check if account is active
+    if (user.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: "Account is deactivated",
       });
     }
 
@@ -142,7 +394,11 @@ exports.login = async (req, res) => {
       }
     }
 
-    const token = generateToken(user._id);
+    // 🔥 Update last login timestamp (with validation disabled for performance)
+    user.lastLoginAt = Date.now();
+    await user.save({ validateBeforeSave: false });
+
+    const token = generateToken(user);
 
     return res.json({
       success: true,
@@ -189,55 +445,9 @@ exports.getMe = async (req, res) => {
   }
 };
 
-
 /* ==========================================================
-   VERIFY EMAIL
+   VERIFY RESET TOKEN
 ========================================================== */
-exports.verifyEmail = async (req, res) => {
-  try {
-    const { token: emailToken } = req.body;
-
-    const user = await User.findOne({
-      'verification.emailToken': emailToken,
-      'verification.emailTokenExpires': { $gt: Date.now() },
-    });
-
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid or expired verification token',
-      });
-    }
-
-    user.isVerified.email = true;
-    user.verification.emailToken = undefined;
-    user.verification.emailTokenExpires = undefined;
-    await user.save();
-
-    const token = generateToken(user._id);
-
-    return res.json({
-      success: true,
-      message: 'Email verified successfully',
-      data: {
-        user: {
-          id: user._id,
-          email: user.email,
-          profile: user.profile,
-        },
-        token,
-      },
-    });
-
-  } catch (error) {
-    console.error('❌ Verify email error:', error);
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
 exports.verifyResetToken = async (req, res) => {
   try {
     const { token } = req.body;
@@ -268,7 +478,6 @@ exports.verifyResetToken = async (req, res) => {
     });
   }
 };
-
 
 /* ==========================================================
    SETUP 2FA
@@ -345,39 +554,45 @@ exports.verify2FA = async (req, res) => {
 };
 
 /* ==========================================================
-   FORGOT PASSWORD (EMAIL ONLY — Twilio Removed)
+   FORGOT PASSWORD (HARDENED - No Email Enumeration)
 ========================================================== */
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({
+    // 🔹 FIX 2 - Basic input validation
+    if (!email) {
+      return res.status(400).json({
         success: false,
-        message: 'User not found',
+        message: "Email is required",
       });
     }
 
-    const resetToken = user.generatePhoneVerificationCode();
-    await user.save();
+    // 🔹 FIX 1 - Normalize email
+    const normalizedEmail = normalizeEmail(email);
 
-    // REPLACEMENT — ALWAYS SEND EMAIL, NEVER SMS
-    await sendEmail({
-      to: user.email,
-      subject: 'Password Reset - Asiyo Global Women Connect',
-      html: `
-        <h2>Password Reset Code</h2>
-        <p>Your reset code is:</p>
-        <h1 style="font-size: 32px; letter-spacing: 4px;">${resetToken}</h1>
-        <p>This code expires in 10 minutes.</p>
-      `,
-    });
+    const user = await User.findOne({ email: normalizedEmail });
 
+    // 🔥 Block email enumeration
+    if (user) {
+      const resetToken = user.generatePhoneVerificationCode();
+      await user.save();
+
+      await sendEmail({
+        to: user.email,
+        subject: 'Password Reset - Asiyo Global Women Connect',
+        html: `
+          <h2>Password Reset Code</h2>
+          <h1 style="font-size: 32px; letter-spacing: 4px;">${resetToken}</h1>
+          <p>This code expires in 10 minutes.</p>
+        `,
+      });
+    }
+
+    // Always return same message regardless of whether user exists
     return res.json({
       success: true,
-      message: 'Password reset code sent successfully',
+      message: "If an account with that email exists, a reset code has been sent.",
     });
 
   } catch (error) {
@@ -390,11 +605,26 @@ exports.forgotPassword = async (req, res) => {
 };
 
 /* ==========================================================
-   RESET PASSWORD
+   RESET PASSWORD (HARDENED - Invalidates Sessions)
 ========================================================== */
 exports.resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
+
+    // 🔹 FIX 2 - Basic input validation
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Token and new password are required",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters long",
+      });
+    }
 
     const user = await User.findOne({
       'verification.phoneToken': token,
@@ -408,7 +638,9 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
+    // 🔥 Invalidate all old sessions
     user.password = newPassword;
+    user.tokenVersion += 1; // tokenVersion must have default:0 in schema
     user.verification.phoneToken = undefined;
     user.verification.phoneTokenExpires = undefined;
     await user.save();
@@ -428,14 +660,26 @@ exports.resetPassword = async (req, res) => {
 };
 
 /* ==========================================================
-   ADMIN LOGIN
+   ADMIN LOGIN (HARDENED)
 ========================================================== */
 exports.adminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
+
+    // 🔹 FIX 2 - Basic input validation
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
     console.log("Request body:", req.body);
 
-    const user = await User.findOne({ email }).select('+password');
+    // 🔹 FIX 1 - Normalize email
+    const normalizedEmail = normalizeEmail(email);
+
+    const user = await User.findOne({ email: normalizedEmail }).select('+password');
 
     if (!user || !(await user.correctPassword(password, user.password))) {
       return res.status(401).json({
@@ -459,7 +703,19 @@ exports.adminLogin = async (req, res) => {
       });
     }
 
-    const token = generateToken(user._id);
+    // 🔹 Check if account is active
+    if (user.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: "Account is deactivated",
+      });
+    }
+
+    // 🔥 Update last login timestamp (with validation disabled for performance)
+    user.lastLoginAt = Date.now();
+    await user.save({ validateBeforeSave: false });
+
+    const token = generateToken(user);
 
     return res.json({
       success: true,
@@ -535,4 +791,3 @@ exports.removeAdmin = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-

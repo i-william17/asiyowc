@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
+// app/(auth)/forgot-password.js
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
   TextInput,
   SafeAreaView,
-  Alert,
   ScrollView,
   Animated,
+  KeyboardAvoidingView,
+  TouchableWithoutFeedback,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useForm, Controller } from 'react-hook-form';
@@ -16,14 +20,58 @@ import AnimatedButton from '../../components/ui/AnimatedButton';
 import tw from '../../utils/tw';
 import { authService } from '../../services/auth';
 
+// ============================================
+// CROSS-PLATFORM WRAPPERS
+// ============================================
+
+/**
+ * KeyboardWrapper - Conditionally applies KeyboardAvoidingView only on mobile
+ */
+const KeyboardWrapper = ({ children }) => {
+  if (Platform.OS === 'web') {
+    return <View style={{ flex: 1 }}>{children}</View>;
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}
+    >
+      {children}
+    </KeyboardAvoidingView>
+  );
+};
+
+/**
+ * DismissKeyboardWrapper - Allows keyboard dismissal on mobile only
+ * On web, this is just a View to avoid interfering with input focus
+ */
+const DismissKeyboardWrapper = ({ children }) => {
+  if (Platform.OS === 'web') {
+    return <View style={{ flex: 1 }}>{children}</View>;
+  }
+
+  return (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <View style={{ flex: 1 }}>{children}</View>
+    </TouchableWithoutFeedback>
+  );
+};
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
+
 const ForgotPasswordScreen = () => {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  
+
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
-  
-  const fadeAnim = useState(new Animated.Value(0))[0];
+
+  // ✅ FIXED: useRef instead of useState to prevent animation reset on web
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const showMessage = (type, message) => {
     if (type === 'success') {
@@ -72,7 +120,10 @@ const ForgotPasswordScreen = () => {
       showMessage('success', 'OTP sent to your email!');
 
       setTimeout(() => {
-        router.push('/(auth)/verify-reset', { email });
+        router.push({
+          pathname: '/(auth)/verify-reset',
+          params: { email }
+        });
       }, 1200);
 
     } catch (error) {
@@ -86,124 +137,242 @@ const ForgotPasswordScreen = () => {
   };
 
   return (
-    <SafeAreaView style={tw`flex-1 bg-white`}>
-      <LinearGradient
-        colors={['#6A1B9A', '#8E24AA']}
-        style={tw`h-40 rounded-b-3xl`}
-      >
-        <View style={tw`flex-1 justify-center items-center`}>
-          <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-white mt-5`]}>
-            Asiyo Women Connect App
-          </Text>
-          <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white opacity-90 mt-5`]}>
-            Reset Password
-          </Text>
-        </View>
-      </LinearGradient>
-
-      <ScrollView
-        style={tw`flex-1 px-6 py-8`}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Center Animation */}
-        <View style={tw`items-center mb-8`}>
-          <LottieLoader type="meditation" size={120} />
-        </View>
-
-        {/* Title */}
-        <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-purple-900 mb-2`]}>
-          Forgot Password?
-        </Text>
-        <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-base text-center text-gray-600 mb-8`]}>
-          Enter your email and we’ll send you a reset code.
-        </Text>
-
-        {/* SUCCESS / ERROR BANNER */}
-        {successMessage !== '' && (
-          <Animated.View
-            style={[
-              tw`bg-green-100 border border-green-400 p-4 rounded-xl mb-6`,
-              { opacity: fadeAnim }
-            ]}
-          >
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-green-700 text-center`]}>
-              ✅ {successMessage}
-            </Text>
-          </Animated.View>
-        )}
-
-        {errorMessage !== '' && (
-          <Animated.View
-            style={[
-              tw`bg-red-100 border border-red-400 p-4 rounded-xl mb-6`,
-              { opacity: fadeAnim }
-            ]}
-          >
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-red-700 text-center`]}>
-              ❌ {errorMessage}
-            </Text>
-          </Animated.View>
-        )}
-
-        {/* Email Input */}
-        <View style={tw`mb-6`}>
-          <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-sm text-gray-700 mb-2`]}>
-            Email Address
-          </Text>
-
-          <Controller
-            control={control}
-            rules={{
-              required: 'Email is required',
-              pattern: {
-                value: /^\S+@\S+$/i,
-                message: 'Invalid email address'
-              }
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <KeyboardWrapper>
+        {/* HEADER - FULL WIDTH - OUTSIDE SCROLLVIEW */}
+        <View
+          style={{
+            backgroundColor: '#6A1B9A',
+            height: 170,
+            borderBottomLeftRadius: 40,
+            borderBottomRightRadius: 40,
+            shadowColor: '#000',
+            shadowOpacity: 0.25,
+            shadowRadius: 15,
+            elevation: 12,
+          }}
+        >
+          <LinearGradient
+            colors={['#4A148C', '#6A1B9A']}
+            style={{
+              flex: 1,
+              borderBottomLeftRadius: 40,
+              borderBottomRightRadius: 40,
+              justifyContent: 'center',
+              alignItems: 'center',
             }}
-            render={({ field: { onChange, onBlur, value } }) => (
-              <TextInput
-                style={[
-                  tw`border-2 border-gray-200 rounded-2xl px-4 py-4 text-base`,
-                  errors.email && tw`border-red-500`
-                ]}
-                placeholder="Enter your email"
-                placeholderTextColor="#9CA3AF"
-                onBlur={onBlur}
-                onChangeText={onChange}
-                value={value}
-                autoCapitalize="none"
-                keyboardType="email-address"
-              />
-            )}
-            name="email"
-          />
-
-          {errors.email && (
-            <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-red-500 text-sm mt-1`]}>
-              {errors.email.message}
+          >
+            <Text
+              style={{
+                fontFamily: 'Poppins-Bold',
+                fontSize: 22,
+                color: '#FFFFFF',
+                marginTop: 10,
+              }}
+            >
+              Asiyo Women Connect
             </Text>
-          )}
+
+            <Text
+              style={{
+                fontFamily: 'Poppins-Regular',
+                color: 'rgba(255,255,255,0.85)',
+                marginTop: 6,
+              }}
+            >
+              Reset Password
+            </Text>
+          </LinearGradient>
         </View>
 
-        {/* Buttons */}
-        <AnimatedButton
-          title="Send Reset Code"
-          onPress={handleSubmit(handleResetRequest)}
-          variant="primary"
-          size="lg"
-          loading={loading}
-          fullWidth
-          style={tw`mb-4`}
-        />
+        <DismissKeyboardWrapper>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{
+              flexGrow: 1,
+              paddingHorizontal: 24,
+              paddingTop: 24,
+              paddingBottom: 60,
+            }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={
+              Platform.OS === 'ios' ? 'interactive' : 'on-drag'
+            }
+          >
+            {/* CENTERED CONTAINER FOR WEB CONSISTENCY */}
+            <View
+              style={{
+                width: '100%',
+                maxWidth: 420,
+                alignSelf: 'center',
+              }}
+            >
+              {/* Animation */}
+              <View style={{ alignItems: 'center', marginBottom: 24 }}>
+                <LottieLoader type="meditation" size={110} />
+              </View>
 
-        <AnimatedButton
-          title="Back to Login"
-          variant="secondary"
-          size="md"
-          onPress={() => router.back()}
-          fullWidth
-        />
-      </ScrollView>
+              {/* Title */}
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Bold',
+                  fontSize: 22,
+                  textAlign: 'center',
+                  color: '#6A1B9A',
+                  marginBottom: 6,
+                }}
+              >
+                Forgot Password?
+              </Text>
+
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Light',
+                  fontSize: 14,
+                  textAlign: 'center',
+                  color: '#6B7280',
+                  marginBottom: 28,
+                }}
+              >
+                Enter your email and we’ll send you a reset code.
+              </Text>
+
+              {/* SUCCESS / ERROR */}
+              {successMessage !== '' && (
+                <Animated.View
+                  style={[
+                    {
+                      backgroundColor: '#DCFCE7',
+                      padding: 14,
+                      borderRadius: 16,
+                      marginBottom: 20,
+                      opacity: fadeAnim,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontFamily: 'Poppins-Medium',
+                      color: '#166534',
+                      textAlign: 'center',
+                      fontSize: 14,
+                    }}
+                  >
+                    ✅ {successMessage}
+                  </Text>
+                </Animated.View>
+              )}
+
+              {errorMessage !== '' && (
+                <Animated.View
+                  style={[
+                    {
+                      backgroundColor: '#FEE2E2',
+                      padding: 14,
+                      borderRadius: 16,
+                      marginBottom: 20,
+                      opacity: fadeAnim,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontFamily: 'Poppins-Medium',
+                      color: '#991B1B',
+                      textAlign: 'center',
+                      fontSize: 14,
+                    }}
+                  >
+                    ❌ {errorMessage}
+                  </Text>
+                </Animated.View>
+              )}
+
+              {/* Email Field */}
+              <View style={{ marginBottom: 24 }}>
+                <Text
+                  style={{
+                    fontFamily: 'Poppins-Medium',
+                    fontSize: 13,
+                    color: '#374151',
+                    marginBottom: 6,
+                  }}
+                >
+                  Email Address
+                </Text>
+
+                <Controller
+                  control={control}
+                  rules={{
+                    required: 'Email is required',
+                    pattern: {
+                      value: /^\S+@\S+$/i,
+                      message: 'Invalid email address'
+                    }
+                  }}
+                  render={({ field: { onChange, onBlur, value } }) => (
+                    <TextInput
+                      style={[
+                        {
+                          borderWidth: 2,
+                          borderColor: errors.email ? '#EF4444' : '#E5E7EB',
+                          borderRadius: 16,
+                          paddingHorizontal: 16,
+                          paddingVertical: 12,
+                          fontFamily: 'Poppins-Regular',
+                          fontSize: 14,
+                          color: '#111827',
+                        },
+                      ]}
+                      placeholder="Enter your email"
+                      placeholderTextColor="#9CA3AF"
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                      onBlur={onBlur}
+                      onChangeText={onChange}
+                      value={value}
+                    />
+                  )}
+                  name="email"
+                />
+
+                {errors.email && (
+                  <Text
+                    style={{
+                      fontFamily: 'Poppins-Regular',
+                      color: '#EF4444',
+                      fontSize: 12,
+                      marginTop: 4,
+                    }}
+                  >
+                    {errors.email.message}
+                  </Text>
+                )}
+              </View>
+
+              {/* Buttons */}
+              <AnimatedButton
+                title="Send Reset Code"
+                onPress={handleSubmit(handleResetRequest)}
+                variant="primary"
+                size="lg"
+                loading={loading}
+                fullWidth
+                style={{ marginBottom: 14 }}
+              />
+
+              <AnimatedButton
+                title="Back to Login"
+                variant="secondary"
+                size="md"
+                onPress={() => router.back()}
+                fullWidth
+              />
+            </View>
+          </ScrollView>
+        </DismissKeyboardWrapper>
+      </KeyboardWrapper>
     </SafeAreaView>
   );
 };

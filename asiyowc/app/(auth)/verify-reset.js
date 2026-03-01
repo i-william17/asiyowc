@@ -1,3 +1,4 @@
+// app/(auth)/verify-otp.js
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -5,9 +6,9 @@ import {
   TextInput,
   SafeAreaView,
   TouchableOpacity,
-  Alert
+  Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import axios from 'axios';
 import LottieLoader from '../../components/animations/LottieLoader';
@@ -23,11 +24,14 @@ const VerifyResetCodeScreen = () => {
 
   const [successMsg, setSuccessMsg] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [infoMsg, setInfoMsg] = useState(null);
 
   const [timer, setTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
 
   const inputs = useRef([]);
+  const params = useLocalSearchParams();
+  const email = params.email;
 
   useEffect(() => {
     let interval;
@@ -92,102 +96,265 @@ const VerifyResetCodeScreen = () => {
   };
 
   const handleResend = async () => {
+    if (!canResend) return;
+
     try {
+      if (!email) {
+        setErrorMsg("Missing email information.");
+        return;
+      }
+
       setTimer(60);
       setCanResend(false);
       setOtp(['', '', '', '', '', '']);
+      setErrorMsg(null);
+      setSuccessMsg(null);
+      setInfoMsg(null);
 
       await axios.post(`${server}/auth/forgot-password`, {
-        email: "yourEmailHere@todo.com"  // You will fill this from previous screen
+        email
       });
 
-      Alert.alert("Code Sent", "A new reset code has been sent to your email.");
+      setInfoMsg("A new verification code has been sent to your email.");
     } catch (err) {
-      Alert.alert("Error", "Could not resend reset code.");
+      console.log("❌ RESEND ERROR:", err?.response?.data || err);
+
+      setErrorMsg(
+        err?.response?.data?.message || "Failed to resend code"
+      );
     }
   };
 
   return (
-    <SafeAreaView style={tw`flex-1 bg-white`}>
-      <LinearGradient
-        colors={['#6A1B9A', '#8E24AA']}
-        style={tw`h-40 rounded-b-3xl`}
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      {/* ---------------- HEADER ---------------- */}
+      <View
+        style={{
+          backgroundColor: '#6A1B9A',
+          height: 170,
+          borderBottomLeftRadius: 40,
+          borderBottomRightRadius: 40,
+          shadowColor: '#000',
+          shadowOpacity: 0.25,
+          shadowRadius: 15,
+          elevation: 12,
+        }}
       >
-        <View style={tw`flex-1 justify-center items-center`}>
-          <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-white mt-5`]}>
+        <LinearGradient
+          colors={['#4A148C', '#6A1B9A']}
+          style={{
+            flex: 1,
+            borderBottomLeftRadius: 40,
+            borderBottomRightRadius: 40,
+            justifyContent: 'center',
+            alignItems: 'center',
+            shadowColor: '#4A148C',
+            shadowOpacity: 0.3,
+            shadowRadius: 20,
+          }}
+        >
+          <Text
+            style={{
+              fontFamily: 'Poppins-Bold',
+              fontSize: 22,
+              color: '#FFFFFF',
+              marginTop: 10,
+            }}
+          >
             Verify Reset Code
           </Text>
-          <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white opacity-90 mt-5`]}>
+
+          <Text
+            style={{
+              fontFamily: 'Poppins-Regular',
+              color: 'rgba(255,255,255,0.85)',
+              marginTop: 6,
+            }}
+          >
             Enter the 6-digit reset code
           </Text>
-        </View>
-      </LinearGradient>
+        </LinearGradient>
+      </View>
 
-      <View style={tw`flex-1 px-6 py-8`}>
-        <View style={tw`items-center mb-8`}>
-          <LottieLoader type="otp" size={120} />
-        </View>
-
-        <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-purple-900 mb-2`]}>
-          Enter Reset Code
-        </Text>
-        <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-center text-gray-600 mb-8`]}>
-          We sent a password reset code to your email.
-        </Text>
-
-        {/* OTP Inputs */}
-        <View style={tw`flex-row justify-between mb-8`}>
-          {otp.map((digit, index) => (
-            <TextInput
-              key={index}
-              ref={ref => (inputs.current[index] = ref)}
-              style={[
-                tw`w-12 h-12 border-2 rounded-xl text-center text-lg font-bold`,
-                digit ? tw`border-purple-500 bg-purple-50` : tw`border-gray-300`
-              ]}
-              value={digit}
-              onChangeText={(v) => handleOtpChange(v, index)}
-              keyboardType="number-pad"
-              maxLength={1}
+      <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 60 }}>
+        {/* Centered Container - Web Optimized */}
+        <View
+          style={{
+            width: '100%',
+            maxWidth: 420,
+            alignSelf: 'center',
+          }}
+        >
+          <View style={{ alignItems: 'center', marginBottom: 32 }}>
+            <LottieLoader 
+              type="otp" 
+              size={Platform.OS === 'web' ? 100 : 120} 
             />
-          ))}
-        </View>
-
-        {/* SUCCESS MESSAGE */}
-        {successMsg && (
-          <View style={tw`p-4 mb-3 bg-green-100 rounded-xl`}>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-green-700 text-center`]}>
-              {successMsg}
-            </Text>
           </View>
-        )}
 
-        {/* ERROR MESSAGE */}
-        {errorMsg && (
-          <View style={tw`p-4 mb-3 bg-red-100 rounded-xl`}>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-red-700 text-center`]}>
-              {errorMsg}
-            </Text>
+          <Text
+            style={{
+              fontFamily: 'Poppins-Bold',
+              fontSize: 22,
+              color: '#6A1B9A',
+              textAlign: 'center',
+              marginBottom: 8,
+            }}
+          >
+            Enter Reset Code
+          </Text>
+          
+          <Text
+            style={{
+              fontFamily: 'Poppins-Light',
+              fontSize: 14,
+              color: '#6B7280',
+              textAlign: 'center',
+              marginBottom: 32,
+            }}
+          >
+            We sent a password reset code to your email.
+          </Text>
+
+          {/* OTP Inputs - Centered with fixed spacing */}
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'center',
+              marginBottom: 32,
+            }}
+          >
+            {otp.map((digit, index) => (
+              <TextInput
+                key={index}
+                ref={ref => (inputs.current[index] = ref)}
+                style={[
+                  {
+                    width: 48,
+                    height: 52,
+                    borderWidth: 2,
+                    borderColor: digit ? '#6A1B9A' : '#D1D5DB',
+                    borderRadius: 14,
+                    textAlign: 'center',
+                    fontSize: 18,
+                    fontFamily: 'Poppins-Bold',
+                    marginHorizontal: 6,
+                    backgroundColor: digit ? '#F3E8FF' : '#FFFFFF',
+                    color: '#111827',
+                  }
+                ]}
+                value={digit}
+                onChangeText={(v) => handleOtpChange(v, index)}
+                keyboardType="number-pad"
+                maxLength={1}
+              />
+            ))}
           </View>
-        )}
 
-        <AnimatedButton
-          title="Verify Code"
-          onPress={handleVerification}
-          variant="primary"
-          size="lg"
-          loading={loading}
-          fullWidth
-        />
-
-        <View style={tw`items-center mt-6`}>
-          {canResend ? (
-            <TouchableOpacity onPress={handleResend}>
-              <Text style={[{ fontFamily: 'Poppins-SemiBold' }, tw`text-purple-500`]}>Resend Code</Text>
-            </TouchableOpacity>
-          ) : (
-            <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-gray-500`]}>Resend in {timer}s</Text>
+          {/* INFO MESSAGE - Unified Banner Style */}
+          {infoMsg && (
+            <View
+              style={{
+                backgroundColor: '#EDE9FE',
+                borderRadius: 16,
+                padding: 14,
+                marginBottom: 12,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Medium',
+                  fontSize: 14,
+                  color: '#5B21B6',
+                  textAlign: 'center',
+                }}
+              >
+                {infoMsg}
+              </Text>
+            </View>
           )}
+
+          {/* SUCCESS MESSAGE - Unified Banner Style */}
+          {successMsg && (
+            <View
+              style={{
+                backgroundColor: '#DCFCE7',
+                borderRadius: 16,
+                padding: 14,
+                marginBottom: 12,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Medium',
+                  fontSize: 14,
+                  color: '#166534',
+                  textAlign: 'center',
+                }}
+              >
+                {successMsg}
+              </Text>
+            </View>
+          )}
+
+          {/* ERROR MESSAGE - Unified Banner Style */}
+          {errorMsg && (
+            <View
+              style={{
+                backgroundColor: '#FEE2E2',
+                borderRadius: 16,
+                padding: 14,
+                marginBottom: 12,
+              }}
+            >
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Medium',
+                  fontSize: 14,
+                  color: '#991B1B',
+                  textAlign: 'center',
+                }}
+              >
+                {errorMsg}
+              </Text>
+            </View>
+          )}
+
+          <AnimatedButton
+            title="Verify Code"
+            onPress={handleVerification}
+            variant="primary"
+            size="lg"
+            loading={loading}
+            fullWidth
+            style={{ marginTop: 16 }}
+          />
+
+          <View style={{ alignItems: 'center', marginTop: 24 }}>
+            {canResend ? (
+              <TouchableOpacity onPress={handleResend}>
+                <Text
+                  style={{
+                    fontFamily: 'Poppins-SemiBold',
+                    color: '#6A1B9A',
+                    fontSize: 14,
+                  }}
+                >
+                  Resend Code
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <Text
+                style={{
+                  fontFamily: 'Poppins-Regular',
+                  color: '#6B7280',
+                  fontSize: 14,
+                }}
+              >
+                Resend in {timer}s
+              </Text>
+            )}
+          </View>
         </View>
       </View>
     </SafeAreaView>
