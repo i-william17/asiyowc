@@ -746,16 +746,22 @@ const communitySlice = createSlice({
     ===================================================== */
     updatePinnedMessage: (state, action) => {
       const { chatId, pinnedMessage } = action.payload || {};
+      if (!chatId) return;
 
-      // ✅ NORMALIZE: always store ID or null
-      const pinnedId =
-        typeof pinnedMessage === "object"
-          ? String(pinnedMessage._id)
-          : pinnedMessage
-            ? String(pinnedMessage)
-            : null;
+      let pinnedId = null;
 
-      // 1️⃣ Update currently opened chat
+      // 🔐 SAFE NORMALIZATION
+      if (pinnedMessage) {
+        if (typeof pinnedMessage === "object") {
+          if (pinnedMessage._id) {
+            pinnedId = String(pinnedMessage._id);
+          }
+        } else {
+          pinnedId = String(pinnedMessage);
+        }
+      }
+
+      // 1️⃣ Update selectedChat
       if (
         state.selectedChat &&
         String(state.selectedChat._id) === String(chatId)
@@ -763,7 +769,7 @@ const communitySlice = createSlice({
         state.selectedChat.pinnedMessage = pinnedId;
       }
 
-      // 2️⃣ ALSO update chat list
+      // 2️⃣ Update chats list
       const chat = state.chats.find(
         (c) => String(c._id) === String(chatId)
       );

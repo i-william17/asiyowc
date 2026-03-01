@@ -207,27 +207,36 @@ export default function GroupChatInterface({ chatId }) {
   const getMemberName = (userId) => {
     if (!userId) return "Member";
 
-    // 1️⃣ Try messages first (BEST SOURCE)
-    const msg = messages.find(
-      (m) => String(getSenderId(m)) === String(userId)
-    );
-
-    if (msg) {
-      return getSenderNameFromMessage(msg);
-    }
-
-    // 2️⃣ Fallback to group members
+    // 1️⃣ Try group members ONLY (no recursion)
     const member = members.find((m) => {
       const uid = normalizeId(m?.user || m);
       return uid && String(uid) === String(userId);
     });
 
-    return (
-      member?.user?.profile?.fullName ||
-      member?.user?.fullName ||
-      member?.fullName ||
-      "Member"
+    if (member) {
+      return (
+        member?.user?.profile?.fullName ||
+        member?.user?.fullName ||
+        member?.fullName ||
+        "Member"
+      );
+    }
+
+    // 2️⃣ Fallback: try message sender directly (NO recursive call)
+    const msg = messages.find(
+      (m) => String(getSenderId(m)) === String(userId)
     );
+
+    if (msg?.sender?.profile?.fullName)
+      return msg.sender.profile.fullName;
+
+    if (msg?.sender?.fullName)
+      return msg.sender.fullName;
+
+    if (msg?.sender?.name)
+      return msg.sender.name;
+
+    return "Member";
   };
 
   const getMemberById = (id) => {
@@ -284,8 +293,8 @@ export default function GroupChatInterface({ chatId }) {
     if (msg?.sender?.profile?.fullName) return msg.sender.profile.fullName;
     if (msg?.sender?.fullName) return msg.sender.fullName;
     if (msg?.sender?.name) return msg.sender.name;
-    const senderId = getSenderId(msg);
-    return getMemberName(senderId);
+
+    return "Member"; // ✅ no recursion
   };
 
   const getSenderAvatarFromMessage = (msg) =>

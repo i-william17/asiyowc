@@ -1955,11 +1955,10 @@ exports.createChat = async (req, res) => {
       .map(String)
       .filter(Boolean);
 
-    // Deduplicate
     const uniqueParticipants = [...new Set(cleanParticipants)];
 
     // ----------------------------------------
-    // 2️⃣ DM CHAT LOGIC (PRODUCTION SAFE)
+    // 2️⃣ DM CHAT LOGIC (SESSION-BASED)
     // ----------------------------------------
     if (type === 'dm') {
       if (uniqueParticipants.length !== 2) {
@@ -1968,25 +1967,31 @@ exports.createChat = async (req, res) => {
 
       const dmKey = [...uniqueParticipants].sort().join('_');
 
-      const chat = await Chat.findOneAndUpdate(
-        { type: 'dm', dmKey },
-        {
-          $setOnInsert: {
-            type: 'dm',
-            participants: uniqueParticipants,
-            dmKey,
-            messages: []
-          }
-        },
-        {
-          new: true,
-          upsert: true
-        }
-      );
+      // 🔎 STEP 1: Check for ACTIVE chat only
+      const activeChat = await Chat.findOne({
+        type: 'dm',
+        dmKey,
+        isRemoved: false
+      });
 
-      return created(res, chat);
+      if (activeChat) {
+        return created(res, activeChat);
+      }
+
+      // 🔎 STEP 2: Ignore soft-deleted chats completely
+      // (We do NOT restore them)
+
+      // 🆕 STEP 3: Create new chat session
+      const newChat = await Chat.create({
+        type: 'dm',
+        participants: uniqueParticipants,
+        dmKey,
+        messages: [],
+        isRemoved: false
+      });
+
+      return created(res, newChat);
     }
-
 
     // ----------------------------------------
     // 3️⃣ GROUP CHAT LOGIC
@@ -2009,6 +2014,7 @@ exports.createChat = async (req, res) => {
     // 4️⃣ INVALID TYPE
     // ----------------------------------------
     return bad(res, 'Invalid chat type');
+
   } catch (error) {
     console.error('[createChat] ❌ ERROR:', error);
     return serverError(res, error);
@@ -2533,20 +2539,14 @@ exports.getVoices = async (req, res) => {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-
-        // ✅ HOST
         .populate({
           path: "host",
           select: "profile.fullName profile.avatar",
         })
-
-        // ✅ SPEAKERS
         .populate({
           path: "instances.speakers",
           select: "profile.fullName profile.avatar",
         })
-
-        // ✅ LISTENERS
         .populate({
           path: "instances.participants",
           select: "profile.fullName profile.avatar",
@@ -2555,8 +2555,51 @@ exports.getVoices = async (req, res) => {
       Voice.countDocuments(query),
     ]);
 
-    let data = voices.map((v) => v.toObject());
+    /* ==========================================
+       🔥 COMPUTE STATUS + DERIVED FLAGS
+    ========================================== */
+    let data = voices.map((v) => {
+      const voiceObj = v.toObject();
 
+      // 1️⃣ Compute instance statuses
+      voiceObj.instances = (voiceObj.instances || []).map((instance) => {
+        const computedStatus = computeVoiceInstanceStatus(instance);
+
+        return {
+          ...instance,
+          status: computedStatus,
+        };
+      });
+
+      // 2️⃣ Determine live instance
+      const liveInstance = voiceObj.instances.find(
+        (i) => i.status === "live"
+      );
+
+      const currentInstance =
+        liveInstance ||
+        voiceObj.instances[voiceObj.instances.length - 1] ||
+        null;
+
+      // 3️⃣ Derived fields
+      voiceObj.currentInstance = currentInstance;
+      voiceObj.isLive = !!liveInstance;
+
+      voiceObj.listenersCount =
+        currentInstance?.participants?.length || 0;
+
+      voiceObj.speakersCount =
+        currentInstance?.speakers?.length || 0;
+
+      voiceObj.participantsCount =
+        voiceObj.listenersCount + voiceObj.speakersCount;
+
+      return voiceObj;
+    });
+
+    /* ==========================================
+       🔥 LIVE FILTER (based on computed status)
+    ========================================== */
     if (String(req.query.live || "false") === "true") {
       data = data.filter((v) => v.isLive === true);
     }
@@ -2580,7 +2623,6 @@ exports.getVoiceById = async (req, res) => {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
-    // ✅ PARAM FIX (matches route)
     const { id: voiceId } = req.params;
 
     if (!ensureObjectIdParam(res, voiceId, "id")) return;
@@ -2589,26 +2631,18 @@ exports.getVoiceById = async (req, res) => {
       _id: voiceId,
       isRemoved: false,
     })
-
-      // ✅ HOST
       .populate({
         path: "host",
         select: "profile.fullName profile.avatar",
       })
-
-      // ✅ SPEAKERS
       .populate({
         path: "instances.speakers",
         select: "profile.fullName profile.avatar",
       })
-
-      // ✅ LISTENERS
       .populate({
         path: "instances.participants",
         select: "profile.fullName profile.avatar",
       })
-
-      // optional context
       .populate("group", "name avatar privacy")
       .populate("hub", "name avatar type region");
 
@@ -2642,7 +2676,45 @@ exports.getVoiceById = async (req, res) => {
       }
     }
 
-    return ok(res, voice);
+    /* ==========================================
+       🔥 COMPUTE STATUS + DERIVED FIELDS
+    ========================================== */
+    const voiceObj = voice.toObject();
+
+    // 1️⃣ Compute instance statuses
+    voiceObj.instances = (voiceObj.instances || []).map((instance) => {
+      const computedStatus = computeVoiceInstanceStatus(instance);
+
+      return {
+        ...instance,
+        status: computedStatus,
+      };
+    });
+
+    // 2️⃣ Determine live instance
+    const liveInstance = voiceObj.instances.find(
+      (i) => i.status === "live"
+    );
+
+    const currentInstance =
+      liveInstance ||
+      voiceObj.instances[voiceObj.instances.length - 1] ||
+      null;
+
+    // 3️⃣ Derived flags
+    voiceObj.currentInstance = currentInstance;
+    voiceObj.isLive = !!liveInstance;
+
+    voiceObj.listenersCount =
+      currentInstance?.participants?.length || 0;
+
+    voiceObj.speakersCount =
+      currentInstance?.speakers?.length || 0;
+
+    voiceObj.participantsCount =
+      voiceObj.listenersCount + voiceObj.speakersCount;
+
+    return ok(res, voiceObj);
   } catch (error) {
     return serverError(res, error);
   }

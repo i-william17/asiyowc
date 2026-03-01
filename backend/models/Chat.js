@@ -227,7 +227,10 @@ chatSchema.index(
   { dmKey: 1 },
   {
     unique: true,
-    partialFilterExpression: { type: 'dm' }
+    partialFilterExpression: {
+      type: 'dm',
+      isRemoved: false
+    }
   }
 );
 
