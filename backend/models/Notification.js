@@ -16,7 +16,7 @@ const notificationSchema = new mongoose.Schema({
       'message',
       'program_enrollment',
       'program_completion',
-      'program_cerificate',
+      'program_certificate',
       'program_reminder',
       'savings_withdrawal',
       'savings_contribution',

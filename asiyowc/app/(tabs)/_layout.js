@@ -12,58 +12,48 @@ export default function TabLayout() {
   const dispatch = useDispatch();
   const { user, loading } = useSelector((state) => state.user);
 
-  const fullName = user?.profile?.fullName;
+  const fullName = user?.profile?.fullName || "User";
   const firstName = fullName?.split(" ")[0] || "User";
   const avatar = user?.profile?.avatar?.url;
 
   useEffect(() => {
     dispatch(fetchUserProfile());
-  }, []);
+  }, [dispatch]);
 
   // ⏰ Dynamic Greeting Based on Time
   const getGreeting = () => {
     const hour = new Date().getHours();
 
     const morning = [
-      "Rise Boldly",
+      "Rise & Thrive",
       "Own Today",
       "You Matter",
       "You Belong",
       "Shine on",
-      "Radiate Strength",
-      "Lead Forward",
     ];
 
     const afternoon = [
       "Keep Winning",
       "Keep Going",
-      "You’re Growing",
-      "Stay Powerful",
+      "Make it Count",
       "Command Growth",
       "Drive Impact",
-      "Making Moves",
-      "Proud Progress",
       "Steady Wins",
     ];
 
     const evening = [
       "Well Done",
-      "Evening Reflection",
-      "Own Progress",
       "Reset & Rewind",
-      "Inner Authority",
-      "Growth Noticed",
+      "Invest in Rest",
       "Celebrate Yourself",
       "You did it",
     ];
 
     const night = [
       "Tomorrow awaits",
-      "Sleep Peacefully",
       "You’re Enough",
       "Be Gentle",
       "Stay Hopeful",
-      "Feel Proud",
       "Stay Strong",
       "You’re Growing",
     ];

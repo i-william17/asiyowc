@@ -214,6 +214,13 @@ export const authService = {
     return res.data;
   },
 
+  async getGamification(token) {
+    const res = await axios.get(`${server}/auth/me/gamification`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return res.data; // { success, data: { xp, level } }
+  },
+
   /* =========================================================
      ⭐⭐ ADDED METHODS (NON-BREAKING)
      These DO NOT affect existing code

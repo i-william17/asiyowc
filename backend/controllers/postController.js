@@ -3,6 +3,8 @@ const Post = require('../models/Post');
 const Group = require('../models/Group');
 const Hub = require('../models/Hub');
 const Report = require('../models/Report');
+const { sendExpoPushToUser } = require('../utils/push');
+const User = require('../models/User');
 const { deleteFromCloudinary } = require('../middleware/upload');
 
 /* =========================================================================
@@ -691,6 +693,65 @@ exports.addComment = async (req, res) => {
     post.commentsCount = (post.commentsCount || 0) + 1;
 
     await post.save();
+
+    /* ================= PUSH NOTIFICATION ================= */
+    try {
+      if (String(post.author) !== String(userId)) {
+        const postAuthor = await User.findById(post.author)
+          .select('pushTokens profile.fullName')
+          .lean();
+
+        const commenter = await User.findById(userId)
+          .select('profile.fullName')
+          .lean();
+
+        if (postAuthor) {
+          await sendExpoPushToUser(postAuthor, {
+            title: "New Comment",
+            body: `${commenter?.profile?.fullName || "Someone"} commented on your post`,
+            data: {
+              type: "post",
+              postId: String(post._id),
+            },
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Comment push error:", err);
+    }
+
+    if (parentCommentId) {
+      const parentComment = post.comments.id(parentCommentId);
+
+      if (
+        parentComment &&
+        String(parentComment.author) !== String(userId)
+      ) {
+        try {
+          const parentAuthor = await User.findById(parentComment.author)
+            .select('pushTokens profile.fullName')
+            .lean();
+
+          const replier = await User.findById(userId)
+            .select('profile.fullName')
+            .lean();
+
+          if (parentAuthor) {
+            await sendExpoPushToUser(parentAuthor, {
+              title: "New Reply",
+              body: `${replier?.profile?.fullName || "Someone"} replied to your comment`,
+              data: {
+                type: "post",
+                postId: String(post._id),
+                commentId: String(parentCommentId),
+              },
+            });
+          }
+        } catch (err) {
+          console.error("Reply push error:", err);
+        }
+      }
+    }
 
     /* ================= POPULATE CORRECTLY ================= */
     await post.populate({

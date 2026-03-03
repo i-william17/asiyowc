@@ -6,10 +6,170 @@ const QRCode = require("qrcode");
 const Program = require("../models/Program");
 const User = require("../models/User");
 const Notification = require("../models/Notification");
+const { sendExpoPushToUser } = require("../utils/push");
 
-// ========================================================================
-// INTERNAL HELPER: CREATE PROGRAM NOTIFICATIONS (Organizer + Participant)
-// ========================================================================
+/* ========================================================================
+   GAMIFICATION (User.gamification) — SAFE, ATOMIC, NON-BREAKING
+   - Awards milestones + XP into User.gamification
+   - Prevents duplicates (key + program)
+   - Awards only ONE program badge: "growth"
+======================================================================== */
+
+const XP_PER_LEVEL = 200; // tweak freely
+
+const MILESTONES = [
+  { key: "FIRST_ENROLLMENT", title: "First Step Taken", xp: 20, scope: "global" },
+  { key: "FIRST_MODULE", title: "Momentum Started", xp: 30, scope: "global" },
+  { key: "HALF_PROGRESS", title: "Halfway There", xp: 50, scope: "program" },
+  { key: "PROGRAM_COMPLETE", title: "Program Conqueror", xp: 100, scope: "program" },
+  { key: "FIVE_PROGRAMS", title: "Growth Champion", xp: 300, scope: "global" },
+  { key: "TEN_MODULES", title: "Knowledge Builder", xp: 120, scope: "global" },
+  { key: "FIRST_REVIEW", title: "Voice of Impact", xp: 25, scope: "global" },
+  // Not implemented here: CONSISTENT_LEARNER (needs streak tracking)
+  // Not implemented here: HIGH_ACHIEVER (needs quiz endpoint/grades)
+  { key: "COMMUNITY_CONTRIBUTOR", title: "Community Builder", xp: 70, scope: "global" },
+];
+
+const getMilestoneDef = (key) => MILESTONES.find((m) => m.key === key) || null;
+
+const normalizeObjectId = (v) => (v?._id ? v._id.toString() : v?.toString());
+
+const awardMilestone = async ({ userId, key, programId = null }) => {
+  try {
+    const def = getMilestoneDef(key);
+    if (!def) return { awarded: false, reason: "Unknown milestone" };
+
+    const uid = new mongoose.Types.ObjectId(userId);
+    const programValue = programId ? new mongoose.Types.ObjectId(programId) : null;
+
+    const filter = {
+      _id: uid,
+      "gamification.milestones": {
+        $not: {
+          $elemMatch: programId
+            ? { key, program: programValue }
+            : { key, $or: [{ program: null }, { program: { $exists: false } }] },
+        },
+      },
+    };
+
+    const updatePipeline = [
+      {
+        $set: {
+          _gx: { $ifNull: ["$gamification.xp", 0] },
+          _gm: { $ifNull: ["$gamification.milestones", []] },
+        },
+      },
+      {
+        $set: {
+          "gamification.xp": { $add: ["$_gx", def.xp] },
+          "gamification.milestones": {
+            $concatArrays: [
+              "$_gm",
+              [{ key, program: programValue, points: def.xp, achievedAt: "$$NOW" }],
+            ],
+          },
+        },
+      },
+      {
+        $set: {
+          "gamification.level": {
+            $add: [1, { $floor: { $divide: ["$gamification.xp", XP_PER_LEVEL] } }],
+          },
+        },
+      },
+      { $unset: ["_gx", "_gm"] },
+    ];
+
+    const result = await User.updateOne(filter, updatePipeline);
+    const awarded = result.modifiedCount === 1;
+
+    // ✅ If milestone was actually awarded, send push
+    if (awarded) {
+      const user = await User.findById(uid).select("pushTokens gamification profile.fullName");
+
+      await sendExpoPushToUser(user, {
+        title: "🎉 Milestone Achieved!",
+        body: `${def.title} (+${def.xp} XP)`,
+        data: {
+          type: "milestone",
+          milestone: key,
+          programId: programId ? programId.toString() : null,
+        },
+      });
+    }
+
+    return { awarded, xp: def.xp, key };
+  } catch (e) {
+    console.error("awardMilestone ERROR:", e);
+    return { awarded: false, reason: "awardMilestone error" };
+  }
+};
+
+const awardGrowthBadge = async (userId) => {
+  try {
+    await User.updateOne(
+      { _id: new mongoose.Types.ObjectId(userId) },
+      { $addToSet: { badges: "growth" } } // your rule: only ONE program badge
+    );
+  } catch (e) {
+    console.error("awardGrowthBadge ERROR:", e);
+  }
+};
+
+const countCompletedPrograms = async (userId) => {
+  try {
+    return Program.countDocuments({
+      participants: { $elemMatch: { user: new mongoose.Types.ObjectId(userId), progress: 100 } },
+    });
+  } catch (e) {
+    console.error("countCompletedPrograms ERROR:", e);
+    return 0;
+  }
+};
+
+const countCompletedModules = async (userId) => {
+  try {
+    const uid = new mongoose.Types.ObjectId(userId);
+
+    const agg = await Program.aggregate([
+      { $match: { "participants.user": uid } },
+      { $unwind: "$participants" },
+      { $match: { "participants.user": uid } },
+      {
+        $project: {
+          cnt: { $size: { $ifNull: ["$participants.completedModules", []] } },
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$cnt" } } },
+    ]);
+
+    return agg?.[0]?.total || 0;
+  } catch (e) {
+    console.error("countCompletedModules ERROR:", e);
+    return 0;
+  }
+};
+
+const countProgramCommentsByUser = async (userId) => {
+  try {
+    const uid = new mongoose.Types.ObjectId(userId);
+    const agg = await Program.aggregate([
+      { $match: { "comments.user": uid } },
+      { $unwind: "$comments" },
+      { $match: { "comments.user": uid } },
+      { $group: { _id: null, total: { $sum: 1 } } },
+    ]);
+    return agg?.[0]?.total || 0;
+  } catch (e) {
+    console.error("countProgramCommentsByUser ERROR:", e);
+    return 0;
+  }
+};
+
+/* ========================================================================
+   INTERNAL HELPER: CREATE PROGRAM NOTIFICATIONS (Organizer + Participant)
+======================================================================== */
 const createProgramNotifications = async ({
   program,
   user,
@@ -59,59 +219,91 @@ exports.getAllPrograms = async (req, res) => {
       category,
       status,
       search,
+      featured = "false",
       page = 1,
-      limit = 10,
-      featured = false,
+      limit = 12,
     } = req.query;
 
-    let query = {};
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 12, 1), 50);
+    const skip = (pageNum - 1) * limitNum;
 
+    const query = {};
     if (category && category !== "All") query.category = category;
     if (status) query.status = status;
-
     if (featured === "true") query.featured = true;
 
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-      ];
+    // ✅ Prefer TEXT search (you already have text index)
+    if (search && search.trim()) {
+      query.$text = { $search: search.trim() };
     }
 
-    const programs = await Program.find(query)
-      .populate(
+    // ✅ limit+1 trick -> hasNextPage, no countDocuments needed
+    const docs = await Program.find(query)
+      .select([
+        "title",
+        "shortDescription",
+        "image",
+        "category",
+        "difficulty",
+        "duration",
+        "price",
+        "featured",
+        "status",
+        "analytics.averageRating",
+        "analytics.totalRatings",
+        "analytics.enrollments",
+        "createdAt",
         "organizer",
-        "profile.fullName profile.avatar"
+        "participants", // we use it ONLY to derive count, then strip it
+      ])
+      .populate("organizer", "profile.fullName profile.avatar")
+      .sort(
+        query.$text
+          ? { score: { $meta: "textScore" }, createdAt: -1 }
+          : { createdAt: -1 }
       )
-      .populate(
-        "participants.user",
-        "profile.fullName profile.avatar"
-      )
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .skip(skip)
+      .limit(limitNum + 1)
+      .lean();
 
-    const total = await Program.countDocuments(query);
+    const hasNextPage = docs.length > limitNum;
+    const pageDocs = hasNextPage ? docs.slice(0, limitNum) : docs;
 
-    res.json({
+    const programs = pageDocs.map((p) => ({
+      _id: p._id,
+      title: p.title,
+      shortDescription: p.shortDescription,
+      image: p.image,
+      category: p.category,
+      difficulty: p.difficulty,
+      duration: p.duration,
+      price: p.price,
+      featured: p.featured,
+      status: p.status,
+      analytics: p.analytics,
+      organizer: p.organizer,
+      createdAt: p.createdAt,
+
+      // ✅ derived field
+      participantsCount: Array.isArray(p.participants) ? p.participants.length : 0,
+    }));
+
+    return res.json({
       success: true,
       data: {
         programs,
         pagination: {
-          total,
-          totalPages: Math.ceil(total / limit),
-          currentPage: parseInt(page),
-          hasNextPage: page * limit < total,
-          hasPrevPage: page > 1,
+          currentPage: pageNum,
+          limit: limitNum,
+          hasNextPage,
+          hasPrevPage: pageNum > 1,
         },
       },
     });
   } catch (error) {
     console.error("getAllPrograms ERROR:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -157,12 +349,18 @@ exports.getProgram = async (req, res) => {
       }
     }
 
+    // ✅ ALSO RETURN USER GAMIFICATION (optional)
+    const userGamification = userId
+      ? await User.findById(userId).select("gamification badges profile.fullName")
+      : null;
+
     return res.json({
       success: true,
       data: {
         program,
         isEnrolled,
         userProgress,
+        userGamification,
       },
     });
   } catch (error) {
@@ -173,8 +371,6 @@ exports.getProgram = async (req, res) => {
     });
   }
 };
-
-
 
 // ========================================================================
 // CREATE PROGRAM
@@ -342,6 +538,9 @@ exports.enrollInProgram = async (req, res) => {
       message: `${fullName} enrolled in ${updated.title}.`
     });
 
+    // ✅ GAMIFICATION: FIRST_ENROLLMENT (global, once)
+    await awardMilestone({ userId, key: "FIRST_ENROLLMENT" });
+
     // ⭐ IMPORTANT: MATCH getProgram() RESPONSE STRUCTURE
     return res.status(201).json({
       success: true,
@@ -356,8 +555,6 @@ exports.enrollInProgram = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
-
-
 
 // ========================================================================
 // BUY PROGRAM (PAID)
@@ -433,6 +630,9 @@ exports.buyProgram = async (req, res) => {
       message: `${fullName} purchased and enrolled in ${updatedProgram.title}.`,
     });
 
+    // ✅ GAMIFICATION: FIRST_ENROLLMENT (global, once)
+    await awardMilestone({ userId, key: "FIRST_ENROLLMENT" });
+
     return res.status(200).json({
       success: true,
       message: "Program purchased successfully",
@@ -446,10 +646,6 @@ exports.buyProgram = async (req, res) => {
   }
 };
 
-
-// ========================================================================
-// LEAVE PROGRAM
-// ========================================================================
 // ========================================================================
 // LEAVE PROGRAM (BUT DO NOT REMOVE IF COMPLETED)
 // ========================================================================
@@ -513,7 +709,6 @@ exports.leaveProgram = async (req, res) => {
   }
 };
 
-
 // ========================================================================
 // COMPLETE MODULE (SCHEMA-COMPLIANT)
 // ========================================================================
@@ -533,11 +728,8 @@ exports.completeModule = async (req, res) => {
       });
     }
 
-    // Normalize ObjectId comparison
-    const normalize = (v) => (v?._id ? v._id.toString() : v?.toString());
-
     const participant = program.participants.find(
-      (p) => normalize(p.user) === normalize(userId)
+      (p) => normalizeObjectId(p.user) === normalizeObjectId(userId)
     );
 
     if (!participant) {
@@ -571,7 +763,8 @@ exports.completeModule = async (req, res) => {
 
     // Compute progress
     const completedCount = participant.completedModules.length;
-    const progress = Math.round((completedCount / totalModules) * 100);
+    const progress =
+      totalModules > 0 ? Math.round((completedCount / totalModules) * 100) : 0;
 
     participant.progress = progress;
 
@@ -585,7 +778,6 @@ exports.completeModule = async (req, res) => {
       participant.certificateIssued = true;
       participant.completedAt = new Date();
 
-      // Store certificate object as defined in schema
       participant.certificate = {
         id: certId,
         issuedAt: new Date(),
@@ -593,7 +785,6 @@ exports.completeModule = async (req, res) => {
         verified: true,
       };
 
-      // Send completion notification
       await createProgramNotifications({
         program,
         user: req.user,
@@ -604,6 +795,51 @@ exports.completeModule = async (req, res) => {
     }
 
     await program.save();
+
+    /* ============================================================
+       ✅ GAMIFICATION AWARDS (after save)
+       - FIRST_MODULE (global) when first-ever new module completion happens
+       - HALF_PROGRESS (per program) when progress >= 50
+       - PROGRAM_COMPLETE (per program) when progress == 100
+       - FIVE_PROGRAMS (global) when completed programs >= 5
+       - TEN_MODULES (global) when total modules >= 10
+    ============================================================ */
+
+    // FIRST_MODULE (global, once) — only when this call actually added a module completion
+    if (!alreadyDone) {
+      await awardMilestone({ userId, key: "FIRST_MODULE" });
+    }
+
+    // HALF_PROGRESS (per program, once)
+    if (participant.progress >= 50) {
+      await awardMilestone({ userId, key: "HALF_PROGRESS", programId });
+    }
+
+    // PROGRAM_COMPLETE (per program, once)
+    if (participant.progress === 100) {
+      const completion = await awardMilestone({
+        userId,
+        key: "PROGRAM_COMPLETE",
+        programId,
+      });
+
+      // Award the ONLY program badge you want
+      if (completion.awarded) {
+        await awardGrowthBadge(userId);
+      }
+
+      // FIVE_PROGRAMS (global, once)
+      const completedPrograms = await countCompletedPrograms(userId);
+      if (completedPrograms >= 5) {
+        await awardMilestone({ userId, key: "FIVE_PROGRAMS" });
+      }
+    }
+
+    // TEN_MODULES (global, once)
+    const completedModulesTotal = await countCompletedModules(userId);
+    if (completedModulesTotal >= 10) {
+      await awardMilestone({ userId, key: "TEN_MODULES" });
+    }
 
     return res.status(200).json({
       success: true,
@@ -624,9 +860,9 @@ exports.completeModule = async (req, res) => {
   }
 };
 
-
-
+// ========================================================================
 // ADD MODULE
+// ========================================================================
 exports.addModule = async (req, res) => {
   try {
     const { programId } = req.params;
@@ -643,14 +879,15 @@ exports.addModule = async (req, res) => {
       title,
       description,
       contentUrl,
-      completedBy: [],
+      completedBy: [], // NOTE: you said this is removed in schema, but leaving as-is to avoid structure change
     };
 
     program.modules.push(newModule);
     await program.save();
 
     console.log("PARTICIPANT LIST:", program.participants);
-    console.log("USER ID:", userId);
+    // ✅ FIX: userId was undefined here (remove to avoid breaking)
+    // console.log("USER ID:", userId);
 
     res.status(201).json({
       success: true,
@@ -664,9 +901,6 @@ exports.addModule = async (req, res) => {
 };
 
 // ========================================================================
-// ADD REVIEW
-// ========================================================================
-// ========================================================================
 // ADD REVIEW (SAFE FULLNAME HANDLING)
 // ========================================================================
 exports.addReview = async (req, res) => {
@@ -679,7 +913,6 @@ exports.addReview = async (req, res) => {
 
     const { rating, reviewText } = req.body;
 
-    // Check if user already reviewed
     const exists = program.reviews.some(
       (r) => r.user.toString() === req.user.id
     );
@@ -689,28 +922,24 @@ exports.addReview = async (req, res) => {
         .json({ success: false, message: "Already reviewed" });
     }
 
-    // Add review
     program.reviews.push({
       user: req.user.id,
       rating,
       reviewText,
     });
 
-    // Update analytics
     const sum = program.reviews.reduce((a, b) => a + b.rating, 0);
     program.analytics.averageRating = sum / program.reviews.length;
     program.analytics.totalRatings = program.reviews.length;
 
     await program.save();
 
-    // SAFELY handle user name
     const reviewerName =
       req.user?.profile?.fullName ||
       req.user?.fullName ||
       req.user?.name ||
       "Someone";
 
-    // Send notification
     await Notification.create({
       recipient: program.organizer,
       type: "system_alert",
@@ -722,6 +951,9 @@ exports.addReview = async (req, res) => {
       },
       priority: "medium",
     });
+
+    // ✅ GAMIFICATION: FIRST_REVIEW (global, once)
+    await awardMilestone({ userId: req.user.id, key: "FIRST_REVIEW" });
 
     res.json({ success: true, message: "Review submitted" });
   } catch (error) {
@@ -748,6 +980,12 @@ exports.addComment = async (req, res) => {
     });
 
     await program.save();
+
+    // ✅ GAMIFICATION: COMMUNITY_CONTRIBUTOR once user has >= 5 comments across programs
+    const totalComments = await countProgramCommentsByUser(req.user.id);
+    if (totalComments >= 5) {
+      await awardMilestone({ userId: req.user.id, key: "COMMUNITY_CONTRIBUTOR" });
+    }
 
     res.json({ success: true, message: "Comment added" });
   } catch (error) {
@@ -785,7 +1023,6 @@ exports.deleteReview = async (req, res) => {
 
     console.log("📌 TOTAL REVIEWS BEFORE:", program.reviews.length);
 
-    // CHECK PARTICIPANT MEMBERSHIP
     const isParticipant = program.participants.some(
       (p) => p.user.toString() === userId
     );
@@ -824,12 +1061,7 @@ exports.deleteReview = async (req, res) => {
   }
 };
 
-
-
-// DELETE COMMENT
-// ========================================================================
 // DELETE COMMENT + REPLIES (FULLY FIXED)
-// ========================================================================
 exports.deleteComment = async (req, res) => {
   try {
     const { id, commentId } = req.params;
@@ -850,7 +1082,6 @@ exports.deleteComment = async (req, res) => {
 
     console.log("📌 TOTAL COMMENTS BEFORE:", program.comments.length);
 
-    // Check if user is participant
     const requester = req.user?._id?.toString();
     const participantIds = program.participants.map(p => p.user.toString());
 
@@ -868,7 +1099,6 @@ exports.deleteComment = async (req, res) => {
       });
     }
 
-    // Find comment
     const comment = program.comments.id(commentId);
     if (!comment) {
       console.log("❌ Comment not found");
@@ -904,9 +1134,6 @@ exports.deleteComment = async (req, res) => {
   }
 };
 
-
-
-
 // ========================================================================
 // GET MY PROGRAMS (All enrolled programs)
 // ========================================================================
@@ -923,7 +1150,6 @@ exports.getMyPrograms = async (req, res) => {
       .populate("participants.user", "profile.fullName profile.avatar")
       .sort({ createdAt: -1 });
 
-    // Inject participant-specific data
     const enriched = programs.map((p) => {
       const participant = p.participants.find(
         (pp) => pp.user.toString() === userId
@@ -945,7 +1171,6 @@ exports.getMyPrograms = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
-
 
 // ========================================================================
 // GET CONTINUE PROGRAMS (progress between 1–99% for THIS user only)
@@ -976,7 +1201,6 @@ exports.getContinuePrograms = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
-
 
 // ========================================================================
 // GET COMPLETED PROGRAMS (progress = 100 for THIS user only)
@@ -1010,7 +1234,6 @@ exports.getCompletedPrograms = async (req, res) => {
     });
   }
 };
-
 
 // ========================================================================
 // GET PROGRAM STATISTICS (updated to new schema)
@@ -1082,7 +1305,6 @@ exports.getProgramParticipants = async (req, res) => {
       });
     }
 
-    // Only organizer or admin can view participants
     if (
       program.organizer.toString() !== req.user.id &&
       req.user.role !== "admin"
@@ -1197,9 +1419,6 @@ exports.downloadCertificate = async (req, res) => {
 
     console.log("📌 DOWNLOAD CERTIFICATE REQUEST");
 
-    /* =====================================================
-       1️⃣ SERVER-SIDE VALIDATION (SOURCE OF TRUTH)
-    ===================================================== */
     const program = await Program.findById(programId).populate(
       "participants.user",
       "profile.fullName"
@@ -1232,9 +1451,6 @@ exports.downloadCertificate = async (req, res) => {
 
     const certificateId = participant.certificate.id;
 
-    /* =====================================================
-       2️⃣ VALIDATE FRONTEND VERIFICATION URL (SECURITY)
-    ===================================================== */
     let finalVerificationUrl;
 
     if (
@@ -1247,9 +1463,6 @@ exports.downloadCertificate = async (req, res) => {
       finalVerificationUrl = `${process.env.FRONTEND_URL}/verify-certificate/${certificateId}`;
     }
 
-    /* =====================================================
-       3️⃣ LOAD STATIC CERTIFICATE ASSETS
-    ===================================================== */
     const sealPath = path.join(
       __dirname,
       "../assets/certificates/seal.png"
@@ -1265,14 +1478,8 @@ exports.downloadCertificate = async (req, res) => {
       encoding: "base64",
     });
 
-    /* =====================================================
-       4️⃣ GENERATE QR CODE (BACKEND)
-    ===================================================== */
     const qrCodeBase64 = await QRCode.toDataURL(finalVerificationUrl);
 
-    /* =====================================================
-       5️⃣ PREPARE TEMPLATE DATA
-    ===================================================== */
     const certData = {
       participantName: participant.user.profile.fullName,
       programTitle: program.title,
@@ -1284,9 +1491,6 @@ exports.downloadCertificate = async (req, res) => {
       qrCodeImage: qrCodeBase64,
     };
 
-    /* =====================================================
-       6️⃣ LOAD & COMPILE HTML TEMPLATE
-    ===================================================== */
     const templatePath = path.join(
       __dirname,
       "../templates/certificate.html"
@@ -1298,9 +1502,6 @@ exports.downloadCertificate = async (req, res) => {
       html = html.replace(new RegExp(`{{${key}}}`, "g"), value);
     });
 
-    /* =====================================================
-       7️⃣ GENERATE PDF WITH PUPPETEER
-    ===================================================== */
     const browser = await puppeteer.launch({
       headless: "new",
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -1311,7 +1512,7 @@ exports.downloadCertificate = async (req, res) => {
 
     const pdf = await page.pdf({
       format: "A4",
-      landscape: true,              // ✅ FORCE LANDSCAPE
+      landscape: true,
       printBackground: true,
       margin: {
         top: "0",
@@ -1319,14 +1520,11 @@ exports.downloadCertificate = async (req, res) => {
         bottom: "0",
         left: "0",
       },
-      preferCSSPageSize: true,      // ✅ RESPECT @page CSS
+      preferCSSPageSize: true,
     });
 
     await browser.close();
 
-    /* =====================================================
-       8️⃣ SEND PDF (RAW BINARY — SAFE)
-    ===================================================== */
     res.writeHead(200, {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename=certificate-${certificateId}.pdf`,
@@ -1367,7 +1565,6 @@ exports.searchAdvancedHandler = async (req, res) => {
 
     let searchQuery = {};
 
-    // Text search
     if (query) searchQuery.$text = { $search: query };
 
     if (category) searchQuery.category = category;
@@ -1376,14 +1573,12 @@ exports.searchAdvancedHandler = async (req, res) => {
     if (featured !== undefined)
       searchQuery.featured = featured === "true";
 
-    // Duration filter
     if (minDuration || maxDuration) {
       searchQuery["duration.value"] = {};
       if (minDuration) searchQuery["duration.value"].$gte = Number(minDuration);
       if (maxDuration) searchQuery["duration.value"].$lte = Number(maxDuration);
     }
 
-    // Price range
     if (minPrice || maxPrice) {
       searchQuery["price.amount"] = {};
       if (minPrice)
@@ -1397,10 +1592,7 @@ exports.searchAdvancedHandler = async (req, res) => {
     };
 
     const programs = await Program.find(searchQuery)
-      .populate(
-        "organizer",
-        "profile.fullName profile.avatar"
-      )
+      .populate("organizer", "profile.fullName profile.avatar")
       .sort(sortOptions)
       .skip((page - 1) * limit)
       .limit(Number(limit));
@@ -1439,32 +1631,24 @@ exports.recommendationsHandler = async (req, res) => {
 
     let recommended = [];
 
-    // Match user's interests first
     if (interests.length > 0) {
       recommended = await Program.find({
         category: { $in: interests },
         status: "active",
-        "participants.user": { $ne: req.user.id }, // not already enrolled
+        "participants.user": { $ne: req.user.id },
       })
-        .populate(
-          "organizer",
-          "profile.fullName profile.avatar"
-        )
+        .populate("organizer", "profile.fullName profile.avatar")
         .sort({ "analytics.enrollments": -1 })
         .limit(6);
     }
 
-    // Supplement with popular programs if not enough results
     if (recommended.length < 6) {
       const popular = await Program.find({
         status: "active",
         "participants.user": { $ne: req.user.id },
         _id: { $nin: recommended.map((p) => p._id) },
       })
-        .populate(
-          "organizer",
-          "profile.fullName profile.avatar"
-        )
+        .populate("organizer", "profile.fullName profile.avatar")
         .sort({ "analytics.enrollments": -1 })
         .limit(6 - recommended.length);
 

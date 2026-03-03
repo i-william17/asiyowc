@@ -8,9 +8,15 @@ import { programService } from "../../services/program";
 /* ---- PUBLIC ---- */
 export const fetchPublicPrograms = createAsyncThunk(
   "programs/public",
-  async (_, thunkAPI) => {
+  async ({ page = 1, limit = 12, replace = false } = {}, thunkAPI) => {
     try {
-      return await programService.getPublicPrograms();
+      const data = await programService.getPublicPrograms({ page, limit });
+
+      return {
+        ...data,
+        page,
+        replace,
+      };
     } catch (err) {
       return thunkAPI.rejectWithValue(err.response?.data || err.message);
     }
@@ -287,6 +293,13 @@ const initialState = {
   loading: false,
   error: null,
 
+  pagination: {
+    currentPage: 1,
+    hasNextPage: true,
+  },
+  // ⭐ Gamification
+  userGamification: null,
+
   // ⭐ Enrollment Tracking
   enrolledPrograms: [], // [programId]
   progress: {},         // { [programId]: number }
@@ -345,13 +358,33 @@ const programSlice = createSlice({
     /* ---- PUBLIC PROGRAMS ---- */
     builder.addCase(fetchPublicPrograms.fulfilled, (state, action) => {
       state.loading = false;
-      state.publicPrograms = action.payload.programs || action.payload;
+
+      const programs = action.payload.programs || [];
+      const replace = action.payload.replace;
+
+      if (replace) {
+        state.publicPrograms = programs;
+      } else {
+        state.publicPrograms = [
+          ...state.publicPrograms,
+          ...programs,
+        ];
+      }
+
+      state.pagination = action.payload.pagination || {};
     });
 
     /* ---- ALL PROGRAMS ---- */
     builder.addCase(fetchAllPrograms.fulfilled, (state, action) => {
       state.loading = false;
-      state.programs = action.payload.programs || action.payload;
+
+      const payload = action.payload?.data || action.payload;
+
+      // Your backend: { programs, userGamification, pagination }
+      state.programs = payload?.programs || payload || [];
+
+      // ✅ Store gamification
+      state.userGamification = payload?.userGamification || null;
     });
 
     /* ==================================================================
@@ -362,33 +395,29 @@ const programSlice = createSlice({
 
       const response = action.payload?.data || action.payload;
 
+      // ✅ keep gamification synced
+      if (response?.userGamification) {
+        state.userGamification = response.userGamification;
+      }
+
       const program = response?.program || response;
       const programId = program?._id;
 
       const isEnrolled = response?.isEnrolled || false;
       const userProgress = response?.userProgress || { progress: 0 };
 
-      state.program = {
-        ...program,
-        isEnrolled,
-        userProgress,
-      };
+      state.program = { ...program, isEnrolled, userProgress };
 
       if (programId) {
         if (isEnrolled) {
-          if (!state.enrolledPrograms.includes(programId)) {
-            state.enrolledPrograms.push(programId);
-          }
+          if (!state.enrolledPrograms.includes(programId)) state.enrolledPrograms.push(programId);
           state.progress[programId] = userProgress.progress || 0;
         } else {
-          state.enrolledPrograms = state.enrolledPrograms.filter(
-            (id) => id !== programId
-          );
+          state.enrolledPrograms = state.enrolledPrograms.filter((id) => id !== programId);
           delete state.progress[programId];
         }
       }
     });
-
     /* ---- MY PROGRAMS ---- */
     builder.addCase(fetchMyPrograms.fulfilled, (state, action) => {
       state.loading = false;

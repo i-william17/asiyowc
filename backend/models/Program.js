@@ -338,6 +338,7 @@ programSchema.virtual('durationInWeeks').get(function () {
 // ============================================================
 // INDEXES
 // ============================================================
+programSchema.index({ createdAt: -1 });
 programSchema.index({ title: 'text', description: 'text', tags: 'text' });
 programSchema.index({ category: 1, status: 1 });
 programSchema.index({ organizer: 1, createdAt: -1 });

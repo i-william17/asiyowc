@@ -1,55 +1,86 @@
-import React, { useEffect, useRef } from "react";
-import { View, Text, Animated, Pressable } from "react-native";
+import React, { useState } from "react";
+import { View, Text, Pressable, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import tw from "../../utils/tw";
 
-// 🎖 Corporate Color Palette (more premium)
 const COLORS = {
   gold: {
-    bg: ["#FFF7D1", "#FDE68A"],
-    text: "#92400E",
-    icon: "trophy",
+    bg: "#ffffff",
+    text: "#b45309",
+    border: "#fde68a",
+    icon: "star",
   },
   silver: {
-    bg: ["#F3F4F6", "#E5E7EB"],
-    text: "#374151",
-    icon: "medal-outline",
+    bg: "#ffffff",
+    text: "#4b5563",
+    border: "#e5e7eb",
+    icon: "star",
   },
   bronze: {
-    bg: ["#FFE4D6", "#FDBA74"],
-    text: "#7C2D12",
-    icon: "flame",
+    bg: "#ffffff",
+    text: "#b45309",
+    border: "#fed7aa",
+    icon: "star",
   },
   purple: {
-    bg: ["#F3E8FF", "#E9D5FF"],
-    text: "#6D28D9",
+    bg: "#ffffff",
+    text: "#7c3aed",
+    border: "#e9d5ff",
     icon: "star",
   },
   green: {
-    bg: ["#D1FADF", "#A7F3D0"],
-    text: "#065F46",
-    icon: "checkmark-circle",
+    bg: "#ffffff",
+    text: "#059669",
+    border: "#a7f3d0",
+    icon: "checkmark",
   },
-
   free: {
-    bg: ["#DCFCE7", "#BBF7D0"],
-    text: "#15803D",
-    icon: "leaf",
+    bg: "#ffffff",
+    text: "#059669",
+    border: "#a7f3d0",
+    icon: "gift",
   },
   paid: {
-    bg: ["#E0E7FF", "#C7D2FE"],
-    text: "#4338CA",
+    bg: "#ffffff",
+    text: "#7c3aed",
+    border: "#e9d5ff",
     icon: "card",
   },
   progress: {
-    bg: ["#FEF3C7", "#FDE68A"],
-    text: "#B45309",
-    icon: "time-outline",
+    bg: "#ffffff",
+    text: "#b45309",
+    border: "#fde68a",
+    icon: "time",
   },
   completed: {
-    bg: ["#D1FAE5", "#A7F3D0"],
-    text: "#047857",
-    icon: "ribbon",
+    bg: "#ffffff",
+    text: "#059669",
+    border: "#a7f3d0",
+    icon: "checkmark-circle",
+  },
+};
+
+const SIZE_MAP = {
+  sm: {
+    paddingY: 4,
+    paddingX: 8,
+    fontSize: 11,
+    iconSize: 12,
+    letterSpacing: 0.2,
+  },
+  md: {
+    paddingY: 6,
+    paddingX: 12,
+    fontSize: 12,
+    iconSize: 14,
+    letterSpacing: 0.2,
+  },
+  lg: {
+    paddingY: 8,
+    paddingX: 16,
+    fontSize: 13,
+    iconSize: 16,
+    letterSpacing: 0.2,
   },
 };
 
@@ -60,93 +91,93 @@ const AchievementBadge = ({
   style,
   iconOverride,
   size = "md",
+  variant = "text",
+  showIcon = true,
 }) => {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.92)).current;
+  const [pressed, setPressed] = useState(false);
 
-  // 🟣 Premium smooth fade + scale animation
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 350,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        damping: 12,
-        stiffness: 140,
-        mass: 0.8,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, []);
+  const { bg, text, border, icon } = COLORS[type] ?? COLORS.gold;
+  const s = SIZE_MAP[size] ?? SIZE_MAP.md;
 
-  const { bg, text, icon } = COLORS[type] ?? COLORS["gold"];
+  const isIconOnly = variant === "icon";
 
-  // 🟦 Dynamic Sizing (more spacing)
-  const sizeMap = {
-    sm: { paddingV: 3, paddingH: 10, font: 11, icon: 14 },
-    md: { paddingV: 5, paddingH: 14, font: 13, icon: 18 },
-    lg: { paddingV: 7, paddingH: 18, font: 15, icon: 20 },
-  };
-
-  const s = sizeMap[size] ?? sizeMap.md;
-
-  const Wrapper = onPress ? Pressable : View;
-
-  return (
-    <Wrapper
-      onPress={onPress}
-      style={{ borderRadius: 999 }}
-      android_ripple={{ color: "#E5E7EB" }}
+  const badgeContent = (
+    <View
+      style={[
+        tw`flex-row items-center justify-center rounded-full`,
+        {
+          backgroundColor: bg,
+          paddingVertical: s.paddingY,
+          paddingHorizontal: isIconOnly ? s.paddingY : s.paddingX,
+          borderWidth: 1,
+          borderColor: border,
+          transform: [{ scale: pressed ? 0.985 : 1 }],
+          ...Platform.select({
+            ios: {
+              shadowColor: "#000000",
+              shadowOpacity: 0.02,
+              shadowRadius: 2,
+              shadowOffset: { width: 0, height: 1 },
+            },
+            android: {
+              elevation: 0,
+            },
+            web: {
+              shadowColor: "#000000",
+              shadowOpacity: 0.02,
+              shadowRadius: 2,
+              shadowOffset: { width: 0, height: 1 },
+              transition: "all 0.1s ease",
+              cursor: onPress ? "pointer" : "default",
+            },
+          }),
+        },
+        style,
+      ]}
     >
-      <Animated.View
-        style={[
-          tw`flex-row items-center rounded-full`,
-          {
-            paddingVertical: s.paddingV,
-            paddingHorizontal: s.paddingH,
-            opacity: fadeAnim,
-            transform: [{ scale: scaleAnim }],
-
-            // Horizontal badge spacing
-            marginRight: 10,
-
-            // Premium Look
-            backgroundColor: bg[1],
-            shadowColor: "#000",
-            shadowOpacity: 0.15,
-            shadowRadius: 6,
-            shadowOffset: { width: 0, height: 3 },
-            elevation: 5,
-            borderWidth: 0.6,
-            borderColor: bg[0],
-          },
-          style,
-        ]}
-      >
-
+      {showIcon && (
         <Ionicons
           name={iconOverride ?? icon}
-          size={s.icon}
+          size={s.iconSize}
           color={text}
-          style={{ marginRight: 6 }}
+          style={isIconOnly ? {} : { marginRight: 4 }}
         />
+      )}
 
+      {!isIconOnly && label && (
         <Text
           style={{
-            fontFamily: "Poppins-SemiBold",
-            fontSize: s.font,
+            fontFamily: "Poppins-Medium",
+            fontSize: s.fontSize,
+            letterSpacing: s.letterSpacing,
             color: text,
-            letterSpacing: 0.2,
+            includeFontPadding: false,
+            lineHeight: s.fontSize * 1.4,
           }}
+          numberOfLines={1}
         >
           {label}
         </Text>
-      </Animated.View>
-    </Wrapper>
+      )}
+    </View>
   );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        onPressIn={() => setPressed(true)}
+        onPressOut={() => setPressed(false)}
+        style={{ borderRadius: 999 }}
+        accessibilityLabel={label}
+        accessibilityRole="button"
+      >
+        {badgeContent}
+      </Pressable>
+    );
+  }
+
+  return badgeContent;
 };
 
 export default AchievementBadge;

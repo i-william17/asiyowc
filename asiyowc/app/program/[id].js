@@ -9,10 +9,12 @@ import {
   Dimensions,
   TextInput,
   RefreshControl,
+  Platform,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useDispatch, useSelector } from "react-redux";
+import { decode as atob } from "base-64";
 
 import {
   fetchProgram,
@@ -51,6 +53,40 @@ const ProgramDetailsScreen = () => {
 
   const { program, loading } = useSelector((state) => state.programs);
 
+  const { token, user: authUser } = useSelector((state) => state.auth || {});
+
+  const currentUserId = (() => {
+    // Prefer user in redux if available
+    const idFromUser = authUser?._id || authUser?.id;
+    if (idFromUser) return String(idFromUser);
+
+    // Fallback: decode token
+    try {
+      if (!token) return null;
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      return String(payload?.id || payload?._id || payload?.userId || "");
+    } catch (e) {
+      return null;
+    }
+  })();
+
+  const isOwner = (maybeUserOrId) => {
+    if (!currentUserId) return false;
+
+    // maybeUserOrId can be:
+    // - populated user object { _id: ... }
+    // - raw id string
+    // - sometimes nested differently
+    const id =
+      maybeUserOrId?._id ||
+      maybeUserOrId?.id ||
+      maybeUserOrId?.userId ||
+      maybeUserOrId;
+
+    if (!id) return false;
+    return String(id) === String(currentUserId);
+  };
+
   const isEnrolled = program?.isEnrolled || false;
   const userProgress = program?.userProgress?.progress || 0;
   const isCompleted = userProgress === 100;
@@ -71,6 +107,33 @@ const ProgramDetailsScreen = () => {
   const [activeReply, setActiveReply] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  /* -----------------------------------------------
+   PROGRESSIVE REVEAL (5 at a time)
+----------------------------------------------- */
+  const STEP = 5;
+
+  const [visibleReviews, setVisibleReviews] = useState(STEP);
+  const [visibleComments, setVisibleComments] = useState(STEP);
+
+  // Reset when program changes (or refresh loads new arrays)
+  useEffect(() => {
+    setVisibleReviews(STEP);
+    setVisibleComments(STEP);
+  }, [programId]);
+
+  const showMore = (kind, total) => {
+    if (kind === "reviews") {
+      setVisibleReviews((v) => Math.min(v + STEP, total));
+    } else {
+      setVisibleComments((v) => Math.min(v + STEP, total));
+    }
+  };
+
+  const showLess = (kind) => {
+    if (kind === "reviews") setVisibleReviews(STEP);
+    else setVisibleComments(STEP);
+  };
+
   /* SNACKBAR */
   const [snack, setSnack] = useState({
     visible: false,
@@ -88,6 +151,15 @@ const ProgramDetailsScreen = () => {
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scrollY = useRef(new Animated.Value(0)).current;
+  const IS_WEB = Platform.OS === "web";
+
+  const webContainer = IS_WEB
+    ? {
+      maxWidth: 1000,   // adjust if you want tighter
+      width: "100%",
+      alignSelf: "center",
+    }
+    : null;
 
   /* -----------------------------------------------
      LOAD PROGRAM
@@ -170,14 +242,38 @@ const ProgramDetailsScreen = () => {
   ----------------------------------------------- */
   const submitReview = async () => {
     try {
-      await programService.addReview(program._id, { rating, reviewText });
+      // ✅ guard (prevents most mobile failures)
+      if (!rating || rating < 1) {
+        showSnack("Please select a rating (1–5).", "error");
+        return;
+      }
+
+      await programService.addReview(program._id, {
+        rating: Number(rating),
+        reviewText: (reviewText || "").trim(),
+      });
+
       setShowReviewModal(false);
       setRating(0);
       setReviewText("");
       await refreshProgram();
+      setVisibleReviews(STEP);
       showSnack("Your review has been submitted!", "success");
     } catch (e) {
-      showSnack("Failed to submit review.", "error");
+      // ✅ show the REAL error
+      const msg =
+        e?.response?.data?.message ||
+        e?.response?.data?.error ||
+        e?.message ||
+        "Failed to submit review.";
+
+      console.log("❌ addReview error:", {
+        msg,
+        status: e?.response?.status,
+        data: e?.response?.data,
+      });
+
+      showSnack(msg, "error");
     }
   };
 
@@ -204,6 +300,7 @@ const ProgramDetailsScreen = () => {
       });
       setCommentText("");
       await refreshProgram();
+      setVisibleComments(STEP);
       showSnack("Comment posted!", "success");
     } catch (e) {
       showSnack("Failed to post comment.", "error");
@@ -344,7 +441,7 @@ const ProgramDetailsScreen = () => {
 
       {/* BACK BUTTON */}
       <TouchableOpacity
-        onPress={() => router.back()}
+        onPress={() => router.replace("/programs")}
         style={tw`absolute top-12 left-4 bg-black/40 rounded-full p-3`}
       >
         <Ionicons name="arrow-back" size={22} color="#fff" />
@@ -462,7 +559,7 @@ const ProgramDetailsScreen = () => {
 
           {/* BUY BUTTON */}
           {/* BUY BUTTON — ONLY FOR PAID PROGRAMS */}
-          {program.price.amount > 0 && !isEnrolled && !hasCertificate && (
+          {/* {program.price.amount > 0 && !isEnrolled && !hasCertificate && (
             <TouchableOpacity
               onPress={handleBuyProgram}
               style={tw`bg-green-700 p-4 mt-4 rounded-2xl`}
@@ -477,8 +574,7 @@ const ProgramDetailsScreen = () => {
                 Buy Program (M-Pesa)
               </Text>
             </TouchableOpacity>
-          )}
-
+          )} */}
 
 
           {/* UNENROLL BUTTON */}
@@ -780,7 +876,7 @@ const ProgramDetailsScreen = () => {
           )}
 
           {program.reviews?.length > 0 ? (
-            program.reviews.map((rev) => (
+            program.reviews.slice(0, visibleReviews).map((rev) => (
               <View
                 key={rev._id}
                 style={tw`mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200`}
@@ -811,12 +907,14 @@ const ProgramDetailsScreen = () => {
                   </View>
 
                   {/* DELETE ICON */}
-                  <TouchableOpacity
-                    onPress={() => handleDeleteReview(rev._id)}
-                    style={tw`absolute top-3 right-3`}
-                  >
-                    <Ionicons name="trash" size={18} color="red" />
-                  </TouchableOpacity>
+                  {isOwner(rev?.user) && (
+                    <TouchableOpacity
+                      onPress={() => handleDeleteReview(rev._id)}
+                      style={tw`absolute top-3 right-3`}
+                    >
+                      <Ionicons name="trash" size={18} color="red" />
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 <View style={tw`flex-row mt-2`}>
@@ -841,6 +939,7 @@ const ProgramDetailsScreen = () => {
                 </Text>
               </View>
             ))
+
           ) : (
             <Text
               style={{
@@ -852,6 +951,34 @@ const ProgramDetailsScreen = () => {
               No reviews yet.
             </Text>
           )}
+
+          {/* SEE MORE / SHOW LESS (REVIEWS) */}
+          {(program.reviews?.length || 0) > STEP && (
+            <View style={tw`mt-4 items-center`}>
+              {visibleReviews < (program.reviews?.length || 0) ? (
+                <TouchableOpacity
+                  onPress={() => showMore("reviews", program.reviews.length)}
+                  style={tw`flex-row items-center px-4 py-2 bg-gray-100 rounded-full`}
+                >
+                  <Ionicons name="chevron-down" size={18} color="#111827" />
+                  <Text style={{ fontFamily: "Poppins-Medium", marginLeft: 6, color: "#111827" }}>
+                    See more
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => showLess("reviews")}
+                  style={tw`flex-row items-center px-4 py-2 bg-gray-100 rounded-full`}
+                >
+                  <Ionicons name="chevron-up" size={18} color="#111827" />
+                  <Text style={{ fontFamily: "Poppins-Medium", marginLeft: 6, color: "#111827" }}>
+                    Show less
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
         </View>
 
         {/* COMMENTS */}
@@ -885,7 +1012,7 @@ const ProgramDetailsScreen = () => {
           </TouchableOpacity>
 
           {/* Comment List */}
-          {topLevelComments.map((c) => (
+          {topLevelComments.slice(0, visibleComments).map((c) => (
             <View key={c._id} style={tw`mt-6`}>
               <View style={tw`flex-row`}>
                 <Image
@@ -904,12 +1031,14 @@ const ProgramDetailsScreen = () => {
                       {getName(c?.user?.profile)}
                     </Text>
 
-                    <TouchableOpacity
-                      onPress={() => handleDeleteComment(c._id)}
-                      style={tw`absolute top-3 right-3`}
-                    >
-                      <Ionicons name="trash" size={16} color="red" />
-                    </TouchableOpacity>
+                    {isOwner(c?.user) && (
+                      <TouchableOpacity
+                        onPress={() => handleDeleteComment(c._id)}
+                        style={tw`absolute top-3 right-3`}
+                      >
+                        <Ionicons name="trash" size={16} color="red" />
+                      </TouchableOpacity>
+                    )}
                   </View>
 
                   <Text
@@ -995,11 +1124,11 @@ const ProgramDetailsScreen = () => {
                           </View>
                         </View>
 
-                        <TouchableOpacity
-                          onPress={() => handleDeleteComment(r._id)}
-                        >
-                          <Ionicons name="trash" size={16} color="red" />
-                        </TouchableOpacity>
+                        {isOwner(r?.user) && (
+                          <TouchableOpacity onPress={() => handleDeleteComment(r._id)}>
+                            <Ionicons name="trash" size={16} color="red" />
+                          </TouchableOpacity>
+                        )}
                       </View>
                     </View>
                   ))}
@@ -1007,6 +1136,33 @@ const ProgramDetailsScreen = () => {
               </View>
             </View>
           ))}
+
+          {/* SEE MORE / SHOW LESS (COMMENTS) */}
+          {topLevelComments.length > STEP && (
+            <View style={tw`mt-6 items-center`}>
+              {visibleComments < topLevelComments.length ? (
+                <TouchableOpacity
+                  onPress={() => showMore("comments", topLevelComments.length)}
+                  style={tw`flex-row items-center px-4 py-2 bg-gray-100 rounded-full`}
+                >
+                  <Ionicons name="chevron-down" size={18} color="#111827" />
+                  <Text style={{ fontFamily: "Poppins-Medium", marginLeft: 6, color: "#111827" }}>
+                    See more
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => showLess("comments")}
+                  style={tw`flex-row items-center px-4 py-2 bg-gray-100 rounded-full`}
+                >
+                  <Ionicons name="chevron-up" size={18} color="#111827" />
+                  <Text style={{ fontFamily: "Poppins-Medium", marginLeft: 6, color: "#111827" }}>
+                    Show less
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
       </Animated.ScrollView>
 

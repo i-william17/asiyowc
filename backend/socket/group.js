@@ -12,6 +12,8 @@
 const mongoose = require("mongoose");
 const Group = require("../models/Group");
 const Chat = require("../models/Chat");
+const User = require("../models/User");
+const { sendExpoPushToUser } = require("../utils/push");
 
 /**
  * Presence helpers (GLOBAL truth)
@@ -172,6 +174,42 @@ module.exports = (io, socket) => {
 
       chat.messages.push(message);
       await chat.save();
+
+      /* ================= PUSH NOTIFICATION ================= */
+      const groupDoc = await Group.findById(gid)
+        .select("name members.user")
+        .lean();
+
+      if (groupDoc?.members?.length) {
+        const senderName = socket.user?.profile?.fullName || "Someone";
+
+        const preview =
+          payload.type === "text"
+            ? payload.ciphertext?.slice(0, 60) || "New message"
+            : "New message";
+
+        for (const member of groupDoc.members) {
+          const memberId = String(member.user);
+
+          if (memberId === String(userId)) continue;
+
+          // Skip if online (optional smart delivery)
+          if (isOnline(memberId)) continue;
+
+          const recipient = await User.findById(memberId).select("pushTokens");
+          if (!recipient) continue;
+
+          await sendExpoPushToUser(recipient, {
+            title: groupDoc.name || "Group Message",
+            body: `${senderName}: ${preview}`,
+            data: {
+              type: "community",
+              groupId: String(gid),
+              chatId: String(group.chat),
+            },
+          });
+        }
+      }
 
       io.to(`chat:${String(group.chat)}`).emit("group:group:new", {
         groupId: gid,
@@ -375,6 +413,32 @@ module.exports = (io, socket) => {
           : messageId;
 
       await chat.save();
+
+      /* ================= PIN PUSH ================= */
+      const group = await Group.findOne({ chat: chatId })
+        .select("name members.user")
+        .lean();
+
+      if (group?.members?.length) {
+        for (const member of group.members) {
+          const memberId = String(member.user);
+          if (memberId === String(userId)) continue;
+          if (isOnline(memberId)) continue;
+
+          const recipient = await User.findById(memberId).select("pushTokens");
+          if (!recipient) continue;
+
+          await sendExpoPushToUser(recipient, {
+            title: "Pinned Message",
+            body: `A message was pinned in ${group.name}`,
+            data: {
+              type: "community",
+              groupId: String(group._id),
+              chatId: String(chatId),
+            },
+          });
+        }
+      }
 
       const pinnedMsg =
         chat.messages.id(chat.pinnedMessage) || null;

@@ -12,6 +12,7 @@ require('express-async-errors');
 const dotenv = require('dotenv');
 const path = require('path');
 const { initRedis } = require('./config/redis.js');
+const runVoiceReminderCron = require('./utils/voiceReminder');
 
 // Routes
 const authRoutes = require('./routes/auth.js');
@@ -185,6 +186,9 @@ const connectDB = async () => {
     process.exit(1);
   }
 })();
+
+// Start voice ten minute reminder cron
+runVoiceReminderCron();
 
 // Routes
 app.use('/api/auth', authRoutes);

@@ -197,6 +197,33 @@ const userSchema = new mongoose.Schema(
       lastSOSUsed: Date,
     },
 
+    gamification: {
+      xp: { type: Number, default: 0 },
+      level: { type: Number, default: 1 },
+      milestones: {
+        type: [
+          {
+            key: { type: String, required: true },
+            program: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "Program",
+              default: null,
+            },
+            points: { type: Number, default: 0 },
+            achievedAt: { type: Date, default: Date.now },
+          },
+        ],
+        default: [],
+      },
+    },
+
+    pushTokens: [
+      {
+        token: String,
+        platform: String,
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     /* ================= PROGRAM PROGRESS ================= */
     programProgress: [
       {
@@ -230,6 +257,10 @@ const userSchema = new mongoose.Schema(
 /* ================= INDEXES ================= */
 userSchema.index({ interests: 1 });
 userSchema.index({ createdAt: -1 });
+userSchema.index(
+  { "gamification.milestones.key": 1, "gamification.milestones.program": 1 },
+  { partialFilterExpression: { "gamification.milestones.0": { $exists: true } } }
+);
 // Optional future use:
 // userSchema.index({ 'profile.location.countryCode': 1 });
 

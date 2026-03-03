@@ -446,6 +446,53 @@ exports.getMe = async (req, res) => {
 };
 
 /* ==========================================================
+   SAVE PUSH TOKEN
+========================================================== */
+exports.savePushToken = async (req, res) => {
+  try {
+    const { token, platform } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Push token is required",
+      });
+    }
+
+    // ✅ 1) Remove any previous record of this token
+    await User.updateOne(
+      { _id: req.user.id },
+      { $pull: { pushTokens: { token } } }
+    );
+
+    // ✅ 2) Add fresh record
+    await User.updateOne(
+      { _id: req.user.id },
+      {
+        $push: {
+          pushTokens: {
+            token,
+            platform: platform || "unknown",
+            createdAt: new Date(),
+          },
+        },
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: "Push token saved",
+    });
+  } catch (error) {
+    console.error("SAVE PUSH TOKEN ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save push token",
+    });
+  }
+};
+
+/* ==========================================================
    VERIFY RESET TOKEN
 ========================================================== */
 exports.verifyResetToken = async (req, res) => {
@@ -656,6 +703,30 @@ exports.resetPassword = async (req, res) => {
       success: false,
       message: error.message,
     });
+  }
+};
+
+// controllers/userController.js
+exports.getMyGamification = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await User.findById(userId)
+      .select("gamification.xp gamification.level")
+      .lean();
+
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    return res.json({
+      success: true,
+      data: {
+        xp: user?.gamification?.xp ?? 0,
+        level: user?.gamification?.level ?? 1,
+      },
+    });
+  } catch (err) {
+    console.error("getMyGamification error:", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch gamification" });
   }
 };
 

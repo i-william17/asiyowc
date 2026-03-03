@@ -11,9 +11,11 @@ const {
   resetPassword,
   verifyResetToken,
   getMe,
+  getMyGamification,
+  savePushToken,
   adminLogin,
   makeAdmin,
-  removeAdmin, 
+  removeAdmin,
 } = require('../controllers/authController');
 
 const { auth, isAdmin } = require('../middleware/auth');
@@ -33,12 +35,14 @@ router.post('/login', authLimiter, loginValidation, handleValidationErrors, logi
 
 // Fetch authenticated user
 router.get('/me', auth, getMe);
+router.post('/save-push-token', auth, savePushToken);
 
 router.post('/verify-email', verifyEmail);
 router.post('/resend-email-otp', resendEmailOTP);
 router.post('/verify-reset', verifyResetToken);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
+router.get("/me/gamification", auth, getMyGamification);
 
 // 2FA routes
 router.post('/2fa/setup', auth, setup2FA);

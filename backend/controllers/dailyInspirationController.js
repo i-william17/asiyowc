@@ -1,8 +1,7 @@
 const axios = require("axios");
 const cron = require("node-cron");
-const { Expo } = require("expo-server-sdk");
-
-const expo = new Expo();
+const User = require("../models/User"); // ✅ adjust path if needed
+const { sendExpoPushToUser } = require("../utils/push"); // ✅ your helper
 
 /* =====================================================
    THEMES BY DAY
@@ -47,51 +46,15 @@ const PHOEBE_ASIYO_QUOTES = [
       "Women must be part of decision-making, not because they are women, but because they are citizens.",
     source: "Phoebe Asiyo – Kenya National Assembly Address",
   },
-  {
-    quote:
-      "Empowering a woman is empowering a nation.",
-    source: "Phoebe Asiyo – Women’s Political Leadership Forum",
-  },
-  {
-    quote:
-      "Leadership is about service, not visibility.",
-    source: "Phoebe Asiyo – Interview with Daily Nation",
-  },
-  {
-    quote:
-      "Culture should never be used to silence women.",
-    source: "Phoebe Asiyo – Gender Equality Conference",
-  },
-  {
-    quote:
-      "Women’s voices shape the future, whether heard or ignored.",
-    source: "Phoebe Asiyo – Advocacy Speech",
-  },
-  {
-    quote:
-      "Equality is not given. It is claimed.",
-    source: "Phoebe Asiyo – Constitutional Reform Dialogue",
-  },
-  {
-    quote:
-      "Development without women is incomplete.",
-    source: "Phoebe Asiyo – African Women Leadership Summit",
-  },
-  {
-    quote:
-      "Justice begins when women are seen as full citizens.",
-    source: "Phoebe Asiyo – Public Lecture",
-  },
-  {
-    quote:
-      "History remembers those who speak when silence is easier.",
-    source: "Phoebe Asiyo – Memoirs",
-  },
-  {
-    quote:
-      "True leadership uplifts others, not the self.",
-    source: "Phoebe Asiyo – Leadership Training Session",
-  },
+  { quote: "Empowering a woman is empowering a nation.", source: "Phoebe Asiyo – Women’s Political Leadership Forum" },
+  { quote: "Leadership is about service, not visibility.", source: "Phoebe Asiyo – Interview with Daily Nation" },
+  { quote: "Culture should never be used to silence women.", source: "Phoebe Asiyo – Gender Equality Conference" },
+  { quote: "Women’s voices shape the future, whether heard or ignored.", source: "Phoebe Asiyo – Advocacy Speech" },
+  { quote: "Equality is not given. It is claimed.", source: "Phoebe Asiyo – Constitutional Reform Dialogue" },
+  { quote: "Development without women is incomplete.", source: "Phoebe Asiyo – African Women Leadership Summit" },
+  { quote: "Justice begins when women are seen as full citizens.", source: "Phoebe Asiyo – Public Lecture" },
+  { quote: "History remembers those who speak when silence is easier.", source: "Phoebe Asiyo – Memoirs" },
+  { quote: "True leadership uplifts others, not the self.", source: "Phoebe Asiyo – Leadership Training Session" },
 ];
 
 /* =====================================================
@@ -131,6 +94,7 @@ function getRandomSendTime() {
    LANGUAGE ROTATION (EN / SW)
 ===================================================== */
 function getUserLanguage(user) {
+  // later: respect user preference from profile
   return Math.random() > 0.5 ? "en" : "sw";
 }
 
@@ -141,9 +105,7 @@ async function generateMessage(theme, day, lang) {
   // Historical Thursday uses Phoebe Asiyo archive directly
   if (day === "thursday") {
     const q =
-      PHOEBE_ASIYO_QUOTES[
-        Math.floor(Math.random() * PHOEBE_ASIYO_QUOTES.length)
-      ];
+      PHOEBE_ASIYO_QUOTES[Math.floor(Math.random() * PHOEBE_ASIYO_QUOTES.length)];
     return `${q.quote}\n— ${q.source}`;
   }
 
@@ -179,20 +141,11 @@ Rules:
 }
 
 /* =====================================================
-   SEND EXPO PUSH
+   ANALYTICS (SIMPLE COUNTER)
 ===================================================== */
-async function sendPush(token, title, body, weekday) {
-  if (!Expo.isExpoPushToken(token)) return;
-
-  await expo.sendPushNotificationsAsync([
-    {
-      to: token,
-      sound: "default",
-      title,
-      body,
-      data: { weekday },
-    },
-  ]);
+const analytics = {};
+function recordAnalytics(day, count = 1) {
+  analytics[day] = (analytics[day] || 0) + count;
 }
 
 /* =====================================================
@@ -206,30 +159,43 @@ async function runDailyInspirationJob() {
   const theme = THEMES[weekday];
   if (!theme) return;
 
-  // 🔁 Replace with DB query
-  const users = await getAllUsersWithExpoTokens();
+  // ✅ Real DB query: active users with push tokens
+  const users = await User.find({
+    isActive: true,
+    pushTokens: { $exists: true, $ne: [] },
+  })
+    .select("_id pushTokens profile.fullName") // lightweight
+    .lean();
+
+  if (!users.length) return;
 
   for (const user of users) {
-    if (user.quietHours?.enabled) continue;
+    // later: enforce quiet hours if you add them
+    // if (user.quietHours?.enabled) continue;
 
     const delay = getRandomSendTime();
     const lang = getUserLanguage(user);
 
     setTimeout(async () => {
-      const message = await generateMessage(theme, weekday, lang);
-      await sendPush(user.expoPushToken, theme.title, message, weekday);
-      recordAnalytics(weekday);
+      try {
+        const message = await generateMessage(theme, weekday, lang);
+
+        await sendExpoPushToUser(user, {
+          title: theme.title,
+          body: message,
+          data: {
+            weekday,
+            type: "daily_inspiration",
+          },
+        });
+
+        // Count as 1 "user delivery attempt" (not per token)
+        recordAnalytics(weekday, 1);
+      } catch (e) {
+        console.error("Daily inspiration send ERROR:", e);
+      }
     }, delay);
   }
-}
-
-/* =====================================================
-   ANALYTICS (SIMPLE COUNTER)
-===================================================== */
-const analytics = {};
-
-function recordAnalytics(day) {
-  analytics[day] = (analytics[day] || 0) + 1;
 }
 
 /* =====================================================
@@ -238,13 +204,6 @@ function recordAnalytics(day) {
 cron.schedule("0 6 * * *", runDailyInspirationJob, {
   timezone: "Africa/Nairobi",
 });
-
-/* =====================================================
-   MOCK DB FUNCTIONS (REPLACE)
-===================================================== */
-async function getAllUsersWithExpoTokens() {
-  return [];
-}
 
 /* =====================================================
    EXPORT

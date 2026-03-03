@@ -77,19 +77,21 @@ export default function VoiceCard({
       </View>
 
       {/* ================= FOOTER ================= */}
-      <View style={tw`flex-row items-center mt-3`}>
-        <Headphones size={14} color="#7C3AED" />
-        <Text
-          style={{
-            fontFamily: "Poppins-Medium",
-            fontSize: 13,
-            color: "#7C3AED",
-            marginLeft: 6,
-          }}
-        >
-          {listenersCount} listening
-        </Text>
-      </View>
+      {isLive && (
+        <View style={tw`flex-row items-center mt-3`}>
+          <Headphones size={14} color="#7C3AED" />
+          <Text
+            style={{
+              fontFamily: "Poppins-Medium",
+              fontSize: 13,
+              color: "#7C3AED",
+              marginLeft: 6,
+            }}
+          >
+            {listenersCount} listening
+          </Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 }

@@ -10,6 +10,8 @@
 const mongoose = require("mongoose");
 const Hub = require("../models/Hub");
 const { isOnline } = require("./presence");
+const User = require("../models/User");
+const { sendExpoPushToUser } = require("../utils/push");
 
 /* =====================================================
    HELPERS
@@ -240,6 +242,36 @@ module.exports = (io, socket) => {
       hub.markModified("pinnedUpdate");
 
       await hub.save();
+
+      /* ================= HUB PIN PUSH ================= */
+
+const hubDoc = await Hub.findById(hid)
+  .select("name members moderators")
+  .lean();
+
+if (hubDoc?.members?.length) {
+  for (const memberIdRaw of hubDoc.members) {
+    const memberId = String(memberIdRaw);
+
+    // Skip moderator who pinned
+    if (memberId === String(userId)) continue;
+
+    // Skip online users
+    if (isOnline(memberId)) continue;
+
+    const recipient = await User.findById(memberId).select("pushTokens");
+    if (!recipient) continue;
+
+    await sendExpoPushToUser(recipient, {
+      title: hubDoc.name || "Hub Update",
+      body: "A post was pinned in your hub",
+      data: {
+        type: "community",
+        hubId: String(hid),
+      },
+    });
+  }
+}
 
       /* ================= POPULATE PIN ================= */
       let populatedPinned = null;

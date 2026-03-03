@@ -33,6 +33,21 @@ const voiceInstanceSchema = new mongoose.Schema(
     },
 
     /* ================================
+   REMINDER FLAGS (CRON REQUIRED)
+================================ */
+    tenMinReminderSent: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    liveNowSent: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    /* ================================
        STABLE INSTANCE ID (SOCKET SAFE)
     ================================ */
     instanceId: {

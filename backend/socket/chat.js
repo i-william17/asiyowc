@@ -1,6 +1,9 @@
 // backend/socket/chat.js
 const mongoose = require('mongoose');
 const Chat = require('../models/Chat');
+const User = require("../models/User");
+const { sendExpoPushToUser } = require("../utils/push");
+const { isOnline } = require("./presence");
 
 /* =====================================================
    HELPERS (CRITICAL)
@@ -209,6 +212,40 @@ module.exports = (io, socket) => {
 
       chat.messages.push(message);
       await chat.save();
+
+      /* ================= DM PUSH NOTIFICATION ================= */
+
+      // Only for DM chats
+      if (chat.type === "dm") {
+        const senderName = socket.user?.profile?.fullName || "Someone";
+
+        const preview =
+          payload.type === "text"
+            ? payload.ciphertext?.slice(0, 60) || "New message"
+            : "New message";
+
+        for (const participant of chat.participants) {
+          const participantId = String(participant);
+
+          // Skip sender
+          if (participantId === String(userId)) continue;
+
+          // Skip if online
+          if (isOnline(participantId)) continue;
+
+          const recipient = await User.findById(participantId).select("pushTokens");
+          if (!recipient) continue;
+
+          await sendExpoPushToUser(recipient, {
+            title: senderName,
+            body: preview,
+            data: {
+              type: "community",
+              chatId: String(cid),
+            },
+          });
+        }
+      }
 
       io.to(`chat:${cid}`).emit('message:new', {
         chatId: cid,

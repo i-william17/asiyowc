@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 const SavingsPod = require("../models/SavingsPod");
 const PaymentIntent = require("../models/PaymentIntent");
 const { nanoid } = require("nanoid");
+const { sendExpoPushToUser } = require("../utils/push");
+const User = require("../models/User");
 require("dotenv").config();
 
 /* =====================================================
@@ -207,11 +209,38 @@ exports.joinPod = async (req, res) => {
         const userId = req.user.id;
         const { podId } = req.params;
 
-        const pod = await SavingsPod.findById(podId);
+        const pod = await SavingsPod.findById(podId)
+            .populate("members.user", "pushTokens profile.fullName")
+            .populate("creator", "pushTokens profile.fullName");
+
         if (!pod) throw new Error("Pod not found");
 
         pod.addMember(userId);
         await pod.save();
+
+        /* ================= PUSH ================= */
+        try {
+            const joiningUser = await User.findById(userId)
+                .select("profile.fullName")
+                .lean();
+
+            const joiningName =
+                joiningUser?.profile?.fullName || "Someone";
+
+            // Notify creator
+            if (String(pod.creator._id) !== String(userId)) {
+                await sendExpoPushToUser(pod.creator, {
+                    title: "New Pod Member",
+                    body: `${joiningName} joined ${pod.name}`,
+                    data: {
+                        type: "savings",
+                        podId: String(pod._id),
+                    },
+                });
+            }
+        } catch (err) {
+            console.error("Join pod push error:", err);
+        }
 
         res.json({ message: "Joined pod successfully" });
     } catch (err) {

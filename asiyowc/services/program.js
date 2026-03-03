@@ -40,18 +40,19 @@ export const programService = {
   /* ------------------------------------------------------
      PUBLIC PROGRAMS
   ------------------------------------------------------ */
-  async getPublicPrograms() {
-    const res = await axios.get(`${server}/programs/public`);
+  async getPublicPrograms(params = {}) {
+    // params: { page, limit, search, category, status, featured }
+    const res = await axios.get(`${server}/programs/public`, { params });
     return unwrap(res); // { programs, pagination }
   },
 
   /* ------------------------------------------------------
      GET ALL PROGRAMS (AUTH REQUIRED)
   ------------------------------------------------------ */
-  async getAllPrograms() {
+  async getAllPrograms(params = {}) {
     const headers = await getAuthHeaders();
-    const res = await axios.get(`${server}/programs`, { headers });
-    return unwrap(res);
+    const res = await axios.get(`${server}/programs`, { headers, params });
+    return unwrap(res); // { programs, pagination }
   },
 
   /* ------------------------------------------------------
@@ -308,49 +309,49 @@ export const programService = {
   },
 
   // DELETE REVIEW (returns updated review list)
-async deleteReview(programId, reviewId) {
-  const headers = await getAuthHeaders();
+  async deleteReview(programId, reviewId) {
+    const headers = await getAuthHeaders();
 
-  console.log("🔐 DELETE REVIEW HEADERS:", headers);
+    console.log("🔐 DELETE REVIEW HEADERS:", headers);
 
-  const res = await axios({
-    method: "DELETE",
-    url: `${server}/programs/${programId}/reviews/${reviewId}`,
-    headers: { ...headers },   // Explicitly force headers
-  });
+    const res = await axios({
+      method: "DELETE",
+      url: `${server}/programs/${programId}/reviews/${reviewId}`,
+      headers: { ...headers },   // Explicitly force headers
+    });
 
-  const d = res.data?.data || res.data;
-  console.log("DELETE REVIEW RESPONSE DATA:", d);
+    const d = res.data?.data || res.data;
+    console.log("DELETE REVIEW RESPONSE DATA:", d);
 
-  return {
-    reviewId,
-    reviews: d.reviews || [],
-    message: d.message || "Review deleted"
-  };
-},
+    return {
+      reviewId,
+      reviews: d.reviews || [],
+      message: d.message || "Review deleted"
+    };
+  },
 
 
   // DELETE COMMENT (removes comment + replies)
-async deleteComment(programId, commentId) {
-  const headers = await getAuthHeaders();
+  async deleteComment(programId, commentId) {
+    const headers = await getAuthHeaders();
 
-  console.log("🔐 DELETE COMMENT HEADERS:", headers);
+    console.log("🔐 DELETE COMMENT HEADERS:", headers);
 
-  const res = await axios({
-    method: "DELETE",
-    url: `${server}/programs/${programId}/comments/${commentId}`,
-    headers: { ...headers },   // Explicitly force headers
-  });
+    const res = await axios({
+      method: "DELETE",
+      url: `${server}/programs/${programId}/comments/${commentId}`,
+      headers: { ...headers },   // Explicitly force headers
+    });
 
-  const d = res.data?.data || res.data;
-  console.log("DELETE COMMENT RESPONSE DATA:", d);
+    const d = res.data?.data || res.data;
+    console.log("DELETE COMMENT RESPONSE DATA:", d);
 
-  return {
-    commentId,
-    comments: d.comments || [],
-    message: d.message || "Comment deleted"
-  };
-},
+    return {
+      commentId,
+      comments: d.comments || [],
+      message: d.message || "Comment deleted"
+    };
+  },
 
 
   /* ------------------------------------------------------

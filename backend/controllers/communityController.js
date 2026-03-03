@@ -11,7 +11,7 @@ const Chat = require('../models/Chat');
 const Voice = require('../models/Voice');
 const Report = require('../models/Report');
 const Post = require('../models/Post');
-
+const { sendExpoPushToUser } = require("../utils/push");
 const { deleteFromCloudinary } = require("../middleware/upload");
 
 
@@ -1788,6 +1788,31 @@ exports.createHubUpdate = async (req, res) => {
 
     const update = hub.updates[0];
 
+    /* ================= PUSH: HUB UPDATE ================= */
+
+    if (hub.members?.length) {
+      for (const memberIdRaw of hub.members) {
+        const memberId = String(memberIdRaw);
+
+        if (memberId === String(user.id)) continue;
+
+        const recipient = await User.findById(memberId)
+          .select("pushTokens")
+          .lean();
+
+        if (!recipient) continue;
+
+        await sendExpoPushToUser(recipient, {
+          title: hub.name,
+          body: "New hub update posted",
+          data: {
+            type: "community_hub",
+            hubId: String(hub._id),
+          },
+        });
+      }
+    }
+
     req.io.to(`hub:${hubId}`).emit("hub:update:new", {
       hubId,
       update,
@@ -2504,6 +2529,59 @@ exports.createVoice = async (req, res) => {
       },
     ]);
 
+/* ================= PUSH: VOICE CREATED ================= */
+
+const voiceDoc = await Voice.findById(voice._id)
+  .populate("host", "profile.fullName")
+  .populate("group", "members")
+  .populate("hub", "members")
+  .lean();
+
+const hostName = voiceDoc.host?.profile?.fullName || "Host";
+
+let recipients = [];
+
+// 🎯 Group members
+if (voiceDoc.group?.members?.length) {
+  recipients.push(
+    ...voiceDoc.group.members.map((m) =>
+      String(m.user || m)
+    )
+  );
+}
+
+// 🎯 Hub members
+if (voiceDoc.hub?.members?.length) {
+  recipients.push(
+    ...voiceDoc.hub.members.map(String)
+  );
+}
+
+// Remove duplicates + host
+recipients = [...new Set(recipients)].filter(
+  (id) => id !== String(user.id)
+);
+
+for (const uid of recipients) {
+  const recipient = await User.findById(uid)
+    .select("pushTokens")
+    .lean();
+
+  if (!recipient) continue;
+
+  await sendExpoPushToUser(recipient, {
+    title: voiceDoc.title,
+    body: `${hostName} started a voice room`,
+    data: {
+      type: "voice",
+      voiceId: String(voiceDoc._id),
+      instanceId: String(
+        voiceDoc.instances?.[0]?.instanceId
+      ),
+    },
+  });
+}
+
     return created(res, voice, "Voice room created");
 
   } catch (error) {
@@ -2983,6 +3061,55 @@ exports.updateVoiceInstanceStatus = async (req, res) => {
 
     instance.status = status;
     await voice.save();
+
+    /* ================= PUSH: VOICE STARTING IN 10 MIN ================= */
+
+    if (instance.status === "scheduled" && status === "live") {
+      const voiceDoc = await Voice.findById(voiceId)
+        .populate("host", "profile.fullName")
+        .populate("group", "members")
+        .populate("hub", "members")
+        .lean();
+
+      let recipients = [];
+
+      if (voiceDoc.group?.members?.length) {
+        recipients.push(
+          ...voiceDoc.group.members.map((m) =>
+            String(m.user || m)
+          )
+        );
+      }
+
+      if (voiceDoc.hub?.members?.length) {
+        recipients.push(
+          ...voiceDoc.hub.members.map(String)
+        );
+      }
+
+      recipients = [...new Set(recipients)];
+      recipients = recipients.filter(
+        (id) => id !== String(user.id)
+      );
+
+      for (const userId of recipients) {
+        const recipient = await User.findById(userId)
+          .select("pushTokens")
+          .lean();
+
+        if (!recipient) continue;
+
+        await sendExpoPushToUser(recipient, {
+          title: voiceDoc.title,
+          body: "Voice starts in 10 minutes",
+          data: {
+            type: "voice",
+            voiceId: String(voiceDoc._id),
+            instanceId: String(instance.instanceId),
+          },
+        });
+      }
+    }
 
     return ok(res, instance, 'Instance status updated');
   } catch (error) {

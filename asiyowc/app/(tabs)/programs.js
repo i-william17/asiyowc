@@ -9,9 +9,12 @@ import {
   Animated,
   RefreshControl,
   TextInput,
+  useWindowDimensions,
+  Platform,
+  FlatList,
 } from "react-native";
 
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -19,25 +22,47 @@ import FeedShimmer from "../../components/ui/ShimmerLoader";
 import ProgramCard from "../../components/programs/ProgramCard";
 import { programService } from "../../services/program";
 import tw from "../../utils/tw";
-import { secureStore } from "../../services/storage";
+import { useSelector, useDispatch } from "react-redux";
+import { fetchPublicPrograms, clearPrograms } from "../../store/slices/programsSlice";
+import { fetchGamification } from "../../store/slices/authSlice";
 
 const ProgramsScreen = () => {
+  const dispatch = useDispatch();
   const router = useRouter();
+  const { user } = useSelector((state) => state.auth);
+  
+  // Redux state for programs
+  const {
+    publicPrograms,
+    pagination,
+    loading: programsLoading,
+  } = useSelector((state) => state.programs);
+
+  const xp = user?.gamification?.xp ?? 0;
+  const level = user?.gamification?.level ?? 1;
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [activeTab, setActiveTab] = useState("all");
 
-  const [allPrograms, setAllPrograms] = useState([]);
   const [myPrograms, setMyPrograms] = useState([]);
   const [completedPrograms, setCompletedPrograms] = useState([]);
 
   // 🔎 Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  const { width } = useWindowDimensions();
+
+  const webCols =
+    Platform.OS === "web"
+      ? width >= 1200
+        ? 4
+        : 2
+      : 1;
 
   /* -----------------------------------------------------------------
       SAFE EXTRACTOR: handles { programs }, { data }, or arrays
@@ -50,46 +75,85 @@ const ProgramsScreen = () => {
     return [];
   };
 
-
   /* -----------------------------------------------------------------
-      FETCH ALL PROGRAM DATA
+      FETCH MY & COMPLETED PROGRAMS (keep existing functionality)
   ----------------------------------------------------------------- */
-  const fetchAll = async () => {
+  const fetchUserPrograms = async () => {
     try {
-      setLoading(true);
+      const [myRes, completedRes] = await Promise.all([
+        programService.getMyPrograms(),
+        programService.getCompletedPrograms(),
+      ]);
 
-      const publicRes = await programService.getPublicPrograms();
-      const myRes = await programService.getMyPrograms();
-      const completedRes = await programService.getCompletedPrograms();
-
-      // console.log("📌 PUBLIC:", publicRes);
-      // console.log("📌 MY PROGRAMS:", myRes);
-      // console.log("📌 COMPLETED:", completedRes);
-
-      setAllPrograms(extractPrograms(publicRes));
       setMyPrograms(extractPrograms(myRes));
       setCompletedPrograms(extractPrograms(completedRes));
     } catch (err) {
-      console.log("❌ Fetch error:", err);
-    } finally {
-      setLoading(false);
+      console.log("❌ Fetch user programs error:", err);
     }
   };
 
+  useFocusEffect(
+    React.useCallback(() => {
+      dispatch(fetchGamification());
+    }, [dispatch])
+  );
+
+  // Load first page of public programs on mount
   useEffect(() => {
-    fetchAll();
+    dispatch(
+      fetchPublicPrograms({
+        page: 1,
+        limit: 12,
+        replace: true,
+      })
+    );
+    
+    fetchUserPrograms();
 
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 550,
       useNativeDriver: true,
     }).start();
-  }, []);
+
+    // Cleanup on unmount
+    return () => {
+      dispatch(clearPrograms());
+    };
+  }, [dispatch]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchAll();
+    await Promise.all([
+      dispatch(
+        fetchPublicPrograms({
+          page: 1,
+          limit: 12,
+          replace: true,
+        })
+      ),
+      fetchUserPrograms(),
+      dispatch(fetchGamification()),
+    ]);
     setRefreshing(false);
+  };
+
+  /* -----------------------------------------------------------------
+      LOAD MORE HANDLER
+  ----------------------------------------------------------------- */
+  const loadMore = () => {
+    if (!pagination?.hasNextPage || programsLoading || loadingMore) return;
+
+    setLoadingMore(true);
+    dispatch(
+      fetchPublicPrograms({
+        page: pagination.currentPage + 1,
+        limit: 12,
+        replace: false,
+      })
+    ).finally(() => {
+      setLoadingMore(false);
+    });
   };
 
   /* -----------------------------------------------------------------
@@ -112,7 +176,8 @@ const ProgramsScreen = () => {
     { id: "completed", name: "Completed" },
   ];
 
-  let dataToRender = allPrograms;
+  let dataToRender = [];
+  if (activeTab === "all") dataToRender = publicPrograms;
   if (activeTab === "enrolled") dataToRender = myPrograms;
   if (activeTab === "completed") dataToRender = completedPrograms;
 
@@ -128,6 +193,83 @@ const ProgramsScreen = () => {
       );
     });
   }
+
+  /* -----------------------------------------------------------------
+      RENDER FOOTER (Load More button)
+  ----------------------------------------------------------------- */
+  const renderFooter = () => {
+    if (activeTab !== "all" || !pagination?.hasNextPage) return null;
+    
+    return (
+      <View style={tw`mt-6 items-center`}>
+        <TouchableOpacity
+          onPress={loadMore}
+          disabled={programsLoading || loadingMore}
+          style={[
+            tw`py-3 px-8 rounded-xl items-center`,
+            { 
+              backgroundColor: "#6A1B9A",
+              opacity: programsLoading || loadingMore ? 0.7 : 1,
+            },
+          ]}
+        >
+          <Text
+            style={{
+              color: "#FFFFFF",
+              fontFamily: "Poppins-SemiBold",
+              fontSize: 14,
+            }}
+          >
+            {loadingMore ? "Loading..." : "Load More"}
+          </Text>
+        </TouchableOpacity>
+        
+        {pagination && (
+          <Text
+            style={{
+              color: "#9CA3AF",
+              fontFamily: "Poppins-Regular",
+              fontSize: 12,
+              marginTop: 8,
+            }}
+          >
+            Showing {publicPrograms.length} of {pagination.totalDocs || publicPrograms.length} programs
+          </Text>
+        )}
+      </View>
+    );
+  };
+
+  /* -----------------------------------------------------------------
+      RENDER PROGRAM GRID (Web)
+  ----------------------------------------------------------------- */
+  const renderWebGrid = () => (
+    <View
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${webCols}, minmax(0, 1fr))`,
+        gap: 16,
+      }}
+    >
+      {dataToRender.map((program) => (
+        <ProgramCard key={program._id} program={program} />
+      ))}
+    </View>
+  );
+
+  /* -----------------------------------------------------------------
+      RENDER PROGRAM LIST (Native)
+  ----------------------------------------------------------------- */
+  const renderNativeList = () => (
+    <FlatList
+      data={dataToRender}
+      keyExtractor={(item) => item._id}
+      renderItem={({ item }) => <ProgramCard program={item} />}
+      scrollEnabled={false}
+      ListFooterComponent={renderFooter}
+      contentContainerStyle={{ paddingBottom: 20 }}
+    />
+  );
 
   /* -----------------------------------------------------------------
       RENDER UI
@@ -150,7 +292,7 @@ const ProgramsScreen = () => {
             HEADER
         -------------------------------------------------------------- */}
         <LinearGradient
-          colors={["#6A1B9A","#6A1B9A"]}
+          colors={["#6A1B9A", "#6A1B9A"]}
           style={tw`px-6 pt-16 pb-10 rounded-b-3xl shadow-lg`}
         >
           <View style={tw`flex-row justify-between items-center`}>
@@ -177,6 +319,65 @@ const ProgramsScreen = () => {
               </Text>
             </View>
 
+            <View style={tw`flex-row items-center`}>
+              {/* ⭐ XP + Level Pill - Minimal Premium */}
+              <View
+                style={[
+                  {
+                    backgroundColor: 'rgba(255,255,255,0.08)',
+                    borderRadius: 100,
+                    paddingVertical: 6,
+                    paddingHorizontal: 14,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: 'rgba(255,215,0,0.15)',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.15,
+                    shadowRadius: 12,
+                    elevation: 4,
+                    backdropFilter: 'blur(8px)',
+                  }
+                ]}
+              >
+                {/* Level - Subtle Gold */}
+                <Text
+                  style={{
+                    color: '#FBBF24',
+                    fontFamily: 'Poppins-Bold',
+                    fontSize: 13,
+                    marginRight: 8,
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  Lv.{level}
+                </Text>
+
+                {/* XP - Clean White */}
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text
+                    style={{
+                      color: '#FFFFFF',
+                      fontFamily: 'Poppins-SemiBold',
+                      fontSize: 14,
+                      marginRight: 4,
+                    }}
+                  >
+                    {xp}
+                  </Text>
+                  <Text
+                    style={{
+                      color: 'rgba(255,255,255,0.5)',
+                      fontFamily: 'Poppins-Regular',
+                      fontSize: 12,
+                    }}
+                  >
+                    XP
+                  </Text>
+                </View>
+              </View>
+            </View>
             {/* 🔔 Notifications */}
             {/* <TouchableOpacity
               style={[
@@ -202,7 +403,20 @@ const ProgramsScreen = () => {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={tw`flex-row`}
+              contentContainerStyle={[
+                tw`flex-row`,
+                Platform.OS === "web" && {
+                  justifyContent: "center",
+                  flexGrow: 1,
+                },
+              ]}
+              style={[
+                Platform.OS === "web" && {
+                  alignSelf: "center",
+                  width: "100%",
+                  maxWidth: 1100,
+                },
+              ]}
             >
               {tabs.map((tab) => (
                 <TouchableOpacity
@@ -234,7 +448,16 @@ const ProgramsScreen = () => {
         {/* --------------------------------------------------------------
             SEARCH BAR
         -------------------------------------------------------------- */}
-        <View style={tw`px-6 mb-6`}>
+        <View
+          style={[
+            tw`px-6 mb-6`,
+            Platform.OS === "web" && {
+              alignSelf: "center",
+              width: "100%",
+              maxWidth: 1100,
+            },
+          ]}
+        >
           <View
             style={[
               tw`flex-row items-center rounded-2xl px-4 py-3`,
@@ -276,7 +499,16 @@ const ProgramsScreen = () => {
         {/* --------------------------------------------------------------
             PROGRAM LIST
         -------------------------------------------------------------- */}
-        <View style={tw`px-6 pb-10`}>
+        <View
+          style={[
+            tw`px-6 pb-10`,
+            Platform.OS === "web" && {
+              alignSelf: "center",
+              width: "100%",
+              maxWidth: 1100,
+            },
+          ]}
+        >
           <Text
             style={{
               fontFamily: "Poppins-SemiBold",
@@ -292,7 +524,7 @@ const ProgramsScreen = () => {
                 : "Completed Programs"}
           </Text>
 
-          {loading ? (
+          {programsLoading && activeTab === "all" && dataToRender.length === 0 ? (
             <FeedShimmer />
           ) : dataToRender.length === 0 ? (
             <View style={tw`items-center mt-10`}>
@@ -316,10 +548,13 @@ const ProgramsScreen = () => {
                 Try searching with a different term or pull down to refresh.
               </Text>
             </View>
+          ) : Platform.OS === "web" ? (
+            <>
+              {renderWebGrid()}
+              {renderFooter()}
+            </>
           ) : (
-            dataToRender.map((program) => (
-              <ProgramCard key={program._id} program={program} />
-            ))
+            renderNativeList()
           )}
         </View>
       </Animated.ScrollView>

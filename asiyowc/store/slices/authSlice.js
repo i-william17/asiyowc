@@ -21,6 +21,27 @@ export const fetchAuthenticatedUser = createAsyncThunk(
   }
 );
 
+export const fetchGamification = createAsyncThunk(
+  "auth/fetchGamification",
+  async (_, { getState, rejectWithValue }) => {
+    try {
+      const { token } = getState().auth;
+      if (!token) return rejectWithValue("No token");
+
+      const response = await authService.getGamification(token);
+
+      // ✅ supports both shapes:
+      // 1) { success, data: { xp, level } }
+      // 2) { xp, level }
+      const payload = response?.data ?? response;
+
+      return payload; // { xp, level }
+    } catch (error) {
+      return rejectWithValue(error.response?.data || error.message);
+    }
+  }
+);
+
 /* ============================================================
    RESTORE TOKEN (App Startup)
 ============================================================ */
@@ -296,6 +317,21 @@ const authSlice = createSlice({
         // ❌ DO NOT clear token here
       })
 
+      .addCase(fetchGamification.fulfilled, (state, action) => {
+        // keep existing user, just patch gamification
+        if (!state.user) state.user = {};
+        state.user.gamification = {
+          ...(state.user.gamification || {}),
+          xp: action.payload?.xp ?? 0,
+          level: action.payload?.level ?? 1,
+        };
+      })
+
+      .addCase(fetchGamification.rejected, (state, action) => {
+        // Do nothing destructive; no logout
+        // optionally set error:
+        // state.error = action.payload;
+      })
       /* ============================================================
          LOGOUT
       ============================================================= */
