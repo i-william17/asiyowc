@@ -321,34 +321,69 @@ const userSlice = createSlice({
     builder
       .addCase(fetchUserProfile.fulfilled, (state, action) => {
         state.loading = false;
-        state.user = action.payload.user;
-        state.stats = action.payload.stats;
+
+        const payload = action.payload.data || action.payload;
+
+        state.user = payload.user;
+        state.stats = payload.stats;
       })
+
+      // .addCase(fetchUserProfile.fulfilled, (state, action) => {
+      //   state.loading = false;
+      //   state.user = action.payload.user;
+      //   state.stats = action.payload.stats;
+      // })
 
       .addCase(updateProfile.fulfilled, (state, action) => {
         state.loading = false;
 
-        const updatedUser = action.payload.data.user;
+        const updatedUser = action.payload.user;
+
+        if (!updatedUser) return;
 
         state.user = {
           ...state.user,
           ...updatedUser,
           profile: {
-            ...state.user.profile,
-            ...updatedUser.profile,
+            ...(state.user?.profile || {}),
+            ...(updatedUser?.profile || {}),
           },
           safety: {
-            ...state.user.safety,
-            ...updatedUser.safety,
+            ...(state.user?.safety || {}),
+            ...(updatedUser?.safety || {}),
+            emergencyContacts:
+              updatedUser?.safety?.emergencyContacts ??
+              state.user?.safety?.emergencyContacts ??
+              [],
           },
+          // safety: {
+          //   ...(state.user?.safety || {}),
+          //   ...(updatedUser?.safety || {}),
+          // },
         };
+        // state.user = {
+        //   ...state.user,
+        //   ...updatedUser,
+        //   profile: {
+        //     ...state.user.profile,
+        //     ...updatedUser.profile,
+        //   },
+        //   safety: {
+        //     ...state.user.safety,
+        //     ...updatedUser.safety,
+        //   },
+        // };
       })
 
       .addCase(updateAvatar.fulfilled, (state, action) => {
         state.loading = false;
         if (state.user) {
+          state.user.profile = state.user.profile || {};
           state.user.profile.avatar = action.payload.avatar;
         }
+        // if (state.user) {
+        //   state.user.profile.avatar = action.payload.avatar;
+        // }
         state.message = 'Avatar updated';
       })
 
@@ -363,8 +398,12 @@ const userSlice = createSlice({
       .addCase(updateCoverPhoto.fulfilled, (state, action) => {
         state.loading = false;
         if (state.user) {
+          state.user.profile = state.user.profile || {};
           state.user.profile.coverPhoto = action.payload.coverPhoto;
         }
+        // if (state.user) {
+        //   state.user.profile.coverPhoto = action.payload.coverPhoto;
+        // }
         state.message = 'Cover photo updated';
       })
 

@@ -1,7 +1,7 @@
 /* ============================================================
    EDIT PROFILE SCREEN
    Enhanced Professional Styling • Award-winning Design
-   Updated: Collapsible Sections with Section-based Saving
+   Updated: Simplified Architecture with Single Source of Truth
 ============================================================ */
 
 import { useEffect, useState, useRef, useMemo } from "react";
@@ -136,50 +136,39 @@ export default function EditProfileScreen() {
     [SECTIONS.EMERGENCY_CONTACT]: false,
   });
 
-  // Form state
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [bio, setBio] = useState("");
-  const [role, setRole] = useState("professional");
-  const [interests, setInterests] = useState([]);
-
-  const [location, setLocation] = useState({
-    country: "",
-    countryCode: "",
-    city: "",
+  // SINGLE FORM STATE OBJECT - replaces 7+ individual states
+  const [form, setForm] = useState({
+    fullName: "",
+    email: "",
+    bio: "",
+    role: "professional",
+    interests: [],
+    location: {
+      country: "",
+      countryCode: "",
+      city: "",
+    },
+    password: {
+      current: "",
+      new: "",
+    },
+    emergencyContacts: [],
   });
 
-  const [password, setPassword] = useState({ current: "", new: "" });
-  const [emergency, setEmergency] = useState({
+  // Temporary emergency contact form (not saved until staged)
+  const [emergencyForm, setEmergencyForm] = useState({
     name: "",
     phone: "",
     relationship: "",
   });
 
-  // Track section changes separately
-  const [sectionChanges, setSectionChanges] = useState({
-    [SECTIONS.PROFILE_MEDIA]: false,
-    [SECTIONS.PERSONAL_INFO]: false,
-    [SECTIONS.PROFESSIONAL_ROLE]: false,
-    [SECTIONS.INTERESTS]: false,
-    [SECTIONS.LOCATION]: false,
-    [SECTIONS.PASSWORD]: false,
-    [SECTIONS.EMERGENCY_CONTACT]: false,
-  });
-
-  const [userLocalEmergency, setUserLocalEmergency] = useState([]);
-
-  const [relationshipModal, setRelationshipModal] = useState(false);
-  const [countryModal, setCountryModal] = useState(false);
-  const [cityModal, setCityModal] = useState(false);
-  const isMediaUpdatingRef = useRef(false);
-
-  const [countrySearch, setCountrySearch] = useState("");
-  const [citySearch, setCitySearch] = useState("");
-
-  // Store initial values for each section
+  // Store initial values for change detection
   const initialRef = useRef(null);
+  const isMediaUpdatingRef = useRef(false);
+  const isSavingRef = useRef(false);
+
   const [saving, setSaving] = useState(false);
+  const [baselineVersion, setBaselineVersion] = useState(0);
   const scrollY = useRef(new Animated.Value(0)).current;
 
   const [snackbar, setSnackbar] = useState({
@@ -190,132 +179,157 @@ export default function EditProfileScreen() {
 
   const [passwordError, setPasswordError] = useState("");
 
-  /* ================= ANIMATIONS ================= */
-
-  // const headerHeight = scrollY.interpolate({
-  //   inputRange: [0, 100],
-  //   outputRange: [120, 80],
-  //   extrapolate: 'clamp',
-  // });
-
-  // const headerOpacity = scrollY.interpolate({
-  //   inputRange: [0, 50],
-  //   outputRange: [1, 0],
-  //   extrapolate: 'clamp',
-  // });
+  // Modal states
+  const [relationshipModal, setRelationshipModal] = useState(false);
+  const [countryModal, setCountryModal] = useState(false);
+  const [cityModal, setCityModal] = useState(false);
+  const [countrySearch, setCountrySearch] = useState("");
+  const [citySearch, setCitySearch] = useState("");
 
   /* ================= DATA ================= */
 
   const countries = useMemo(() => Country.getAllCountries(), []);
   const cities = useMemo(() => {
-    if (!location.countryCode) return [];
-    return City.getCitiesOfCountry(location.countryCode) || [];
-  }, [location.countryCode]);
+    if (!form.location.countryCode) return [];
+    return City.getCitiesOfCountry(form.location.countryCode) || [];
+  }, [form.location.countryCode]);
 
   /* ================= INIT ================= */
   useEffect(() => {
     if (!user) return;
 
-    setFullName(user.profile?.fullName || "");
-    setEmail(user.email || "");
-    setBio(user.profile?.bio || "");
-    setRole(user.profile?.role || "professional");
-    setInterests(user.profile?.interests || user.interests || []);
-    setLocation(
-      user.profile?.location || {
-        country: "",
-        countryCode: "",
-        city: "",
-      }
-    );
-
-    setUserLocalEmergency(
-      user.safety?.emergencyContacts ||
-      user.profile?.safety?.emergencyContacts ||
-      []
-    );
-
-    // ✅ RESET BASELINE FOR CHANGE DETECTION
-    initialRef.current = {
+    const baseline = {
       fullName: user.profile?.fullName || "",
       email: user.email || "",
       bio: user.profile?.bio || "",
-      role: user.profile?.role || "",
+      role: user.profile?.role || "professional",
       interests: user.profile?.interests || user.interests || [],
-      location: user.profile?.location || {},
+      location: user.profile?.location || {
+        country: "",
+        countryCode: "",
+        city: "",
+      },
+      password: { current: "", new: "" },
       emergencyContacts:
         user.safety?.emergencyContacts ||
         user.profile?.safety?.emergencyContacts ||
         [],
     };
 
-    // ✅ CLEAR UNSAVED FLAGS (THIS IS THE MISSING PIECE)
-    setSectionChanges({
-      [SECTIONS.PROFILE_MEDIA]: false,
-      [SECTIONS.PERSONAL_INFO]: false,
-      [SECTIONS.PROFESSIONAL_ROLE]: false,
-      [SECTIONS.INTERESTS]: false,
-      [SECTIONS.LOCATION]: false,
-      [SECTIONS.PASSWORD]: false,
-      [SECTIONS.EMERGENCY_CONTACT]: false,
-    });
+    initialRef.current = JSON.parse(JSON.stringify(baseline));
+    setForm(JSON.parse(JSON.stringify(baseline)));
+
+    // ⭐ Force change detection refresh
+    setBaselineVersion((v) => v + 1);
+
   }, [user]);
 
+  /* ================= FORM UPDATE HELPERS ================= */
+
+  const updateField = (key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
+  const updateLocation = (key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      location: {
+        ...prev.location,
+        [key]: value
+      }
+    }));
+  };
+
+  const updatePasswordField = (key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      password: {
+        ...prev.password,
+        [key]: value
+      }
+    }));
+  };
+
+  const updateEmergencyContacts = (contacts) => {
+    setForm((prev) => ({
+      ...prev,
+      emergencyContacts: contacts
+    }));
+  };
+
   /* ================= CHANGE DETECTION ================= */
+  const deepEqual = (a, b) => {
+    try {
+      return JSON.stringify(a) === JSON.stringify(b);
+    } catch {
+      return false;
+    }
+  };
 
-  // Check for changes in each section
-  useEffect(() => {
-    if (!initialRef.current) return;
+  const hasChanges = useMemo(() => {
+    if (!initialRef.current) return false;
 
-    // 🔒 DO NOT mark profile dirty during avatar/cover updates
-    if (isMediaUpdatingRef.current) return;
+    const { password, ...formRest } = form;
+    const { password: _, ...baselineRest } = initialRef.current;
 
-    const changes = {
+    const formChanged = !deepEqual(formRest, baselineRest);
+    const passwordChanged =
+      form.password.current.length > 0 || form.password.new.length > 0;
+
+    return formChanged || passwordChanged;
+
+  }, [form, baselineVersion]);
+
+  // Section-specific change detection
+  const sectionChanges = useMemo(() => {
+    if (!initialRef.current) return {};
+
+    return {
       [SECTIONS.PERSONAL_INFO]:
-        initialRef.current.fullName !== fullName ||
-        initialRef.current.email !== email ||
-        initialRef.current.bio !== bio,
+        initialRef.current.fullName !== form.fullName ||
+        initialRef.current.email !== form.email ||
+        initialRef.current.bio !== form.bio,
 
       [SECTIONS.PROFESSIONAL_ROLE]:
-        initialRef.current.role !== role,
+        initialRef.current.role !== form.role,
 
       [SECTIONS.INTERESTS]:
-        JSON.stringify(initialRef.current.interests) !== JSON.stringify(interests),
+        JSON.stringify(initialRef.current.interests) !==
+        JSON.stringify(form.interests),
 
       [SECTIONS.LOCATION]:
-        JSON.stringify(initialRef.current.location) !== JSON.stringify(location),
+        JSON.stringify(initialRef.current.location) !==
+        JSON.stringify(form.location),
 
       [SECTIONS.PASSWORD]:
-        password.current.length > 0 || password.new.length > 0,
+        form.password.current.length > 0 || form.password.new.length > 0,
 
       [SECTIONS.EMERGENCY_CONTACT]:
         JSON.stringify(initialRef.current.emergencyContacts) !==
-        JSON.stringify(userLocalEmergency),
+        JSON.stringify(form.emergencyContacts),
     };
 
-    setSectionChanges(changes);
-  }, [
-    fullName,
-    email,
-    bio,
-    role,
-    interests,
-    location,
-    password,
-    userLocalEmergency,
-  ]);
+  }, [form, baselineVersion]);
 
   /* ================= HELPERS ================= */
 
   const showSnackbar = (message, type = "success") => {
     setSnackbar({ visible: true, message, type });
-    setTimeout(() => setSnackbar({ visible: false }), 3000);
+    setTimeout(() =>
+      setSnackbar(prev => ({ ...prev, visible: false })),
+      3000);
   };
 
   const toggleInterest = (interest) => {
-    setInterests((prev) =>
-      prev.includes(interest) ? prev.filter((x) => x !== interest) : [...prev, interest]
-    );
+    setForm((prev) => ({
+      ...prev,
+      interests: prev.interests.includes(interest)
+        ? prev.interests.filter((x) => x !== interest)
+        : [...prev.interests, interest]
+    }));
   };
 
   const toggleSection = (section) => {
@@ -363,246 +377,182 @@ export default function EditProfileScreen() {
     }
   };
 
-  /* ================= EMERGENCY STAGING ================= */
+  /* ================= EMERGENCY CONTACT HANDLING ================= */
 
   const handleAddEmergencyContact = () => {
-    if (!emergency.name || !emergency.phone || !emergency.relationship) {
+    if (!emergencyForm.name || !emergencyForm.phone || !emergencyForm.relationship) {
       showSnackbar("Name, phone & relationship required", "error");
       return;
     }
 
-    setUserLocalEmergency((prev) => [
-      ...prev,
+    updateEmergencyContacts([
+      ...form.emergencyContacts,
       {
-        name: emergency.name,
-        phone: emergency.phone,
-        relationship: emergency.relationship,
-      },
+        name: emergencyForm.name,
+        phone: emergencyForm.phone,
+        relationship: emergencyForm.relationship,
+      }
     ]);
 
-    setEmergency({ name: "", phone: "", relationship: "" });
+    setEmergencyForm({ name: "", phone: "", relationship: "" });
     showSnackbar("Staged locally — click SAVE to persist", "success");
   };
 
   const removeStagedContact = (index) => {
-    setUserLocalEmergency((prev) =>
-      prev.filter((_, i) => i !== index)
+    updateEmergencyContacts(
+      form.emergencyContacts.filter((_, i) => i !== index)
     );
   };
 
-  /* ================= SECTION-BASED SAVE FUNCTIONS ================= */
-
-  const savePersonalInfo = async () => {
-    if (!sectionChanges[SECTIONS.PERSONAL_INFO]) return;
-
-    setSaving(true);
-    try {
-      const payload = { fullName, email, bio };
-      await dispatch(updateProfile(payload)).unwrap();
-
-      // Update initial ref for this section
-      if (initialRef.current) {
-        initialRef.current.fullName = fullName;
-        initialRef.current.email = email;
-        initialRef.current.bio = bio;
-      }
-
-      setSectionChanges(prev => ({ ...prev, [SECTIONS.PERSONAL_INFO]: false }));
-      showSnackbar("Personal information updated", "success");
-    } catch (err) {
-      showSnackbar(err?.message || "Update failed", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveProfessionalRole = async () => {
-    if (!sectionChanges[SECTIONS.PROFESSIONAL_ROLE]) return;
-
-    setSaving(true);
-    try {
-      const payload = { role };
-      await dispatch(updateProfile(payload)).unwrap();
-
-      if (initialRef.current) {
-        initialRef.current.role = role;
-      }
-
-      setSectionChanges(prev => ({ ...prev, [SECTIONS.PROFESSIONAL_ROLE]: false }));
-      showSnackbar("Professional role updated", "success");
-    } catch (err) {
-      showSnackbar(err?.message || "Update failed", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveInterests = async () => {
-    if (!sectionChanges[SECTIONS.INTERESTS]) return;
-
-    setSaving(true);
-    try {
-      const payload = {
-        profile: {
-          interests: interests,
-        },
-      };
-
-      console.log("Payload: ", payload);
-      await dispatch(updateProfile(payload)).unwrap();
-
-      if (initialRef.current) {
-        initialRef.current.interests = [...interests];
-      }
-
-      setSectionChanges(prev => ({
-        ...prev,
-        [SECTIONS.INTERESTS]: false,
-      }));
-
-      showSnackbar("Interests updated", "success");
-    } catch (err) {
-      showSnackbar(err?.message || "Update failed", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveLocation = async () => {
-    if (!sectionChanges[SECTIONS.LOCATION]) return;
-
-    // 🔒 HARD GUARD — NEVER send invalid location
-    if (!location.countryCode || location.countryCode.length < 2) {
-      showSnackbar("Please select a valid country", "error");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const payload = {
-        location: {
-          country: location.country,
-          countryCode: location.countryCode,
-          city: location.city || undefined, // optional
-        },
-      };
-
-      await dispatch(updateProfile(payload)).unwrap();
-
-      if (initialRef.current) {
-        initialRef.current.location = { ...location };
-      }
-
-      setSectionChanges((prev) => ({
-        ...prev,
-        [SECTIONS.LOCATION]: false,
-      }));
-
-      showSnackbar("Location updated", "success");
-    } catch (err) {
-      showSnackbar(err?.message || "Update failed", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveEmergencyContacts = async () => {
-    if (!sectionChanges[SECTIONS.EMERGENCY_CONTACT]) return;
-
-    setSaving(true);
-    try {
-      const payload = {
-        profile: {
-          safety: {
-            emergencyContacts: userLocalEmergency,
-          },
-        },
-      };
-
-      await dispatch(updateProfile(payload)).unwrap();
-
-      if (initialRef.current) {
-        initialRef.current.emergencyContacts = [...userLocalEmergency];
-      }
-
-      setSectionChanges(prev => ({
-        ...prev,
-        [SECTIONS.EMERGENCY_CONTACT]: false,
-      }));
-
-      showSnackbar("Emergency contacts updated", "success");
-    } catch (err) {
-      showSnackbar(err?.message || "Update failed", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handlePasswordUpdate = async () => {
-    if (!sectionChanges[SECTIONS.PASSWORD]) return;
-
-    if (!password.current || !password.new) {
-      setPasswordError("Both fields are required");
-      return;
-    }
-
-    if (password.new.length < 6) {
-      setPasswordError("New password must be at least 6 characters");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await dispatch(updatePassword({
-        currentPassword: password.current,
-        newPassword: password.new
-      })).unwrap();
-
-      setPassword({ current: "", new: "" });
-      setPasswordError("");
-      setSectionChanges(prev => ({ ...prev, [SECTIONS.PASSWORD]: false }));
-      showSnackbar("Password updated successfully");
-    } catch (err) {
-      setPasswordError(err.message || "Failed to update password");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Save all changed sections at once
+  /* ================= SAVE FUNCTIONS ================= */
   const saveAllChanges = async () => {
-    const sectionsToSave = Object.entries(sectionChanges)
-      .filter(([_, hasChanges]) => hasChanges)
-      .map(([section]) => section);
+    if (saving || isSavingRef.current) return;
 
-    if (sectionsToSave.length === 0) {
+    if (!hasChanges) {
       showSnackbar("No changes to save", "info");
       return;
     }
 
     setSaving(true);
-
-    // Execute save functions for each changed section
-    const saveFunctions = {
-      [SECTIONS.PERSONAL_INFO]: savePersonalInfo,
-      [SECTIONS.PROFESSIONAL_ROLE]: saveProfessionalRole,
-      [SECTIONS.INTERESTS]: saveInterests,
-      [SECTIONS.LOCATION]: saveLocation,
-      [SECTIONS.PASSWORD]: handlePasswordUpdate,
-      [SECTIONS.EMERGENCY_CONTACT]: saveEmergencyContacts,
-    };
+    isSavingRef.current = true;
 
     try {
-      for (const section of sectionsToSave) {
-        if (saveFunctions[section]) {
-          await saveFunctions[section]();
-        }
+      const profilePayload = {};
+      const profileData = {};
+      const baseline = initialRef.current;
+
+      /* ================= PROFILE FIELDS ================= */
+
+      if (baseline.fullName !== form.fullName)
+        profilePayload.fullName = form.fullName;
+
+      if (baseline.email !== form.email)
+        profilePayload.email = form.email;
+
+      if (baseline.bio !== form.bio)
+        profilePayload.bio = form.bio;
+
+      if (baseline.role !== form.role)
+        profilePayload.role = form.role;
+
+      /* ================= INTERESTS ================= */
+
+      if (
+        JSON.stringify(baseline.interests) !==
+        JSON.stringify(form.interests)
+      ) {
+        profileData.interests = form.interests;
       }
 
+      /* ================= EMERGENCY CONTACT ================= */
+
+      if (
+        JSON.stringify(baseline.emergencyContacts) !==
+        JSON.stringify(form.emergencyContacts)
+      ) {
+        profileData.safety = {
+          emergencyContacts: form.emergencyContacts,
+        };
+      }
+
+      /* ================= LOCATION ================= */
+
+      if (
+        JSON.stringify(baseline.location) !==
+        JSON.stringify(form.location)
+      ) {
+        profileData.location = form.location;
+      }
+
+      /* ================= NEST PROFILE ================= */
+
+      if (Object.keys(profileData).length > 0) {
+        profilePayload.profile = profileData;
+      }
+
+      /* ================= UPDATE PROFILE ================= */
+
+      if (Object.keys(profilePayload).length > 0) {
+        await dispatch(updateProfile(profilePayload)).unwrap();
+      }
+      // let updatedUser = user;
+
+      // if (Object.keys(profilePayload).length > 0) {
+      //   const res = await dispatch(updateProfile(profilePayload)).unwrap();
+      //   updatedUser = res.user;
+      // }
+
+      /* ================= PASSWORD ================= */
+
+      if (form.password.current && form.password.new) {
+        if (form.password.new.length < 6) {
+          setPasswordError("New password must be at least 6 characters");
+          setSaving(false);
+          isSavingRef.current = false;
+          return;
+        }
+
+        await dispatch(
+          updatePassword({
+            currentPassword: form.password.current,
+            newPassword: form.password.new,
+          })
+        ).unwrap();
+
+        setForm((prev) => ({
+          ...prev,
+          password: { current: "", new: "" },
+        }));
+
+        setPasswordError("");
+      }
+
+      /* ================= REFRESH USER ================= */
+
+      // const updatedUser = user;
+
+      /* ================= RESET BASELINE ================= */
+
+      // const newBaseline = {
+      //   fullName: updatedUser.profile?.fullName || "",
+      //   email: updatedUser.email || "",
+      //   bio: updatedUser.profile?.bio || "",
+      //   role: updatedUser.profile?.role || "professional",
+      //   interests: updatedUser.profile?.interests || [],
+      //   location: updatedUser.profile?.location || {
+      //     country: "",
+      //     countryCode: "",
+      //     city: "",
+      //   },
+      //   password: { current: "", new: "" },
+      //   emergencyContacts:
+      //     updatedUser.profile?.safety?.emergencyContacts || [],
+      // };
+      // ✅ Use the saved form as the canonical state
+      const committedBaseline = {
+        fullName: form.fullName,
+        email: form.email,
+        bio: form.bio,
+        role: form.role,
+        interests: form.interests,
+        location: form.location,
+        password: { current: "", new: "" },
+        emergencyContacts: form.emergencyContacts,
+      };
+
+      initialRef.current = JSON.parse(JSON.stringify(committedBaseline));
+      setForm(JSON.parse(JSON.stringify(committedBaseline)));
+
+      /* ================= RESET CHANGE DETECTION ================= */
+
+      setBaselineVersion((v) => v + 1);
+
       showSnackbar("All changes saved successfully", "success");
+
     } catch (err) {
-      showSnackbar("Some updates failed", "error");
+      showSnackbar(err?.message || "Update failed", "error");
     } finally {
+      isSavingRef.current = false;
       setSaving(false);
     }
   };
@@ -622,24 +572,13 @@ export default function EditProfileScreen() {
       style={tw`flex-1 bg-gray-50`}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      {/* FLOATING HEADER */}
-      {/* <Animated.View
-        style={[
-          tw`absolute top-0 left-0 right-0 bg-white border-b border-gray-200 z-10`,
-          {
-            height: headerHeight,
-            opacity: headerOpacity
-          }
-        ]}
-      /> */}
-
       {/* FIXED PURPLE HEADER */}
       <View
         style={[
           tw`absolute top-0 left-0 right-0 z-50`,
           {
             backgroundColor: "#6A1B9A", // Purple-600
-            height: 140,                // ✅ MATCH HOME HEADER
+            height: 140,
             paddingTop: Platform.OS === "ios" ? 56 : 32,
             paddingBottom: 24,
             borderBottomLeftRadius: 35,
@@ -653,8 +592,7 @@ export default function EditProfileScreen() {
           {/* BACK BUTTON */}
           <TouchableOpacity
             onPress={() => {
-              const hasAnyChanges = Object.values(sectionChanges).some(Boolean);
-              if (hasAnyChanges) {
+              if (hasChanges) {
                 showSnackbar("You have unsaved changes", "error");
               } else {
                 router.back();
@@ -669,7 +607,7 @@ export default function EditProfileScreen() {
           <Text
             style={{
               fontFamily: "Poppins-Bold",
-              fontSize: 20,   // ⬆️ slightly larger
+              fontSize: 20,
               color: "#FFFFFF",
             }}
           >
@@ -679,10 +617,10 @@ export default function EditProfileScreen() {
           {/* SAVE BUTTON */}
           <TouchableOpacity
             onPress={saveAllChanges}
-            disabled={!Object.values(sectionChanges).some(Boolean) || saving}
+            disabled={!hasChanges || saving}
             style={[
               tw`px-4 py-2 rounded-full`,
-              Object.values(sectionChanges).some(Boolean)
+              hasChanges
                 ? tw`bg-white`
                 : tw`bg-white/40`,
             ]}
@@ -691,7 +629,7 @@ export default function EditProfileScreen() {
               style={{
                 fontFamily: "Poppins-SemiBold",
                 fontSize: 14,
-                color: Object.values(sectionChanges).some(Boolean)
+                color: hasChanges
                   ? "#7C3AED"
                   : "#6B7280",
               }}
@@ -714,11 +652,10 @@ export default function EditProfileScreen() {
       >
         {/* HERO SECTION */}
         <View style={tw`pt-24 pb-8 px-6 mt-20`}>
-          <Text style={tw`text-2xl text-gray-900 mb-2`}
-            fontFamily="Poppins-Bold">
+          <Text style={[tw`text-xl text-gray-900 mb-2`, { fontFamily: "Poppins-Bold" }]}>
             Edit Profile
           </Text>
-          <Text style={tw`font-['Poppins-Regular'] text-gray-600`}>
+          <Text style={{ fontFamily: "Poppins-Regular", color: "#6B7280" }}>
             Update your personal and professional information
           </Text>
         </View>
@@ -729,7 +666,7 @@ export default function EditProfileScreen() {
           icon="image"
           isExpanded={expandedSections[SECTIONS.PROFILE_MEDIA]}
           onToggle={() => toggleSection(SECTIONS.PROFILE_MEDIA)}
-          hasChanges={false} // Image uploads are handled separately
+          hasChanges={false}
         >
           {expandedSections[SECTIONS.PROFILE_MEDIA] && (
             <View style={tw`flex-row gap-4`}>
@@ -753,10 +690,10 @@ export default function EditProfileScreen() {
                     )}
                   </View>
                 </View>
-                <Text style={tw`font-['Poppins-SemiBold'] text-center text-gray-900 mb-1`}>
+                <Text style={[tw`text-center text-gray-900 mb-1`, { fontFamily: "Poppins-SemiBold" }]}>
                   Profile Photo
                 </Text>
-                <Text style={tw`font-['Poppins-Regular'] text-xs text-center text-gray-500`}>
+                <Text style={[tw`text-xs text-center text-gray-500`, { fontFamily: "Poppins-Regular" }]}>
                   Tap to change
                 </Text>
               </TouchableOpacity>
@@ -781,10 +718,10 @@ export default function EditProfileScreen() {
                     )}
                   </View>
                 </View>
-                <Text style={tw`font-['Poppins-SemiBold'] text-center text-gray-900 mb-1`}>
+                <Text style={[tw`text-center text-gray-900 mb-1`, { fontFamily: "Poppins-SemiBold" }]}>
                   Cover Photo
                 </Text>
-                <Text style={tw`font-['Poppins-Regular'] text-xs text-center text-gray-500`}>
+                <Text style={[tw`text-xs text-center text-gray-500`, { fontFamily: "Poppins-Regular" }]}>
                   Tap to change
                 </Text>
               </TouchableOpacity>
@@ -799,8 +736,6 @@ export default function EditProfileScreen() {
           isExpanded={expandedSections[SECTIONS.PERSONAL_INFO]}
           onToggle={() => toggleSection(SECTIONS.PERSONAL_INFO)}
           hasChanges={sectionChanges[SECTIONS.PERSONAL_INFO]}
-          onSave={savePersonalInfo}
-          saving={saving}
         >
           {expandedSections[SECTIONS.PERSONAL_INFO] && (
             <>
@@ -808,10 +743,10 @@ export default function EditProfileScreen() {
                 <View style={tw`flex-row items-center bg-white border border-gray-300 rounded-xl px-4 py-3`}>
                   <Ionicons name="person-outline" size={18} color="#6B7280" />
                   <TextInput
-                    value={fullName}
-                    onChangeText={setFullName}
+                    value={form.fullName}
+                    onChangeText={(t) => updateField("fullName", t)}
                     placeholder="Enter your full name"
-                    style={tw`flex-1 ml-3 font-['Poppins-Regular'] text-gray-900`}
+                    style={[tw`flex-1 ml-3 text-gray-900`, { fontFamily: "Poppins-Regular" }]}
                   />
                 </View>
               </Field>
@@ -820,12 +755,12 @@ export default function EditProfileScreen() {
                 <View style={tw`flex-row items-center bg-white border border-gray-300 rounded-xl px-4 py-3`}>
                   <Ionicons name="mail-outline" size={18} color="#6B7280" />
                   <TextInput
-                    value={email}
-                    onChangeText={setEmail}
+                    value={form.email}
+                    onChangeText={(t) => updateField("email", t)}
                     placeholder="Enter your email"
                     keyboardType="email-address"
                     autoCapitalize="none"
-                    style={tw`flex-1 ml-3 font-['Poppins-Regular'] text-gray-900`}
+                    style={[tw`flex-1 ml-3 text-gray-900`, { fontFamily: "Poppins-Regular" }]}
                   />
                 </View>
               </Field>
@@ -833,21 +768,24 @@ export default function EditProfileScreen() {
               <Field label="Bio">
                 <View style={tw`bg-white border border-gray-300 rounded-xl px-4 py-3 min-h-[100px]`}>
                   <TextInput
-                    value={bio}
-                    onChangeText={setBio}
+                    value={form.bio}
+                    onChangeText={(t) => updateField("bio", t)}
                     placeholder="Tell us about yourself..."
                     multiline
                     numberOfLines={4}
                     textAlignVertical="top"
-                    style={tw`font-['Poppins-Regular'] text-gray-900 min-h-[80px]`}
+                    style={[tw`text-gray-900 min-h-[80px]`, { fontFamily: "Poppins-Regular" }]}
                     maxLength={500}
                   />
                   <View style={tw`flex-row justify-between mt-2`}>
-                    <Text style={tw`font-['Poppins-Regular'] text-xs text-gray-500`}>
-                      {bio.length}/500 characters
+                    <Text style={[tw`text-xs text-gray-500`, { fontFamily: "Poppins-Regular" }]}>
+                      {form.bio.length}/500 characters
                     </Text>
-                    <Text style={tw`font-['Poppins-Medium'] text-xs ${bio.length > 20 ? 'text-green-600' : 'text-gray-500'}`}>
-                      {bio.length > 20 ? '✓ Good length' : 'Add more details'}
+                    <Text style={[
+                      tw`text-xs ${form.bio.length > 20 ? 'text-green-600' : 'text-gray-500'}`,
+                      { fontFamily: "Poppins-Medium" }
+                    ]}>
+                      {form.bio.length > 20 ? '✓ Good length' : 'Add more details'}
                     </Text>
                   </View>
                 </View>
@@ -863,22 +801,20 @@ export default function EditProfileScreen() {
           isExpanded={expandedSections[SECTIONS.PROFESSIONAL_ROLE]}
           onToggle={() => toggleSection(SECTIONS.PROFESSIONAL_ROLE)}
           hasChanges={sectionChanges[SECTIONS.PROFESSIONAL_ROLE]}
-          onSave={saveProfessionalRole}
-          saving={saving}
         >
           {expandedSections[SECTIONS.PROFESSIONAL_ROLE] && (
             <>
-              <Text style={tw`font-['Poppins-Regular'] text-gray-600 mb-4`}>
+              <Text style={[tw`text-gray-600 mb-4`, { fontFamily: "Poppins-Regular" }]}>
                 Select your primary role in the community
               </Text>
               <View style={tw`flex-row flex-wrap gap-2`}>
                 {ROLE_OPTIONS.map((r) => {
                   const meta = ROLE_DISPLAY[r];
-                  const isActive = role === r;
+                  const isActive = form.role === r;
                   return (
                     <TouchableOpacity
                       key={r}
-                      onPress={() => setRole(r)}
+                      onPress={() => updateField("role", r)}
                       style={[
                         tw`flex-row items-center px-4 py-3 rounded-xl border mb-2`,
                         isActive
@@ -893,10 +829,10 @@ export default function EditProfileScreen() {
                         color={isActive ? meta.color : "#6B7280"}
                       />
                       <Text style={[
-                        tw`ml-2 font-['Poppins-Medium']`,
+                        tw`ml-2`,
                         isActive
-                          ? { color: meta.color }
-                          : tw`text-gray-700`
+                          ? { color: meta.color, fontFamily: "Poppins-Medium" }
+                          : [tw`text-gray-700`, { fontFamily: "Poppins-Medium" }]
                       ]}>
                         {meta.label}
                       </Text>
@@ -915,18 +851,16 @@ export default function EditProfileScreen() {
           isExpanded={expandedSections[SECTIONS.INTERESTS]}
           onToggle={() => toggleSection(SECTIONS.INTERESTS)}
           hasChanges={sectionChanges[SECTIONS.INTERESTS]}
-          onSave={saveInterests}
-          saving={saving}
         >
           {expandedSections[SECTIONS.INTERESTS] && (
             <>
-              <Text style={tw`font-['Poppins-Regular'] text-gray-600 mb-4`}>
+              <Text style={[tw`text-gray-600 mb-4`, { fontFamily: "Poppins-Regular" }]}>
                 Select topics you're passionate about
               </Text>
               <View style={tw`flex-row flex-wrap gap-2`}>
                 {INTEREST_OPTIONS.map((interest) => {
                   const meta = INTEREST_DISPLAY[interest];
-                  const isActive = interests.includes(interest);
+                  const isActive = form.interests.includes(interest);
                   return (
                     <TouchableOpacity
                       key={interest}
@@ -945,10 +879,10 @@ export default function EditProfileScreen() {
                         color={isActive ? meta.color : "#6B7280"}
                       />
                       <Text style={[
-                        tw`ml-2 font-['Poppins-Medium'] capitalize`,
+                        tw`ml-2 capitalize`,
                         isActive
-                          ? { color: meta.color }
-                          : tw`text-gray-700`
+                          ? { color: meta.color, fontFamily: "Poppins-Medium" }
+                          : [tw`text-gray-700`, { fontFamily: "Poppins-Medium" }]
                       ]}>
                         {interest}
                       </Text>
@@ -956,10 +890,10 @@ export default function EditProfileScreen() {
                   );
                 })}
               </View>
-              {interests.length > 0 && (
+              {form.interests.length > 0 && (
                 <View style={tw`mt-4 p-3 bg-purple-50 rounded-xl border border-purple-100`}>
-                  <Text style={tw`font-['Poppins-Medium'] text-purple-700`}>
-                    {interests.length} interest{interests.length !== 1 ? 's' : ''} selected
+                  <Text style={[tw`text-purple-700`, { fontFamily: "Poppins-Medium" }]}>
+                    {form.interests.length} interest{form.interests.length !== 1 ? 's' : ''} selected
                   </Text>
                 </View>
               )}
@@ -974,8 +908,6 @@ export default function EditProfileScreen() {
           isExpanded={expandedSections[SECTIONS.LOCATION]}
           onToggle={() => toggleSection(SECTIONS.LOCATION)}
           hasChanges={sectionChanges[SECTIONS.LOCATION]}
-          onSave={saveLocation}
-          saving={saving}
         >
           {expandedSections[SECTIONS.LOCATION] && (
             <>
@@ -987,8 +919,12 @@ export default function EditProfileScreen() {
                 >
                   <View style={tw`flex-row items-center`}>
                     <Ionicons name="earth-outline" size={18} color="#6B7280" />
-                    <Text style={tw`ml-3 font-['Poppins-Regular'] ${location.country ? 'text-gray-900' : 'text-gray-500'}`}>
-                      {location.country || "Select country"}
+                    <Text style={[
+                      tw`ml-3`,
+                      form.location.country ? tw`text-gray-900` : tw`text-gray-500`,
+                      { fontFamily: "Poppins-Regular" }
+                    ]}>
+                      {form.location.country || "Select country"}
                     </Text>
                   </View>
                   <Ionicons name="chevron-down" size={18} color="#6B7280" />
@@ -997,79 +933,33 @@ export default function EditProfileScreen() {
 
               <Field label="City">
                 <TouchableOpacity
-                  onPress={() => location.countryCode ? setCityModal(true) : showSnackbar("Select country first", "error")}
+                  onPress={() => form.location.countryCode ? setCityModal(true) : showSnackbar("Select country first", "error")}
                   style={[
                     tw`border rounded-xl px-4 py-3 flex-row items-center justify-between`,
-                    location.countryCode
+                    form.location.countryCode
                       ? tw`bg-white border-gray-300`
                       : tw`bg-gray-100 border-gray-300`
                   ]}
                   activeOpacity={0.85}
-                  disabled={!location.countryCode}
+                  disabled={!form.location.countryCode}
                 >
                   <View style={tw`flex-row items-center`}>
-                    <Ionicons name="location-outline" size={18} color={location.countryCode ? "#6B7280" : "#9CA3AF"} />
+                    <Ionicons name="location-outline" size={18} color={form.location.countryCode ? "#6B7280" : "#9CA3AF"} />
                     <Text style={[
-                      tw`ml-3 font-['Poppins-Regular']`,
-                      location.city
+                      tw`ml-3`,
+                      form.location.city
                         ? tw`text-gray-900`
-                        : location.countryCode
+                        : form.location.countryCode
                           ? tw`text-gray-500`
-                          : tw`text-gray-400`
+                          : tw`text-gray-400`,
+                      { fontFamily: "Poppins-Regular" }
                     ]}>
-                      {location.city || (location.countryCode ? "Select city" : "Select country first")}
+                      {form.location.city || (form.location.countryCode ? "Select city" : "Select country first")}
                     </Text>
                   </View>
-                  <Ionicons name="chevron-down" size={18} color={location.countryCode ? "#6B7280" : "#9CA3AF"} />
+                  <Ionicons name="chevron-down" size={18} color={form.location.countryCode ? "#6B7280" : "#9CA3AF"} />
                 </TouchableOpacity>
               </Field>
-            </>
-          )}
-        </CollapsibleSection>
-
-        {/* PASSWORD SECTION */}
-        <CollapsibleSection
-          title="Change Password"
-          icon="lock-closed"
-          isExpanded={expandedSections[SECTIONS.PASSWORD]}
-          onToggle={() => toggleSection(SECTIONS.PASSWORD)}
-          hasChanges={sectionChanges[SECTIONS.PASSWORD]}
-          onSave={handlePasswordUpdate}
-          saving={saving}
-        >
-          {expandedSections[SECTIONS.PASSWORD] && (
-            <>
-              <Field label="Current Password">
-                <View style={tw`flex-row items-center bg-white border border-gray-300 rounded-xl px-4 py-3`}>
-                  <Ionicons name="lock-closed-outline" size={18} color="#6B7280" />
-                  <TextInput
-                    value={password.current}
-                    onChangeText={(t) => setPassword({ ...password, current: t })}
-                    placeholder="Enter current password"
-                    secureTextEntry
-                    style={tw`flex-1 ml-3 font-['Poppins-Regular'] text-gray-900`}
-                  />
-                </View>
-              </Field>
-
-              <Field label="New Password">
-                <View style={tw`flex-row items-center bg-white border border-gray-300 rounded-xl px-4 py-3`}>
-                  <Ionicons name="lock-closed-outline" size={18} color="#6B7280" />
-                  <TextInput
-                    value={password.new}
-                    onChangeText={(t) => setPassword({ ...password, new: t })}
-                    placeholder="Enter new password"
-                    secureTextEntry
-                    style={tw`flex-1 ml-3 font-['Poppins-Regular'] text-gray-900`}
-                  />
-                </View>
-              </Field>
-
-              {passwordError ? (
-                <Text style={tw`text-red-500 text-sm font-['Poppins-Regular'] mt-2`}>
-                  {passwordError}
-                </Text>
-              ) : null}
             </>
           )}
         </CollapsibleSection>
@@ -1081,22 +971,20 @@ export default function EditProfileScreen() {
           isExpanded={expandedSections[SECTIONS.EMERGENCY_CONTACT]}
           onToggle={() => toggleSection(SECTIONS.EMERGENCY_CONTACT)}
           hasChanges={sectionChanges[SECTIONS.EMERGENCY_CONTACT]}
-          onSave={saveEmergencyContacts}
-          saving={saving}
         >
           {expandedSections[SECTIONS.EMERGENCY_CONTACT] && (
             <>
-              <Text style={tw`font-['Poppins-Regular'] text-gray-600 mb-4`}>
+              <Text style={[tw`text-gray-600 mb-4`, { fontFamily: "Poppins-Regular" }]}>
                 Add emergency contact for safety purposes
               </Text>
 
               {/* Display existing/staged contacts */}
-              {userLocalEmergency.length > 0 && (
+              {form.emergencyContacts.length > 0 && (
                 <View style={tw`mb-6`}>
-                  <Text style={tw`font-['Poppins-Medium'] text-gray-700 mb-3`}>
-                    Staged Contacts ({userLocalEmergency.length})
+                  <Text style={[tw`text-gray-700 mb-3`, { fontFamily: "Poppins-Medium" }]}>
+                    Staged Contacts ({form.emergencyContacts.length})
                   </Text>
-                  {userLocalEmergency.map((contact, index) => (
+                  {form.emergencyContacts.map((contact, index) => (
                     <View
                       key={index}
                       style={tw`flex-row items-center justify-between bg-gray-50 rounded-xl p-4 mb-2 border border-gray-200`}
@@ -1104,19 +992,19 @@ export default function EditProfileScreen() {
                       <View style={tw`flex-1`}>
                         <View style={tw`flex-row items-center`}>
                           <Ionicons name="person" size={16} color="#7C3AED" />
-                          <Text style={tw`font-['Poppins-SemiBold'] text-gray-900 ml-2`}>
+                          <Text style={[tw`text-gray-900 ml-2`, { fontFamily: "Poppins-SemiBold" }]}>
                             {contact.name}
                           </Text>
                         </View>
                         <View style={tw`flex-row items-center mt-1`}>
                           <Ionicons name="call" size={14} color="#6B7280" />
-                          <Text style={tw`font-['Poppins-Regular'] text-gray-600 ml-2`}>
+                          <Text style={[tw`text-gray-600 ml-2`, { fontFamily: "Poppins-Regular" }]}>
                             {contact.phone}
                           </Text>
                         </View>
                         <View style={tw`flex-row items-center mt-1`}>
                           <Ionicons name="people" size={14} color="#6B7280" />
-                          <Text style={tw`font-['Poppins-Regular'] text-gray-600 ml-2`}>
+                          <Text style={[tw`text-gray-600 ml-2`, { fontFamily: "Poppins-Regular" }]}>
                             {contact.relationship}
                           </Text>
                         </View>
@@ -1136,10 +1024,10 @@ export default function EditProfileScreen() {
                 <View style={tw`flex-row items-center bg-white border border-gray-300 rounded-xl px-4 py-3`}>
                   <Ionicons name="person-outline" size={18} color="#6B7280" />
                   <TextInput
-                    value={emergency.name}
-                    onChangeText={(t) => setEmergency({ ...emergency, name: t })}
+                    value={emergencyForm.name}
+                    onChangeText={(t) => setEmergencyForm({ ...emergencyForm, name: t })}
                     placeholder="Enter contact name"
-                    style={tw`flex-1 ml-3 font-['Poppins-Regular'] text-gray-900`}
+                    style={[tw`flex-1 ml-3 text-gray-900`, { fontFamily: "Poppins-Regular" }]}
                   />
                 </View>
               </Field>
@@ -1148,41 +1036,43 @@ export default function EditProfileScreen() {
                 <View style={tw`flex-row items-center bg-white border border-gray-300 rounded-xl px-4 py-3`}>
                   <Ionicons name="call-outline" size={18} color="#6B7280" />
                   <TextInput
-                    value={emergency.phone}
-                    onChangeText={(t) => setEmergency({ ...emergency, phone: t })}
+                    value={emergencyForm.phone}
+                    onChangeText={(t) => setEmergencyForm({ ...emergencyForm, phone: t })}
                     placeholder="Enter phone number"
                     keyboardType="phone-pad"
-                    style={tw`flex-1 ml-3 font-['Poppins-Regular'] text-gray-900`}
+                    style={[tw`flex-1 ml-3 text-gray-900`, { fontFamily: "Poppins-Regular" }]}
                   />
                 </View>
               </Field>
 
               <Field label="Relationship" required>
-                <Picker
-                  selectedValue={emergency.relationship}
-                  onValueChange={(value) => {
-                    setEmergency((prev) => ({ ...prev, relationship: value }));
-                  }}
-                  style={tw`mb-6`}
-                >
-                  <Picker.Item
-                    label="Select relationship"
-                    value=""
-                    style={{ fontFamily: 'Poppins-Regular' }}
-                  />
-                  {RELATIONSHIP_OPTIONS.map((r) => (
+                <View style={tw`mb-4`}>
+                  <Picker
+                    selectedValue={emergencyForm.relationship}
+                    onValueChange={(value) => {
+                      setEmergencyForm((prev) => ({ ...prev, relationship: value }));
+                    }}
+                    style={tw`bg-white border border-gray-300 rounded-xl`}
+                  >
                     <Picker.Item
-                      key={r}
-                      label={r}
-                      value={r}
+                      label="Select relationship"
+                      value=""
                       style={{ fontFamily: 'Poppins-Regular' }}
                     />
-                  ))}
-                </Picker>
+                    {RELATIONSHIP_OPTIONS.map((r) => (
+                      <Picker.Item
+                        key={r}
+                        label={r}
+                        value={r}
+                        style={{ fontFamily: 'Poppins-Regular' }}
+                      />
+                    ))}
+                  </Picker>
+                </View>
 
                 <TouchableOpacity
                   onPress={handleAddEmergencyContact}
-                  style={tw`mt-3 bg-purple-600 py-3 rounded-xl items-center`}
+                  style={tw`bg-purple-600 py-3 rounded-xl items-center`}
                 >
                   <Text style={{ fontFamily: 'Poppins-SemiBold', fontSize: 16, color: "#FFFFFF" }}>
                     Stage Contact
@@ -1192,41 +1082,6 @@ export default function EditProfileScreen() {
             </>
           )}
         </CollapsibleSection>
-
-        {/* SAVE ALL BUTTON */}
-        {/* <View style={tw`px-6 mt-10 mb-10`}>
-          <TouchableOpacity
-            onPress={saveAllChanges}
-            disabled={!Object.values(sectionChanges).some(Boolean) || saving}
-            style={[
-              tw`py-4 rounded-2xl items-center shadow-lg`,
-              Object.values(sectionChanges).some(Boolean)
-                ? tw`bg-gradient-to-r from-purple-600 to-amber-500`
-                : tw`bg-gray-300`
-            ]}
-            activeOpacity={0.85}
-          >
-            {saving ? (
-              <View style={tw`flex-row items-center`}>
-                <ActivityIndicator size="small" color="#FFF" style={tw`mr-2`} />
-                <Text style={tw`font-['Poppins-SemiBold'] text-lg text-white`}>
-                  Saving Changes...
-                </Text>
-              </View>
-            ) : (
-              <>
-                <Text style={tw`font-['Poppins-SemiBold'] text-lg ${Object.values(sectionChanges).some(Boolean) ? 'text-white' : 'text-gray-500'}`}>
-                  Save All Changes
-                </Text>
-                {Object.values(sectionChanges).some(Boolean) && (
-                  <Text style={tw`font-['Poppins-Regular'] text-white/80 text-sm mt-1`}>
-                    Only changed sections will be updated
-                  </Text>
-                )}
-              </>
-            )}
-          </TouchableOpacity>
-        </View> */}
       </ScrollView>
 
       {/* COUNTRY MODAL */}
@@ -1238,7 +1093,9 @@ export default function EditProfileScreen() {
         setSearch={setCountrySearch}
         onClose={() => setCountryModal(false)}
         onSelect={(country) => {
-          setLocation({ country: country.name, countryCode: country.isoCode, city: "" });
+          updateLocation("country", country.name);
+          updateLocation("countryCode", country.isoCode);
+          updateLocation("city", "");
           setCountryModal(false);
           setCountrySearch("");
         }}
@@ -1253,79 +1110,46 @@ export default function EditProfileScreen() {
         setSearch={setCitySearch}
         onClose={() => setCityModal(false)}
         onSelect={(city) => {
-          setLocation({ ...location, city: city.name });
+          updateLocation("city", city.name);
           setCityModal(false);
           setCitySearch("");
         }}
       />
 
-      {/* Relationship Modal Sheet */}
-      <Modal visible={relationshipModal} animationType="slide" presentationStyle="pageSheet">
-        <View style={tw`flex-1 bg-white pt-12`}>
-          <View style={tw`px-6 pb-4 border-b border-gray-200`}>
-            <View style={tw`flex-row items-center justify-between mb-4`}>
-              <Text style={{ fontFamily: 'Poppins-Bold', fontSize: 24, color: "#111827" }}>
-                Select Relationship
-              </Text>
-              <TouchableOpacity
-                onPress={() => setRelationshipModal(false)}
-                style={tw`w-10 h-10 bg-gray-100 rounded-full items-center justify-center`}
-              >
-                <Ionicons name="close" size={22} color="#374151" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={tw`px-6 pt-6`}>
-            <Picker
-              selectedValue={emergency.relationship}
-              onValueChange={(value) =>
-                setEmergency((prev) => ({ ...prev, relationship: value }))
-              }
-              style={tw`mb-6`}
-            >
-              <Picker.Item
-                label="Select relationship"
-                value=""
-                style={{ fontFamily: 'Poppins-Regular' }}
-              />
-              {RELATIONSHIP_OPTIONS.map((r) => (
-                <Picker.Item
-                  key={r}
-                  label={r}
-                  value={r}
-                  style={{ fontFamily: 'Poppins-Regular' }}
-                />
-              ))}
-            </Picker>
-
-            <TouchableOpacity
-              onPress={() => setRelationshipModal(false)}
-              style={tw`mt-6 bg-purple-600 py-3 rounded-xl items-center`}
-            >
-              <Text style={{ fontFamily: 'Poppins-Medium', fontSize: 16, color: "#FFFFFF" }}>
-                Done
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
       {/* SNACKBAR */}
       {snackbar.visible && (
-        <View style={[
-          tw`absolute bottom-6 left-6 right-6 rounded-2xl px-5 py-4 shadow-2xl`,
-          snackbar.type === "success"
-            ? tw`bg-gradient-to-r from-green-600 to-green-500`
-            : tw`bg-gradient-to-r from-red-600 to-red-500`
-        ]}>
+        <View
+          style={[
+            tw`absolute bottom-6 left-6 right-6 rounded-2xl px-5 py-4`,
+            snackbar.type === "success"
+              ? tw`bg-green-600`
+              : tw`bg-red-600`,
+            {
+              zIndex: 9999,
+              elevation: 10,
+            },
+          ]}
+        >
           <View style={tw`flex-row items-center`}>
             <Ionicons
-              name={snackbar.type === "success" ? "checkmark-circle" : "alert-circle"}
+              name={
+                snackbar.type === "success"
+                  ? "checkmark-circle"
+                  : "alert-circle"
+              }
               size={24}
               color="#fff"
             />
-            <Text style={{ fontFamily: 'Poppins-Medium', fontSize: 16, color: "#FFFFFF", marginLeft: 12, flex: 1 }}>
+
+            <Text
+              style={{
+                fontFamily: "Poppins-Medium",
+                fontSize: 16,
+                color: "#FFFFFF",
+                marginLeft: 12,
+                flex: 1,
+              }}
+            >
               {snackbar.message}
             </Text>
           </View>
@@ -1346,8 +1170,6 @@ const CollapsibleSection = ({
   isExpanded,
   onToggle,
   hasChanges,
-  onSave,
-  saving
 }) => (
   <View style={tw`mb-6 mx-6`}>
     {/* SECTION HEADER */}
@@ -1362,13 +1184,20 @@ const CollapsibleSection = ({
             <Ionicons name={icon} size={20} color={hasChanges ? "#7C3AED" : "#6B7280"} />
           </View>
           <View style={tw`flex-1`}>
-            <Text style={tw`font-['Poppins-Bold'] text-xl text-gray-900`}>
+            <Text
+              style={{
+                fontFamily: "Poppins-Bold",
+                fontSize: 16,
+                letterSpacing: 0.3,
+                color: "#111827",
+              }}
+            >
               {title}
             </Text>
             {hasChanges && (
               <View style={tw`flex-row items-center mt-1`}>
                 <View style={tw`w-2 h-2 bg-purple-500 rounded-full mr-1`} />
-                <Text style={tw`font-['Poppins-Regular'] text-xs text-purple-600`}>
+                <Text style={[tw`text-xs text-purple-600`, { fontFamily: "Poppins-Regular" }]}>
                   Unsaved changes
                 </Text>
               </View>
@@ -1376,28 +1205,11 @@ const CollapsibleSection = ({
           </View>
         </View>
 
-        <View style={tw`flex-row items-center`}>
-          {hasChanges && onSave && (
-            <TouchableOpacity
-              onPress={(e) => {
-                e.stopPropagation();
-                onSave();
-              }}
-              disabled={saving}
-              style={tw`bg-purple-500 px-4 py-2 rounded-lg mr-3`}
-            >
-              <Text style={{ fontFamily: 'Poppins-SemiBold', fontSize: 14, color: "#FFFFFF" }}>
-                {saving ? "Saving..." : "Save"}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          <Ionicons
-            name={isExpanded ? "chevron-up" : "chevron-down"}
-            size={24}
-            color="#6B7280"
-          />
-        </View>
+        <Ionicons
+          name={isExpanded ? "chevron-up" : "chevron-down"}
+          size={24}
+          color="#6B7280"
+        />
       </View>
     </TouchableOpacity>
 
@@ -1413,7 +1225,7 @@ const CollapsibleSection = ({
 const Field = ({ label, children, required }) => (
   <View style={tw`mb-5`}>
     <View style={tw`flex-row items-center mb-2`}>
-      <Text style={tw`font-['Poppins-Medium'] text-sm text-gray-700`}>
+      <Text style={[tw`text-sm text-gray-700`, { fontFamily: "Poppins-Medium" }]}>
         {label}
       </Text>
       {required && (

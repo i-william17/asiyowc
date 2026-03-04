@@ -854,22 +854,41 @@ const communitySlice = createSlice({
       const { chatId, userId, seq } = action.payload || {};
       if (!chatId || !userId || typeof seq !== "number") return;
 
+      /* =============================
+         UPDATE CHAT READ STATE
+      ============================== */
       const chat = state.chats.find((c) => String(c._id) === String(chatId));
-      if (!chat) return;
 
-      chat.readState = Array.isArray(chat.readState) ? chat.readState : [];
+      if (chat) {
+        chat.readState = Array.isArray(chat.readState) ? chat.readState : [];
 
-      const entry = chat.readState.find((r) => String(r.user) === String(userId));
+        const entry = chat.readState.find(
+          (r) => String(r.user) === String(userId)
+        );
 
-      if (entry) {
-        entry.lastReadSeq = Math.max(entry.lastReadSeq || 0, seq);
-      } else {
-        chat.readState.push({ user: userId, lastReadSeq: seq });
+        if (entry) {
+          entry.lastReadSeq = Math.max(entry.lastReadSeq || 0, seq);
+        } else {
+          chat.readState.push({ user: userId, lastReadSeq: seq });
+        }
       }
 
-      // Optional: keep selectedChat in sync too
+      /* =============================
+         SYNC SELECTED CHAT
+      ============================== */
       if (state.selectedChat && String(state.selectedChat._id) === String(chatId)) {
-        state.selectedChat.readState = chat.readState;
+        state.selectedChat.readState = chat?.readState || [];
+      }
+
+      /* =============================
+         🔥 UPDATE GROUP BADGE
+      ============================== */
+      const group = state.groups.find(
+        (g) => String(g.chatId) === String(chatId)
+      );
+
+      if (group) {
+        group.unreadCount = 0;
       }
     },
 

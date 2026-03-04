@@ -51,7 +51,7 @@ export const restoreToken = createAsyncThunk(
     try {
       console.log("Restoring token...");
       const storedToken = await secureStore.getItem('token');
-      console.log("Stored token:", storedToken);
+      // console.log("Stored token:", storedToken);
 
       const storedHasRegistered = await secureStore.getItem('hasRegistered');
 

@@ -29,6 +29,7 @@ import mentorshipReducer from "./slices/mentorshipSlice";
 import wellnessReducer from "./slices/wellnessSlice";
 import marketplaceReducer from "./slices/marketplaceSlice";
 import cartReducer from "./slices/cartSlice";
+import supportReducer from "./slices/supportSlice";
 
 /* =====================================================
    PERSIST CONFIG (ONLY CART)
@@ -58,6 +59,7 @@ const rootReducer = combineReducers({
   mentorship: mentorshipReducer,
   wellness: wellnessReducer,
   marketplace: marketplaceReducer,
+  support: supportReducer,
 
   // 👇 ONLY THIS IS PERSISTED
   cart: persistReducer(cartPersistConfig, cartReducer),

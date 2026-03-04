@@ -55,28 +55,10 @@ const BADGE_COLORS = {
 ============================================================ */
 const SETTINGS_ITEMS = [
   {
-    label: "Change Password",
-    icon: "key",
-    action: "modal",
-    modalType: "password"
-  },
-  {
     label: "Privacy & Security",
     icon: "lock-closed",
     action: "navigate",
     route: "/profile/privacy"
-  },
-  {
-    label: "Notification Settings",
-    icon: "notifications",
-    action: "navigate",
-    route: "/profile/notifications"
-  },
-  {
-    label: "Safety & SOS",
-    icon: "shield-checkmark",
-    action: "navigate",
-    route: "/profile/safety"
   },
   {
     label: "Help & Support",
@@ -84,23 +66,23 @@ const SETTINGS_ITEMS = [
     action: "navigate",
     route: "/profile/support"
   },
-  {
-    label: "Appearance",
-    icon: "color-palette",
-    action: "navigate",
-    route: "/profile/appearance"
-  },
-  {
-    label: "Language",
-    icon: "language",
-    action: "navigate",
-    route: "/profile/language"
-  },
+  // {
+  //   label: "Appearance",
+  //   icon: "color-palette",
+  //   action: "navigate",
+  //   route: "/profile/appearance"
+  // },
+  // {
+  //   label: "Language",
+  //   icon: "language",
+  //   action: "navigate",
+  //   route: "/profile/language"
+  // },
   {
     label: "About App",
     icon: "information-circle",
     action: "navigate",
-    route: "/profile/about"
+    route: "/more/about"
   }
 ];
 
@@ -118,6 +100,11 @@ export default function ProfileScreen() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(false);
+  const [bioExpanded, setBioExpanded] = useState(false);
+
+  const BIO_LIMIT = 100;
+  const bio = user.profile?.bio || "";
+  const shouldTruncate = bio.length > BIO_LIMIT;
 
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -547,19 +534,42 @@ export default function ProfileScreen() {
               </View>
 
               {/* BIO */}
-              <View style={tw` p-4`}>
-                <Text style={{
-                  fontFamily: "Poppins-Regular",
-                  fontSize: 14,
-                  color: "#4B5563",
-                  lineHeight: 22
-                }}>
-                  {user.profile?.bio || "Add a bio to tell your story..."}
+              <View style={tw`p-4`}>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 14,
+                    color: "#4B5563",
+                    lineHeight: 22,
+                  }}
+                >
+                  {bioExpanded || !shouldTruncate
+                    ? bio
+                    : `${bio.slice(0, BIO_LIMIT)}...`}
                 </Text>
+
+                {shouldTruncate && (
+                  <TouchableOpacity
+                    onPress={() => setBioExpanded(!bioExpanded)}
+                    activeOpacity={0.7}
+                    style={tw`self-start ml-4 mb-2`}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Poppins-SemiBold",
+                        fontSize: 13,
+                        color: "#6A1B9A",
+                        marginTop: 4
+                      }}
+                    >
+                      {bioExpanded ? "Show less" : "Show more"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               {/* ============ LOCATION DISPLAY ============ */}
-              <View style={tw`px-3 mb-2`}>
+              <View style={tw`px-3`}>
                 <View style={tw`flex-row items-center`}>
                   <Ionicons name="location-outline" size={16} />
 
@@ -603,33 +613,77 @@ export default function ProfileScreen() {
         {/* ======================================================
            PROFILE CHECKLIST
         ====================================================== */}
-        <View style={tw`mx-6 mt-6`}>
-          <View style={tw`bg-purple-50 rounded-2xl border border-purple-100 p-5 shadow-sm`}>
+        <View style={tw`mx-6 mt-8`}>
+          {/* Minimal Header */}
+          <View style={tw`flex-row items-center justify-between mb-5`}>
+            <Text style={{
+              fontFamily: "Poppins-SemiBold",
+              fontSize: 17,
+              color: "#111827",
+            }}>
+              Onboarding Checklist
+            </Text>
+            <View style={[
+              tw`px-3 py-1.5 rounded-full`,
+              { backgroundColor: '#F3F4F6' }
+            ]}>
+              <Text style={{
+                fontFamily: "Poppins-Medium",
+                fontSize: 12,
+                color: "#4B5563",
+              }}>
+                {checklistItems.filter(i => i.done).length}/{checklistItems.length}
+              </Text>
+            </View>
+          </View>
+
+          {/* Clean Checklist */}
+          <View style={tw`space-y-2`}>
             {checklistItems.map((i, index) => (
-              <View key={i.label} style={tw`flex-row items-center mb-3`}>
-                <View style={tw`w-6 h-6 rounded-full ${i.done ? 'bg-green-100' : 'bg-gray-100'} items-center justify-center mr-3`}>
-                  <Ionicons
-                    name={i.done ? "checkmark" : "ellipsis-horizontal"}
-                    size={14}
-                    color={i.done ? "#1F2937" : "#9CA3AF"}
-                  />
+              <View
+                key={i.label}
+                style={[
+                  tw`flex-row items-center p-4 rounded-2xl`,
+                  { backgroundColor: i.done ? '#F9FAFB' : '#FFFFFF' }
+                ]}
+              >
+                {/* Minimal Check Indicator */}
+                <View style={[
+                  tw`w-5 h-5 rounded-lg mr-3 items-center justify-center`,
+                  i.done
+                    ? { backgroundColor: '#10B981' }
+                    : { borderWidth: 2, borderColor: '#E5E7EB' }
+                ]}>
+                  {i.done && <Ionicons name="checkmark" size={12} color="#FFFFFF" />}
                 </View>
-                <Text style={{
-                  fontFamily: i.done ? "Poppins-Medium" : "Poppins-Regular",
-                  color: i.done ? "#1F2937" : "#6B7280",
-                  textDecorationLine: i.done ? 'line-through' : 'none'
-                }}>
+
+                {/* Task Text */}
+                <Text style={[
+                  tw`flex-1 text-sm`,
+                  {
+                    fontFamily: i.done ? "Poppins-Regular" : "Poppins-Medium",
+                    color: i.done ? "#9CA3AF" : "#1F2937",
+                  }
+                ]}>
                   {i.label}
                 </Text>
-                {!i.done && (
+
+                {/* Subtle Action */}
+                {!i.done ? (
                   <TouchableOpacity
                     onPress={() => router.push("/profile/edit")}
-                    style={tw`ml-auto px-3 py-1 bg-white border border-purple-200 rounded-full`}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
-                    <Text style={{ fontFamily: "Poppins-Medium", fontSize: 12, color: "#7C3AED" }}>
-                      Add
+                    <Text style={{
+                      fontFamily: "Poppins-Medium",
+                      fontSize: 13,
+                      color: "#6A1B9A",
+                    }}>
+                      Add →
                     </Text>
                   </TouchableOpacity>
+                ) : (
+                  <Ionicons name="checkmark-circle" size={20} color="#D1D5DB" />
                 )}
               </View>
             ))}
@@ -911,7 +965,7 @@ export default function ProfileScreen() {
                   color: "#9CA3AF",
                   textAlign: "center"
                 }}>
-                  Version 1.0.0 • Build 2024.01
+                  Version 1.0.0 • Build 2026.01
                 </Text>
               </View>
             </ScrollView>
@@ -1281,13 +1335,17 @@ const AnimatedCircularProgress = ({ value }) => {
         )}
 
         {isFull && (
-          <View style={tw`absolute inset-0`}>
-            <LottieView
-              source={require("../../assets/animations/task.json")}
-              autoPlay
-              loop={true}
-            />
-          </View>
+          <LottieView
+            source={require("../../assets/animations/task.json")}
+            autoPlay
+            loop
+            style={{
+              position: "absolute",
+              width: 64,
+              height: 64,
+              zIndex: 10,
+            }}
+          />
         )}
       </View>
     </View>

@@ -31,7 +31,7 @@ import { server } from "../server";
 
 import InAppNotificationBanner from "../components/ui/InAppNotificationBanner";
 
-SplashScreen.preventAutoHideAsync().catch(() => {});
+SplashScreen.preventAutoHideAsync().catch(() => { });
 
 /* ================= GLOBAL NOTIFICATION BEHAVIOR ================= */
 Notifications.setNotificationHandler({
@@ -76,7 +76,7 @@ function AppShell() {
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
         });
-      } catch (e) {}
+      } catch (e) { }
     })();
   }, []);
 
@@ -84,22 +84,34 @@ function AppShell() {
   useEffect(() => {
     (async () => {
       try {
-        const result = await dispatch(restoreToken()).unwrap();
-        const { token } = result;
-
-        if (!token) {
-          router.replace("/onboarding");
-          return;
-        }
-
-        router.replace("/(tabs)");
+        await dispatch(restoreToken()).unwrap();
       } catch (e) {
-        router.replace("/onboarding");
+        console.warn("Token restore failed:", e);
       } finally {
-        SplashScreen.hideAsync().catch(() => {});
+        SplashScreen.hideAsync().catch(() => { });
       }
     })();
   }, []);
+
+  // useEffect(() => {
+  //   (async () => {
+  //     try {
+  //       const result = await dispatch(restoreToken()).unwrap();
+  //       const { token } = result;
+
+  //       if (!token) {
+  //         router.replace("/onboarding");
+  //         return;
+  //       }
+
+  //       router.replace("/(tabs)");
+  //     } catch (e) {
+  //       router.replace("/onboarding");
+  //     } finally {
+  //       SplashScreen.hideAsync().catch(() => {});
+  //     }
+  //   })();
+  // }, []);
 
   /* ================= FETCH AUTHENTICATED USER ================= */
   useEffect(() => {
@@ -146,7 +158,7 @@ function AppShell() {
             platform: Platform.OS,
           }),
         });
-      } catch (e) {}
+      } catch (e) { }
     };
 
     registerForPush();
@@ -257,7 +269,7 @@ function AppShell() {
         .then((response) => {
           if (response) handleNotification(response);
         })
-        .catch(() => {});
+        .catch(() => { });
 
       const sub = Notifications.addNotificationResponseReceivedListener(
         handleNotification

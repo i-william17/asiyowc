@@ -72,6 +72,7 @@ const PostCard = ({
   const [shouldPlay, setShouldPlay] = useState(false);
   const [isWifi, setIsWifi] = useState(false);
   const [myId, setMyId] = useState(null);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -163,6 +164,61 @@ const PostCard = ({
     return null;
   }
 
+  const processedText = useMemo(() => {
+    const text = post?.content?.text || "";
+
+    if (!text) {
+      return {
+        displayText: "",
+        shouldTruncate: false,
+      };
+    }
+
+    // TEXT POSTS → 100 WORDS
+    if (post.type === "text") {
+      const words = text.split(/\s+/);
+
+      if (words.length <= 100) {
+        return {
+          displayText: text,
+          shouldTruncate: false,
+        };
+      }
+
+      if (expanded) {
+        return {
+          displayText: text,
+          shouldTruncate: true,
+        };
+      }
+
+      return {
+        displayText: words.slice(0, 100).join(" ") + "...",
+        shouldTruncate: true,
+      };
+    }
+
+    // CAPTIONS → 100 CHARACTERS
+    if (text.length <= 100) {
+      return {
+        displayText: text,
+        shouldTruncate: false,
+      };
+    }
+
+    if (expanded) {
+      return {
+        displayText: text,
+        shouldTruncate: true,
+      };
+    }
+
+    return {
+      displayText: text.slice(0, 100) + "...",
+      shouldTruncate: true,
+    };
+  }, [post?.content?.text, post?.type, expanded]);
+
   const isOwner = useMemo(() => {
     const authorId = post?.author?._id || post?.author?.id;
     if (!myId || !authorId) return false;
@@ -233,26 +289,26 @@ const PostCard = ({
     })();
   }, []);
 
-const handleOpenLink = async (url) => {
-  if (!url) return;
+  const handleOpenLink = async (url) => {
+    if (!url) return;
 
-  let finalUrl = url.trim();
+    let finalUrl = url.trim();
 
-  if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
-    finalUrl = `https://${finalUrl}`;
-  }
-
-  try {
-    const supported = await Linking.canOpenURL(finalUrl);
-    if (supported) {
-      await Linking.openURL(finalUrl);
-    } else {
-      showSnackbar('Cannot open this link', 'error');
+    if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+      finalUrl = `https://${finalUrl}`;
     }
-  } catch (e) {
-    showSnackbar('Failed to open link', 'error');
-  }
-};
+
+    try {
+      const supported = await Linking.canOpenURL(finalUrl);
+      if (supported) {
+        await Linking.openURL(finalUrl);
+      } else {
+        showSnackbar('Cannot open this link', 'error');
+      }
+    } catch (e) {
+      showSnackbar('Failed to open link', 'error');
+    }
+  };
 
   // ===== Video Audio Fix =====
   // useEffect(() => {
@@ -654,17 +710,33 @@ const handleOpenLink = async (url) => {
       {/* ================= CONTENT (double-tap like area) ================= */}
       <Pressable onPress={handleDoubleTap}>
         {post.content?.text ? (
-          <Text
-            style={{
-              marginTop: 14,
-              fontFamily: 'Poppins-Regular',
-              fontSize: 15,
-              lineHeight: 23,
-              color: '#1f2937',
-            }}
-          >
-            {post.content.text}
-          </Text>
+          <View style={{ marginTop: 14 }}>
+            <Text
+              style={{
+                fontFamily: 'Poppins-Regular',
+                fontSize: 15,
+                lineHeight: 23,
+                color: '#1f2937',
+              }}
+            >
+              {processedText.displayText}
+            </Text>
+
+            {processedText.shouldTruncate && (
+              <TouchableOpacity onPress={() => setExpanded(prev => !prev)}>
+                <Text
+                  style={{
+                    marginTop: 6,
+                    fontFamily: 'Poppins-SemiBold',
+                    fontSize: 13,
+                    color: '#6A1B9A',
+                  }}
+                >
+                  {expanded ? "Show Less" : "Show More"}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
         ) : null}
 
         {/* ================= LINK ================= */}

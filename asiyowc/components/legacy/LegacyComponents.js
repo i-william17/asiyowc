@@ -753,7 +753,7 @@ export const JoinMovementCard = () => (
         {/* CTA */}
         <TouchableOpacity
             activeOpacity={0.85}
-            onPress={() => Linking.openURL("mailto:join@asiyofoundation.org")}
+            onPress={() => Linking.openURL("mailto:info@asiyo.org")}
             style={[
                 tw`rounded-2xl overflow-hidden`,
                 {

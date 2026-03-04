@@ -7,10 +7,9 @@ export default function Index() {
   const { token, hasRegistered, appLoaded } = useSelector(
     (state) => state.auth
   );
-
-  if (!appLoaded) {
-    return null;
-  }
+  
+  // Wait until Redux persistence finishes
+  if (!appLoaded) return null;
 
   // 🟢 Logged in
   if (token) {
