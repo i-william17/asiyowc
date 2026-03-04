@@ -42,7 +42,7 @@ export default function HubCard({ hub, onPress }) {
           <Text
             style={{
               fontFamily: "Poppins-SemiBold",
-              fontSize: 16,
+              fontSize: 15.5,
               color: "#111827",
             }}
             numberOfLines={1}
@@ -54,7 +54,7 @@ export default function HubCard({ hub, onPress }) {
             <Text
               style={{
                 fontFamily: "Poppins-Regular",
-                fontSize: 13,
+                fontSize: 12,
                 color: "#6B7280",
                 marginTop: 2,
               }}
@@ -70,7 +70,7 @@ export default function HubCard({ hub, onPress }) {
         <Text
           style={{
             fontFamily: "Poppins-Medium",
-            fontSize: 13,
+            fontSize: 12,
             color: "#6A1B9A",
           }}
         >

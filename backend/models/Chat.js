@@ -91,6 +91,14 @@ const messageSchema = new mongoose.Schema(
     readBy: [readReceiptSchema],
 
     /* =====================
+   📈 MESSAGE SEQUENCE
+===================== */
+
+    seq: {
+      type: Number,
+      index: true
+    },
+    /* =====================
        🗑 DELETE CONTROL
     ===================== */
     deletedFor: [
@@ -152,6 +160,39 @@ const chatSchema = new mongoose.Schema(
     pinnedMessage: {
       type: mongoose.Schema.Types.ObjectId
     },
+
+    /* =====================
+   📊 CHAT MESSAGE SEQ
+===================== */
+
+    lastSeq: {
+      type: Number,
+      default: 0
+    },
+
+    /* =====================
+   👁 CHAT READ STATE
+===================== */
+
+    readState: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true
+        },
+
+        lastReadSeq: {
+          type: Number,
+          default: 0
+        },
+
+        lastReadAt: {
+          type: Date,
+          default: Date.now
+        }
+      }
+    ],
 
     isRemoved: {
       type: Boolean,
@@ -237,5 +278,11 @@ chatSchema.index(
 chatSchema.index({ participants: 1, updatedAt: -1 });
 chatSchema.index({ isRemoved: 1 });
 chatSchema.index({ blockedUsers: 1 });
+chatSchema.index({ _id: 1, "readState.user": 1 });
+chatSchema.methods.getReadState = function (userId) {
+  return this.readState.find(
+    r => String(r.user) === String(userId)
+  );
+};
 
 module.exports = mongoose.model('Chat', chatSchema);

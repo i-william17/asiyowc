@@ -55,13 +55,7 @@ export const fetchHubs = createAsyncThunk(
     try {
       const token = getState().auth.token;
 
-      console.log("🌍 [fetchHubs] START");
-      console.log("🌍 [fetchHubs] token:", token ? "OK" : "MISSING");
-
       const res = await communityService.getHubs(token);
-
-      console.log("🌍 [fetchHubs] RAW RESPONSE:", res);
-      console.log("🌍 [fetchHubs] HUB COUNT:", res?.data?.length ?? 0);
 
       return res;
     } catch (e) {
@@ -114,8 +108,6 @@ export const fetchHubDetail = createAsyncThunk(
       const token = getState().auth.token;
 
       const res = await communityService.getHubById(id, token);
-
-      console.log("🟢 [fetchHubDetail] RAW:", res);
 
       // ✅ RETURN HUB ONLY
       return res.data;
@@ -858,6 +850,29 @@ const communitySlice = createSlice({
       }
     },
 
+    markChatRead: (state, action) => {
+      const { chatId, userId, seq } = action.payload || {};
+      if (!chatId || !userId || typeof seq !== "number") return;
+
+      const chat = state.chats.find((c) => String(c._id) === String(chatId));
+      if (!chat) return;
+
+      chat.readState = Array.isArray(chat.readState) ? chat.readState : [];
+
+      const entry = chat.readState.find((r) => String(r.user) === String(userId));
+
+      if (entry) {
+        entry.lastReadSeq = Math.max(entry.lastReadSeq || 0, seq);
+      } else {
+        chat.readState.push({ user: userId, lastReadSeq: seq });
+      }
+
+      // Optional: keep selectedChat in sync too
+      if (state.selectedChat && String(state.selectedChat._id) === String(chatId)) {
+        state.selectedChat.readState = chat.readState;
+      }
+    },
+
     /* =====================================================
        DELETE (WHATSAPP STYLE)
     ===================================================== */
@@ -1315,6 +1330,7 @@ const communitySlice = createSlice({
 
       .addCase(fetchChats.fulfilled, (s, a) => {
         s.chats = (a.payload?.data || []).filter((c) => c.type === "dm");
+        s.chats = a.payload?.data || [];
       })
 
       .addCase(createOrGetDMChat.fulfilled, (s, a) => {
@@ -1819,6 +1835,7 @@ export const {
   updateEditedMessage,
   clearSelectedChat,
   updateBlockedUsers,
+  markChatRead,
 
   /* VOICE */
   voiceJoined,

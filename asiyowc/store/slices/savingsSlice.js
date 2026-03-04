@@ -34,7 +34,6 @@ export const fetchMyPods = createAsyncThunk(
   async (token, { rejectWithValue }) => {
     try {
       const data = await savingsService.getMyPods(token);
-      console.log("🌍 [fetchMyPods] RAW RESPONSE:", data);
       return data.pods || data; // backend returns { pods }
     } catch (err) {
       return rejectWithValue(err.message);

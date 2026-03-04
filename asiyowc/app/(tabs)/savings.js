@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Animated,
   RefreshControl,
+  Platform,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -54,6 +55,8 @@ const SavingsScreen = () => {
   const [activeTab, setActiveTab] = useState("myPods");
   const [refreshing, setRefreshing] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState("all");
+  const [sortOrder, setSortOrder] = useState("desc"); // desc = latest first
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -61,6 +64,22 @@ const SavingsScreen = () => {
     { id: "myPods", name: "My Pods" },
     { id: "discover", name: "Discover" },
     { id: "contributions", name: "Contributions" },
+  ];
+
+  const months = [
+    { id: "all", name: "All" },
+    { id: 0, name: "Jan" },
+    { id: 1, name: "Feb" },
+    { id: 2, name: "Mar" },
+    { id: 3, name: "Apr" },
+    { id: 4, name: "May" },
+    { id: 5, name: "Jun" },
+    { id: 6, name: "Jul" },
+    { id: 7, name: "Aug" },
+    { id: 8, name: "Sep" },
+    { id: 9, name: "Oct" },
+    { id: 10, name: "Nov" },
+    { id: 11, name: "Dec" },
   ];
 
   /* ============================================================
@@ -136,13 +155,28 @@ const SavingsScreen = () => {
   /* ============================================================
      DERIVED DATA
   ============================================================ */
+  const filteredContributions = contributions
+    .filter((txn) => {
+      if (selectedMonth === "all") return true;
+
+      const month = new Date(txn.date).getMonth();
+      return month === selectedMonth;
+    })
+    .sort((a, b) => {
+      const dateA = new Date(a.date);
+      const dateB = new Date(b.date);
+
+      return sortOrder === "desc"
+        ? dateB - dateA
+        : dateA - dateB;
+    });
 
   const listData =
     activeTab === "myPods"
       ? myPods
       : activeTab === "discover"
         ? discoverPods
-        : contributions;
+        : filteredContributions;
 
   const totalSavings = myPods.reduce((sum, pod) => {
     const mine =
@@ -202,32 +236,110 @@ const SavingsScreen = () => {
           </View>
 
           {/* ================= SUMMARY ================= */}
-          <View style={tw`bg-white bg-opacity-20 rounded-2xl p-6`}>
-            <Text
-              style={[tw`text-white text-lg`, { fontFamily: "Poppins-Medium" }]}
-            >
-              Total Savings
-            </Text>
-            <Text
-              style={[tw`text-white text-3xl mt-1`, { fontFamily: "Poppins-Bold" }]}
-            >
-              KES {totalSavings.toLocaleString()}
-            </Text>
-            <Text
-              style={[
-                tw`text-white text-opacity-80 mt-1`,
-                { fontFamily: "Poppins-Regular" },
-              ]}
-            >
-              Across {myPods.length} pods
-            </Text>
+          <View style={tw`relative overflow-hidden`}>
+            {/* Decorative elements */}
+            <View style={[
+              tw`absolute -right-6 -top-6 w-32 h-32 rounded-full`,
+              { backgroundColor: 'rgba(255,255,255,0.1)' }
+            ]} />
+            <View style={[
+              tw`absolute -left-4 -bottom-4 w-20 h-20 rounded-full`,
+              { backgroundColor: 'rgba(255,255,255,0.08)' }
+            ]} />
+
+            {/* Main card */}
+            <View style={[
+              tw`rounded-3xl p-5`,
+              {
+                backgroundColor: '#6A1B9A',
+                borderCurve: "continuous",
+                shadowColor: "#6A1B9A",
+                shadowOpacity: 0.25,
+                shadowRadius: 15,
+                shadowOffset: { width: 0, height: 5 },
+              }
+            ]}>
+              {/* Top row with icon and label */}
+              <View style={tw`flex-row items-center justify-between`}>
+                <Text
+                  style={[
+                    tw`text-white text-opacity-90 text-sm`,
+                    {
+                      fontFamily: "Poppins-Medium",
+                      letterSpacing: 0.5,
+                      textTransform: 'uppercase',
+                    }
+                  ]}
+                >
+                  Total savings
+                </Text>
+                <View style={[
+                  tw`w-8 h-8 rounded-full items-center justify-center`,
+                  { backgroundColor: 'rgba(255,255,255,0.15)' }
+                ]}>
+                  <Ionicons name="wallet-outline" size={16} color="white" />
+                </View>
+              </View>
+
+              {/* Amount */}
+              <Text
+                style={[
+                  tw`text-white mt-1`,
+                  {
+                    fontFamily: "Poppins-SemiBold",
+                    fontSize: 32,
+                    lineHeight: 40,
+                  }
+                ]}
+              >
+                KES {totalSavings.toLocaleString()}
+              </Text>
+
+              {/* Footer with pod count and trend */}
+              <View style={tw`flex-row items-center justify-between mt-2`}>
+                <View style={tw`flex-row items-center`}>
+                  <View style={[
+                    tw`w-1.5 h-1.5 rounded-full mr-2`,
+                    { backgroundColor: 'rgba(255,255,255,0.5)' }
+                  ]} />
+                  <Text
+                    style={[
+                      tw`text-white text-opacity-80 text-xs`,
+                      { fontFamily: "Poppins-Regular" }
+                    ]}
+                  >
+                    {myPods.length} {myPods.length === 1 ? 'pod' : 'pods'} · Active
+                  </Text>
+                </View>
+
+              </View>
+            </View>
           </View>
         </LinearGradient>
 
         {/* ================= TABS ================= */}
-        <View style={tw`px-6 -mt-4 mb-6`}>
+        <View
+          style={[
+            tw`px-6 -mt-4 mb-6`,
+            Platform.OS === "web" && {
+              alignSelf: "center",
+              width: "100%",
+              maxWidth: 1100,
+            },
+          ]}
+        >
           <View style={tw`bg-white rounded-2xl p-2 shadow-sm`}>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={[
+                tw`flex-row`,
+                Platform.OS === "web" && {
+                  justifyContent: "center",
+                  flexGrow: 1,
+                },
+              ]}
+            >
               {tabs.map((tab) => (
                 <TouchableOpacity
                   key={tab.id}
@@ -256,7 +368,16 @@ const SavingsScreen = () => {
         </View>
 
         {/* ================= CONTENT ================= */}
-        <View style={tw`px-6 pb-8`}>
+        <View
+          style={[
+            tw`px-6 pb-8`,
+            Platform.OS === "web" && {
+              alignSelf: "center",
+              width: "100%",
+              maxWidth: 1100,
+            },
+          ]}
+        >
           <Text
             style={[tw`text-xl text-gray-900 mb-4`, { fontFamily: "Poppins-Bold" }]}
           >
@@ -267,6 +388,78 @@ const SavingsScreen = () => {
                 : "Contribution History"}
           </Text>
 
+          {activeTab === "contributions" && (
+            <View style={tw`mb-4`}>
+
+              {/* SORT BUTTON */}
+              <View style={tw`flex-row justify-between items-center mb-3`}>
+                <Text style={{ fontFamily: "Poppins-Medium", color: "#6B7280" }}>
+                  Sort
+                </Text>
+
+                <TouchableOpacity
+                  onPress={() =>
+                    setSortOrder((prev) =>
+                      prev === "desc" ? "asc" : "desc"
+                    )
+                  }
+                  style={tw`flex-row items-center`}
+                >
+                  <Ionicons
+                    name={sortOrder === "desc" ? "arrow-down" : "arrow-up"}
+                    size={16}
+                    color="#6A1B9A"
+                  />
+                  <Text
+                    style={{
+                      marginLeft: 6,
+                      fontFamily: "Poppins-Medium",
+                      color: "#6A1B9A",
+                    }}
+                  >
+                    {sortOrder === "desc"
+                      ? "Latest first"
+                      : "Oldest first"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* MONTH FILTER */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+              >
+                {months.map((m) => (
+                  <TouchableOpacity
+                    key={m.id}
+                    onPress={() => setSelectedMonth(m.id)}
+                    style={[
+                      tw`px-4 py-2 rounded-xl mr-2`,
+                      {
+                        backgroundColor:
+                          selectedMonth === m.id
+                            ? "#6A1B9A"
+                            : "#F3F4F6",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Poppins-Medium",
+                        fontSize: 13,
+                        color:
+                          selectedMonth === m.id
+                            ? "#FFFFFF"
+                            : "#6B7280",
+                      }}
+                    >
+                      {m.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
           {loading ? (
             <FeedShimmer />
           ) : listData.length === 0 ? (
@@ -287,7 +480,17 @@ const SavingsScreen = () => {
               </Text>
             </View>
           ) : (
-            <View style={tw`space-y-4`}>
+            <View
+              style={
+                Platform.OS === "web"
+                  ? {
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: 16,
+                  }
+                  : tw`space-y-4`
+              }
+            >
               {activeTab === "contributions"
                 ? listData.map((txn) => (
                   <View
@@ -319,20 +522,21 @@ const SavingsScreen = () => {
                     <SavingsPod
                       key={uiPod.id}
                       pod={uiPod}
-                      onPress={() =>
-                        router.push(`/savings/${uiPod.id}`)
-                      }
-                      style={{
-                        opacity: fadeAnim,
-                        transform: [
-                          {
-                            translateY: fadeAnim.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [50 * (index + 1), 0],
-                            }),
-                          },
-                        ],
-                      }}
+                      onPress={() => router.push(`/savings/${uiPod.id}`)}
+                      style={[
+                        {
+                          opacity: fadeAnim,
+                          transform: [
+                            {
+                              translateY: fadeAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [50 * (index + 1), 0],
+                              }),
+                            },
+                          ],
+                        },
+                        Platform.OS !== "web" && { marginBottom: 16 },
+                      ]}
                     />
                   );
                 })}

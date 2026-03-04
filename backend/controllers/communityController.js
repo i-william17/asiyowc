@@ -273,36 +273,78 @@ exports.getGroups = async (req, res) => {
     if (!user) return;
 
     const { page, limit, skip } = parsePage(req);
-    const mine = String(req.query.mine || 'false') === 'true';
+    const mine = String(req.query.mine || "false") === "true";
 
     const query = {
       isRemoved: false,
       isArchived: false,
-      privacy: { $ne: 'system' },
+      privacy: { $ne: "system" },
       ...(mine
-        ? { 'members.user': user.id }
+        ? { "members.user": user.id }
         : {
           $or: [
-            { privacy: 'public' },
-            { privacy: 'private', 'members.user': user.id }
-          ]
-        })
+            { privacy: "public" },
+            { privacy: "private", "members.user": user.id },
+          ],
+        }),
     };
 
-    const [groups, total] = await Promise.all([
-      Group.find(query)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .select('name description avatar privacy members chat createdAt'),
+    const groups = await Group.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .select("name description avatar privacy chat members.user")
+      .lean();
 
-      Group.countDocuments(query)
-    ]);
+    const total = await Group.countDocuments(query);
+
+    /* =====================================================
+       FETCH CHATS FOR THESE GROUPS
+    ===================================================== */
+
+    const chatIds = groups
+      .map((g) => g.chat)
+      .filter(Boolean);
+
+    const chats = await Chat.find({
+      _id: { $in: chatIds },
+      participants: user.id,
+    })
+      .select("lastSeq readState")
+      .lean();
+
+    /* =====================================================
+       BUILD CHAT LOOKUP
+    ===================================================== */
+
+    const chatMap = {};
+    chats.forEach((c) => {
+      chatMap[String(c._id)] = c;
+    });
+
+    /* =====================================================
+       BUILD RESPONSE
+    ===================================================== */
 
     const data = groups.map((g) => {
       const isMember = g.members.some(
         (m) => String(m.user) === String(user.id)
       );
+
+      const chat = chatMap[String(g.chat)];
+
+      let unreadCount = 0;
+
+      if (chat) {
+        const state = chat.readState?.find(
+          (r) => String(r.user) === String(user.id)
+        );
+
+        const lastReadSeq = state?.lastReadSeq || 0;
+        const lastSeq = chat.lastSeq || 0;
+
+        unreadCount = Math.max(0, lastSeq - lastReadSeq);
+      }
 
       return {
         _id: g._id,
@@ -312,7 +354,8 @@ exports.getGroups = async (req, res) => {
         privacy: g.privacy,
         membersCount: g.members.length,
         isMember,
-        chatId: g.chat
+        chatId: g.chat,
+        unreadCount, // ⭐ NEW
       };
     });
 
@@ -321,11 +364,11 @@ exports.getGroups = async (req, res) => {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit)
-      }
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
-    console.error('[getGroups]', error);
+    console.error("[getGroups]", error);
     return serverError(res, error);
   }
 };
@@ -842,9 +885,12 @@ exports.getGroupConversationByChatId = async (req, res) => {
       chat: {
         _id: chat._id,
         pinnedMessage: chat.pinnedMessage || null,
+        lastSeq: chat.lastSeq || 0,
+        readState: chat.readState || [],
         messages: populatedMessages,
       },
     });
+
   } catch (err) {
     console.error("[getGroupConversationByChatId]", err);
     return serverError(res, err);
@@ -857,59 +903,97 @@ exports.sendGroupMessage = async (req, res) => {
     const user = ensureAuthUser(req, res);
     if (!user) return;
 
-    const { groupId, chatId } = req.params;
-    if (!ensureObjectIdParam(res, groupId, 'groupId')) return;
-    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
+    const { groupId } = req.params;
 
-    const chat = await Chat.findOneAndUpdate(
-      {
-        _id: chatId,
-        type: 'group',
-        isRemoved: false,
-        participants: user.id
-      },
-      {
-        $push: {
-          messages: {
-            sender: user.id,
-            ciphertext: req.body.ciphertext,
-            iv: req.body.iv,
-            tag: req.body.tag,
-            type: req.body.type || 'text',
-            replyTo: req.body.replyTo || null
-          }
-        },
-        $set: { updatedAt: new Date() }
-      },
-      { new: true }
-    )
-      .populate('messages.sender', 'profile.fullName profile.avatar')
-      .populate({
-        path: 'messages.replyTo',
-        populate: {
-          path: 'sender',
-          select: 'profile.fullName profile.avatar'
-        }
-      })
-      .populate('messages.reactions.user', 'profile.fullName profile.avatar');
+    if (!isValidObjectId(groupId)) {
+      return bad(res, "Invalid groupId");
+    }
 
-    if (!chat) return notFound(res, 'Chat not found');
+    if (!req.body?.ciphertext || !req.body?.iv || !req.body?.tag) {
+      return bad(res, "Missing encrypted message payload");
+    }
 
-    const message = chat.messages.at(-1);
+    const group = await Group.findOne({
+      _id: groupId,
+      isRemoved: false,
+      "members.user": user.id,
+    }).select("chat");
 
-    // ✅ REALTIME — GROUP CHAT
-    req.io.to(`chat:${chatId}`).emit("group:message:new", {
-      chatId,
-      groupId,
-      message
+    if (!group) return notFound(res, "Group not found");
+
+    const chatId = group.chat;
+
+    const chat = await Chat.findOne({
+      _id: chatId,
+      type: "group",
+      isRemoved: false,
+      participants: user.id,
     });
 
-    return ok(res, message, 'Message sent');
+    if (!chat) return notFound(res, "Chat not found");
+
+    /* =============================
+       SEQUENCE SYSTEM
+    ============================== */
+
+    chat.lastSeq = (chat.lastSeq || 0) + 1;
+
+    const message = {
+      sender: user.id,
+      ciphertext: req.body.ciphertext,
+      iv: req.body.iv,
+      tag: req.body.tag,
+      type: req.body.type || "text",
+      replyTo: req.body.replyTo || null,
+      reactions: [],
+      readBy: [],
+      seq: chat.lastSeq,
+      createdAt: new Date(),
+    };
+
+    chat.messages.push(message);
+    chat.updatedAt = new Date();
+
+    await chat.save();
+
+    /* =============================
+       POPULATE FOR CLIENT
+    ============================== */
+
+    await chat.populate("messages.sender", "profile.fullName profile.avatar");
+
+    await chat.populate({
+      path: "messages.replyTo",
+      populate: {
+        path: "sender",
+        select: "profile.fullName profile.avatar",
+      },
+    });
+
+    await chat.populate(
+      "messages.reactions.user",
+      "profile.fullName profile.avatar"
+    );
+
+    const finalMessage = chat.messages.at(-1);
+
+    /* =============================
+       SOCKET BROADCAST
+    ============================== */
+
+    req.io.to(`chat:${chatId}`).emit("group:message:new", {
+      groupId,
+      chatId,
+      message: finalMessage,
+      lastSeq: chat.lastSeq,
+    });
+
+    return ok(res, finalMessage, "Message sent");
+
   } catch (error) {
     return serverError(res, error);
   }
 };
-
 
 // 5. Delete message in group chat
 exports.deleteGroupMessage = async (req, res) => {
@@ -2051,7 +2135,7 @@ exports.getChats = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const chats = await Chat.find({
+    const chatsRaw = await Chat.find({
       participants: userId,
       isRemoved: false,
     })
@@ -2059,10 +2143,24 @@ exports.getChats = async (req, res) => {
       .sort({ lastMessageAt: -1 })
       .lean();
 
+    const chats = chatsRaw.map(chat => {
+      const state = chat.readState?.find(
+        r => String(r.user) === String(userId)
+      );
+
+      const lastReadSeq = state?.lastReadSeq || 0;
+
+      return {
+        ...chat,
+        unreadCount: Math.max(0, (chat.lastSeq || 0) - lastReadSeq),
+      };
+    });
+
     res.json({
       success: true,
       data: chats,
     });
+
   } catch (err) {
     console.error("[getChats] ❌", err);
     res.status(500).json({
@@ -2071,7 +2169,6 @@ exports.getChats = async (req, res) => {
     });
   }
 };
-
 
 // 3. Get chat by Id
 // controllers/communityController.js
@@ -2208,52 +2305,53 @@ exports.sendMessage = async (req, res) => {
     if (!user) return;
 
     const { chatId } = req.params;
-    const { ciphertext, iv, tag, type = 'text', replyTo } = req.body;
+    const { ciphertext, iv, tag, type = "text", replyTo } = req.body;
 
-    const updated = await Chat.findOneAndUpdate(
-      { _id: chatId, participants: user.id, isRemoved: false },
-      {
-        $push: {
-          messages: {
-            sender: user.id,
-            ciphertext,
-            iv,
-            tag,
-            type,
-            replyTo: replyTo || null
-          }
-        },
-        $set: { updatedAt: new Date() }
-      },
-      { new: true }
-    )
-      .populate({
-        path: 'messages.sender',
-        select: 'profile.fullName profile.avatar'
-      })
-      .populate({
-        path: 'messages.replyTo',
-        populate: {
-          path: 'sender',
-          select: 'profile.fullName profile.avatar'
-        }
-      })
-      .populate({
-        path: 'messages.reactions.user',
-        select: 'profile.fullName profile.avatar'
-      });
-
-    if (!updated) return notFound(res, 'Chat not found');
-
-    const message = updated.messages.at(-1);
-
-    req.io.to(`chat:${chatId}`).emit('message:new', {
-      chatId,
-      message
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: user.id,
+      isRemoved: false,
     });
 
-    return ok(res, message);
+    if (!chat) return notFound(res, "Chat not found");
+
+    // ✅ Safe seq increment
+    chat.lastSeq = (chat.lastSeq || 0) + 1;
+
+    const message = {
+      sender: user.id,
+      ciphertext,
+      iv,
+      tag,
+      type,
+      replyTo: replyTo || null,
+      seq: chat.lastSeq,
+      createdAt: new Date(),
+    };
+
+    chat.messages = chat.messages || [];
+    chat.messages.push(message);
+    chat.updatedAt = new Date();
+
+    await chat.save();
+
+    // Populate only the last message (cheaper)
+    await chat.populate({
+      path: "messages.sender",
+      select: "profile.fullName profile.avatar",
+    });
+
+    const populatedMessage = chat.messages.at(-1);
+
+    req.io.to(`chat:${chatId}`).emit("message:new", {
+      chatId,
+      message: populatedMessage,
+      lastSeq: chat.lastSeq,
+    });
+
+    return ok(res, populatedMessage);
   } catch (e) {
+    console.error("[sendMessage]", e);
     return serverError(res, e);
   }
 };
@@ -2529,58 +2627,58 @@ exports.createVoice = async (req, res) => {
       },
     ]);
 
-/* ================= PUSH: VOICE CREATED ================= */
+    /* ================= PUSH: VOICE CREATED ================= */
 
-const voiceDoc = await Voice.findById(voice._id)
-  .populate("host", "profile.fullName")
-  .populate("group", "members")
-  .populate("hub", "members")
-  .lean();
+    const voiceDoc = await Voice.findById(voice._id)
+      .populate("host", "profile.fullName")
+      .populate("group", "members")
+      .populate("hub", "members")
+      .lean();
 
-const hostName = voiceDoc.host?.profile?.fullName || "Host";
+    const hostName = voiceDoc.host?.profile?.fullName || "Host";
 
-let recipients = [];
+    let recipients = [];
 
-// 🎯 Group members
-if (voiceDoc.group?.members?.length) {
-  recipients.push(
-    ...voiceDoc.group.members.map((m) =>
-      String(m.user || m)
-    )
-  );
-}
+    // 🎯 Group members
+    if (voiceDoc.group?.members?.length) {
+      recipients.push(
+        ...voiceDoc.group.members.map((m) =>
+          String(m.user || m)
+        )
+      );
+    }
 
-// 🎯 Hub members
-if (voiceDoc.hub?.members?.length) {
-  recipients.push(
-    ...voiceDoc.hub.members.map(String)
-  );
-}
+    // 🎯 Hub members
+    if (voiceDoc.hub?.members?.length) {
+      recipients.push(
+        ...voiceDoc.hub.members.map(String)
+      );
+    }
 
-// Remove duplicates + host
-recipients = [...new Set(recipients)].filter(
-  (id) => id !== String(user.id)
-);
+    // Remove duplicates + host
+    recipients = [...new Set(recipients)].filter(
+      (id) => id !== String(user.id)
+    );
 
-for (const uid of recipients) {
-  const recipient = await User.findById(uid)
-    .select("pushTokens")
-    .lean();
+    for (const uid of recipients) {
+      const recipient = await User.findById(uid)
+        .select("pushTokens")
+        .lean();
 
-  if (!recipient) continue;
+      if (!recipient) continue;
 
-  await sendExpoPushToUser(recipient, {
-    title: voiceDoc.title,
-    body: `${hostName} started a voice room`,
-    data: {
-      type: "voice",
-      voiceId: String(voiceDoc._id),
-      instanceId: String(
-        voiceDoc.instances?.[0]?.instanceId
-      ),
-    },
-  });
-}
+      await sendExpoPushToUser(recipient, {
+        title: voiceDoc.title,
+        body: `${hostName} started a voice room`,
+        data: {
+          type: "voice",
+          voiceId: String(voiceDoc._id),
+          instanceId: String(
+            voiceDoc.instances?.[0]?.instanceId
+          ),
+        },
+      });
+    }
 
     return created(res, voice, "Voice room created");
 

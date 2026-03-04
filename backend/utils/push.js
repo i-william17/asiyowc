@@ -8,7 +8,6 @@ async function sendExpoPushToUser(user, { title, body, data = {} }) {
   try {
     if (!user) return;
 
-    // ✅ Extract + dedupe tokens
     const tokens = Array.from(
       new Set(
         (user?.pushTokens || [])
@@ -17,14 +16,11 @@ async function sendExpoPushToUser(user, { title, body, data = {} }) {
       )
     );
 
-    if (tokens.length === 0) return;
+    if (!tokens.length) return;
 
-    // ✅ Keep only valid Expo tokens
-    const validTokens = tokens.filter((t) =>
-      Expo.isExpoPushToken(t)
-    );
+    const validTokens = tokens.filter((t) => Expo.isExpoPushToken(t));
 
-    if (validTokens.length === 0) return;
+    if (!validTokens.length) return;
 
     const messages = validTokens.map((t) => ({
       to: t,
@@ -40,31 +36,29 @@ async function sendExpoPushToUser(user, { title, body, data = {} }) {
       try {
         const tickets = await expo.sendPushNotificationsAsync(chunk);
 
-        tickets.forEach(async (ticket, index) => {
+        for (let i = 0; i < tickets.length; i++) {
+          const ticket = tickets[i];
+          const failedToken = chunk[i]?.to;
+
           if (ticket.status === "error") {
             console.error("Push ticket error:", ticket.message);
-
-            const failedToken = chunk[index]?.to;
 
             if (ticket.details?.error === "DeviceNotRegistered") {
               console.log("Removing invalid token:", failedToken);
 
-              // 🔥 Remove invalid token from DB
               await User.updateOne(
                 { _id: user._id },
-                {
-                  $pull: {
-                    pushTokens: { token: failedToken },
-                  },
-                }
+                { $pull: { pushTokens: { token: failedToken } } }
               );
             }
           }
-        });
+        }
+
       } catch (err) {
         console.error("Expo chunk send error:", err);
       }
     }
+
   } catch (e) {
     console.error("sendExpoPushToUser ERROR:", e);
   }

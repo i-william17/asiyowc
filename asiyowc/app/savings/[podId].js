@@ -22,6 +22,8 @@ import { WebView } from "react-native-webview";
 import tw from "../../utils/tw";
 import FeedShimmer from "../../components/ui/ShimmerLoader";
 import LottieLoader from "../../components/animations/LottieLoader";
+import { server } from "../../server";
+import * as Clipboard from "expo-clipboard";
 
 import {
     fetchPodById,
@@ -29,6 +31,7 @@ import {
     createContributionCheckout,
     clearCheckout,
 } from "../../store/slices/savingsSlice";
+
 
 /* ============================================================
    DROPDOWN OPTIONS (FROM SCHEMA)
@@ -150,6 +153,8 @@ const filterByTime = (items, filter) => {
     const now = Date.now();
 
     return items.filter((item) => {
+        if (!item?.date) return false;
+
         const time = new Date(item.date).getTime();
         if (Number.isNaN(time)) return false;
 
@@ -380,7 +385,7 @@ export default function PodDetailsScreen() {
         (state) => state.savings || {}
     );
 
-    const fadeAnim = useRef(new Animated.Value(0)).current;
+    const fadeAnim = useRef(new Animated.Value(1)).current;
 
     // checkout UI
     const [showCheckout, setShowCheckout] = useState(false);
@@ -422,6 +427,28 @@ export default function PodDetailsScreen() {
         return `${"•".repeat(str.length - visible)}${str.slice(-visible)}`;
     };
 
+    const [showShareModal, setShowShareModal] = useState(false);
+    const [inviteLink, setInviteLink] = useState("");
+
+    const generateInviteLink = () => {
+        if (!podId) return;
+
+        const baseUrl = server.replace("/api", "");
+        const link = `${baseUrl}/savings/pods/invite/${podId}`;
+
+        setInviteLink(link);
+        setShowShareModal(true);
+    };
+
+    const copyInviteLink = async () => {
+        if (!inviteLink) return;
+
+        try {
+            await Clipboard.setStringAsync(inviteLink);
+        } catch (err) {
+            console.log("Copy failed:", err);
+        }
+    };
     /* ============================================================
        LOAD POD
     ============================================================ */
@@ -466,7 +493,7 @@ export default function PodDetailsScreen() {
         refreshPod();
     }, [dispatch, refreshPod]);
 
-    const pod = activePod?.pod;
+    const pod = activePod?.pod ?? null;
     const isMember = Boolean(activePod?.isMember);
 
     const normalized = useMemo(() => {
@@ -759,249 +786,238 @@ export default function PodDetailsScreen() {
     return (
         <SafeAreaView style={tw`flex-1 bg-gray-50`}>
             {/* ================= SETTINGS SIDEBAR MODAL ================= */}
-            <Modal visible={showSettings} transparent animationType="none">
-                <Pressable style={tw`flex-1 bg-black/40`} onPress={closeSettings}>
-                    <Pressable style={tw`flex-1`} onPress={() => { }}>
-                        <Animated.View
-                            style={[
-                                tw`absolute top-0 right-0 bottom-0 w-11/12 bg-white`,
-                                {
-                                    transform: [{ translateX: slideX }],
-                                    borderTopLeftRadius: 24,
-                                    borderBottomLeftRadius: 24,
-                                },
-                            ]}
+            {/*
+<Modal visible={showSettings} transparent animationType="none">
+    <Pressable style={tw`flex-1 bg-black/40`} onPress={closeSettings}>
+        <Pressable style={tw`flex-1`} onPress={() => { }}>
+            <Animated.View
+                style={[
+                    tw`absolute top-0 right-0 bottom-0 w-11/12 bg-white`,
+                    {
+                        transform: [{ translateX: slideX }],
+                        borderTopLeftRadius: 24,
+                        borderBottomLeftRadius: 24,
+                    },
+                ]}
+            >
+                <SafeAreaView style={tw`flex-1`}>
+       
+                    <View style={tw`px-5 pt-4 pb-4 border-b border-gray-100`}>
+                        <View style={tw`flex-row items-center justify-between`}>
+                            <Text style={[tw`text-lg`, { fontFamily: "Poppins-Bold" }]}>
+                                Pod Settings
+                            </Text>
+                            <TouchableOpacity onPress={closeSettings} style={tw`p-2`}>
+                                <Ionicons name="close" size={22} color="#111827" />
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
+                    <ScrollView
+                        style={tw`flex-1`}
+                        contentContainerStyle={tw`px-5 pb-10`}
+                        showsVerticalScrollIndicator={false}
+                    >
+                        <TouchableOpacity
+                            onPress={() =>
+                                setSettingsCollapse((p) => ({ ...p, podSettings: !p.podSettings }))
+                            }
+                            style={tw`flex-row items-center justify-between mt-6`}
                         >
-                            <SafeAreaView style={tw`flex-1`}>
-                                {/* Sidebar header */}
-                                <View style={tw`px-5 pt-4 pb-4 border-b border-gray-100`}>
-                                    <View style={tw`flex-row items-center justify-between`}>
-                                        <Text style={[tw`text-lg`, { fontFamily: "Poppins-Bold" }]}>
-                                            Pod Settings
-                                        </Text>
-                                        <TouchableOpacity onPress={closeSettings} style={tw`p-2`}>
-                                            <Ionicons name="close" size={22} color="#111827" />
-                                        </TouchableOpacity>
-                                    </View>
+                            <Text style={[tw`text-base`, { fontFamily: "Poppins-Bold" }]}>
+                                Settings
+                            </Text>
+                            <Ionicons
+                                name={settingsCollapse.podSettings ? "chevron-up" : "chevron-down"}
+                                size={18}
+                                color="#6B7280"
+                            />
+                        </TouchableOpacity>
 
-                                    <Text style={[tw`text-gray-500 mt-1`, { fontFamily: "Poppins-Regular" }]}>
-                                        These controls are UI-ready. Wire them to an update endpoint later.
-                                    </Text>
-                                </View>
+                        {settingsCollapse.podSettings && (
+                            <View style={tw`mt-4 bg-gray-50 rounded-2xl p-4`}>
+                                <RowSelect
+                                    label="Privacy"
+                                    valueLabel={findOption(PRIVACY_OPTIONS, draft.privacy)?.label || draft.privacy}
+                                    icon="lock-closed"
+                                    onPress={() =>
+                                        openSelect("privacy", "Privacy", PRIVACY_OPTIONS, draft.privacy)
+                                    }
+                                />
 
-                                <ScrollView
-                                    style={tw`flex-1`}
-                                    contentContainerStyle={tw`px-5 pb-10`}
-                                    showsVerticalScrollIndicator={false}
+                                <Divider />
+
+                                <RowInput
+                                    label="Max Members"
+                                    icon="people"
+                                    value={draft.maxMembers}
+                                    keyboardType="number-pad"
+                                    onChangeText={(t) => setDraft((p) => ({ ...p, maxMembers: t }))}
+                                />
+
+                                <Divider />
+
+                                <RowToggle
+                                    label="Allow Withdrawals"
+                                    icon="cash"
+                                    value={draft.allowWithdrawals}
+                                    onToggle={() =>
+                                        setDraft((p) => ({ ...p, allowWithdrawals: !p.allowWithdrawals }))
+                                    }
+                                />
+
+                                <Divider />
+
+                                <RowToggle
+                                    label="Require Approval"
+                                    icon="checkmark-done"
+                                    value={draft.requireApproval}
+                                    onToggle={() =>
+                                        setDraft((p) => ({ ...p, requireApproval: !p.requireApproval }))
+                                    }
+                                />
+
+                                <Divider />
+
+                                <RowSelect
+                                    label="Category"
+                                    valueLabel={
+                                        findOption(CATEGORY_OPTIONS, draft.category)?.label || draft.category
+                                    }
+                                    icon="pricetag"
+                                    onPress={() =>
+                                        openSelect("category", "Category", CATEGORY_OPTIONS, draft.category)
+                                    }
+                                />
+
+                                <Divider />
+
+                                <RowSelect
+                                    label="Status"
+                                    valueLabel={
+                                        findOption(POD_STATUS_OPTIONS, draft.status)?.label || draft.status
+                                    }
+                                    icon="pulse"
+                                    onPress={() =>
+                                        openSelect("status", "Status", POD_STATUS_OPTIONS, draft.status)
+                                    }
+                                />
+                            </View>
+                        )}
+
+                        <TouchableOpacity
+                            onPress={() =>
+                                setSettingsCollapse((p) => ({
+                                    ...p,
+                                    contributionSettings: !p.contributionSettings,
+                                }))
+                            }
+                            style={tw`flex-row items-center justify-between mt-7`}
+                        >
+                            <Text style={[tw`text-base`, { fontFamily: "Poppins-Bold" }]}>
+                                Contribution Settings
+                            </Text>
+                            <Ionicons
+                                name={settingsCollapse.contributionSettings ? "chevron-up" : "chevron-down"}
+                                size={18}
+                                color="#6B7280"
+                            />
+                        </TouchableOpacity>
+
+                        {settingsCollapse.contributionSettings && (
+                            <View style={tw`mt-4 bg-gray-50 rounded-2xl p-4`}>
+                                <RowSelect
+                                    label="Frequency"
+                                    valueLabel={
+                                        findOption(FREQUENCY_OPTIONS, draft.frequency)?.label || draft.frequency
+                                    }
+                                    icon="calendar"
+                                    onPress={() =>
+                                        openSelect("frequency", "Frequency", FREQUENCY_OPTIONS, draft.frequency)
+                                    }
+                                />
+
+                                <Divider />
+
+                                <RowInput
+                                    label="Amount"
+                                    icon="cash"
+                                    value={draft.contributionAmount}
+                                    keyboardType="number-pad"
+                                    onChangeText={(t) =>
+                                        setDraft((p) => ({ ...p, contributionAmount: t }))
+                                    }
+                                />
+
+                                <Divider />
+
+                                <RowToggle
+                                    label="Auto Deduct"
+                                    icon="flash"
+                                    value={draft.autoDeduct}
+                                    onToggle={() => setDraft((p) => ({ ...p, autoDeduct: !p.autoDeduct }))}
+                                />
+                            </View>
+                        )}
+
+                        <TouchableOpacity
+                            onPress={() => setSettingsCollapse((p) => ({ ...p, meta: !p.meta }))}
+                            style={tw`flex-row items-center justify-between mt-7`}
+                        >
+                            <Text style={[tw`text-base`, { fontFamily: "Poppins-Bold" }]}>
+                                Meta
+                            </Text>
+                            <Ionicons
+                                name={settingsCollapse.meta ? "chevron-up" : "chevron-down"}
+                                size={18}
+                                color="#6B7280"
+                            />
+                        </TouchableOpacity>
+
+                        {settingsCollapse.meta && (
+                            <View style={tw`mt-4 bg-gray-50 rounded-2xl p-4`}>
+                                <MetaRow label="Pod ID" value={String(pod._id)} />
+                                <MetaRow label="Created At" value={fmtDateTime(normalized.createdAt)} />
+                                <MetaRow label="Updated At" value={fmtDateTime(normalized.updatedAt)} />
+                                <MetaRow
+                                    label="Active Members"
+                                    value={String(normalized.stats?.activeMembers ?? normalized.members.length)}
+                                />
+                            </View>
+                        )}
+
+                        <View style={tw`mt-10`}>
+                            <TouchableOpacity
+                                onPress={closeSettings}
+                                style={tw`bg-purple-700 py-4 rounded-2xl`}
+                                activeOpacity={0.85}
+                            >
+                                <Text
+                                    style={[
+                                        tw`text-white text-center`,
+                                        { fontFamily: "Poppins-SemiBold" },
+                                    ]}
                                 >
-                                    {/* ================= POD SETTINGS ================= */}
-                                    <TouchableOpacity
-                                        onPress={() =>
-                                            setSettingsCollapse((p) => ({ ...p, podSettings: !p.podSettings }))
-                                        }
-                                        style={tw`flex-row items-center justify-between mt-6`}
-                                    >
-                                        <Text style={[tw`text-base`, { fontFamily: "Poppins-Bold" }]}>
-                                            Settings
-                                        </Text>
-                                        <Ionicons
-                                            name={settingsCollapse.podSettings ? "chevron-up" : "chevron-down"}
-                                            size={18}
-                                            color="#6B7280"
-                                        />
-                                    </TouchableOpacity>
+                                    Done
+                                </Text>
+                            </TouchableOpacity>
 
-                                    {settingsCollapse.podSettings && (
-                                        <View style={tw`mt-4 bg-gray-50 rounded-2xl p-4`}>
-                                            {/* Privacy */}
-                                            <RowSelect
-                                                label="Privacy"
-                                                valueLabel={findOption(PRIVACY_OPTIONS, draft.privacy)?.label || draft.privacy}
-                                                icon="lock-closed"
-                                                onPress={() =>
-                                                    openSelect("privacy", "Privacy", PRIVACY_OPTIONS, draft.privacy)
-                                                }
-                                            />
-
-                                            <Divider />
-
-                                            {/* Max members */}
-                                            <RowInput
-                                                label="Max Members"
-                                                icon="people"
-                                                value={draft.maxMembers}
-                                                keyboardType="number-pad"
-                                                onChangeText={(t) => setDraft((p) => ({ ...p, maxMembers: t }))}
-                                            />
-
-                                            <Divider />
-
-                                            {/* Allow withdrawals */}
-                                            <RowToggle
-                                                label="Allow Withdrawals"
-                                                icon="cash"
-                                                value={draft.allowWithdrawals}
-                                                onToggle={() =>
-                                                    setDraft((p) => ({ ...p, allowWithdrawals: !p.allowWithdrawals }))
-                                                }
-                                            />
-
-                                            <Divider />
-
-                                            {/* Require approval */}
-                                            <RowToggle
-                                                label="Require Approval"
-                                                icon="checkmark-done"
-                                                value={draft.requireApproval}
-                                                onToggle={() =>
-                                                    setDraft((p) => ({ ...p, requireApproval: !p.requireApproval }))
-                                                }
-                                            />
-
-                                            <Divider />
-
-                                            {/* Category */}
-                                            <RowSelect
-                                                label="Category"
-                                                valueLabel={
-                                                    findOption(CATEGORY_OPTIONS, draft.category)?.label || draft.category
-                                                }
-                                                icon="pricetag"
-                                                onPress={() =>
-                                                    openSelect("category", "Category", CATEGORY_OPTIONS, draft.category)
-                                                }
-                                            />
-
-                                            <Divider />
-
-                                            {/* Status */}
-                                            <RowSelect
-                                                label="Status"
-                                                valueLabel={
-                                                    findOption(POD_STATUS_OPTIONS, draft.status)?.label || draft.status
-                                                }
-                                                icon="pulse"
-                                                onPress={() =>
-                                                    openSelect("status", "Status", POD_STATUS_OPTIONS, draft.status)
-                                                }
-                                            />
-                                        </View>
-                                    )}
-
-                                    {/* ================= CONTRIBUTION SETTINGS ================= */}
-                                    <TouchableOpacity
-                                        onPress={() =>
-                                            setSettingsCollapse((p) => ({
-                                                ...p,
-                                                contributionSettings: !p.contributionSettings,
-                                            }))
-                                        }
-                                        style={tw`flex-row items-center justify-between mt-7`}
-                                    >
-                                        <Text style={[tw`text-base`, { fontFamily: "Poppins-Bold" }]}>
-                                            Contribution Settings
-                                        </Text>
-                                        <Ionicons
-                                            name={settingsCollapse.contributionSettings ? "chevron-up" : "chevron-down"}
-                                            size={18}
-                                            color="#6B7280"
-                                        />
-                                    </TouchableOpacity>
-
-                                    {settingsCollapse.contributionSettings && (
-                                        <View style={tw`mt-4 bg-gray-50 rounded-2xl p-4`}>
-                                            <RowSelect
-                                                label="Frequency"
-                                                valueLabel={
-                                                    findOption(FREQUENCY_OPTIONS, draft.frequency)?.label || draft.frequency
-                                                }
-                                                icon="calendar"
-                                                onPress={() =>
-                                                    openSelect("frequency", "Frequency", FREQUENCY_OPTIONS, draft.frequency)
-                                                }
-                                            />
-
-                                            <Divider />
-
-                                            <RowInput
-                                                label="Amount"
-                                                icon="cash"
-                                                value={draft.contributionAmount}
-                                                keyboardType="number-pad"
-                                                onChangeText={(t) =>
-                                                    setDraft((p) => ({ ...p, contributionAmount: t }))
-                                                }
-                                            />
-
-                                            <Divider />
-
-                                            <RowToggle
-                                                label="Auto Deduct"
-                                                icon="flash"
-                                                value={draft.autoDeduct}
-                                                onToggle={() => setDraft((p) => ({ ...p, autoDeduct: !p.autoDeduct }))}
-                                            />
-                                        </View>
-                                    )}
-
-                                    {/* ================= META ================= */}
-                                    <TouchableOpacity
-                                        onPress={() => setSettingsCollapse((p) => ({ ...p, meta: !p.meta }))}
-                                        style={tw`flex-row items-center justify-between mt-7`}
-                                    >
-                                        <Text style={[tw`text-base`, { fontFamily: "Poppins-Bold" }]}>
-                                            Meta
-                                        </Text>
-                                        <Ionicons
-                                            name={settingsCollapse.meta ? "chevron-up" : "chevron-down"}
-                                            size={18}
-                                            color="#6B7280"
-                                        />
-                                    </TouchableOpacity>
-
-                                    {settingsCollapse.meta && (
-                                        <View style={tw`mt-4 bg-gray-50 rounded-2xl p-4`}>
-                                            <MetaRow label="Pod ID" value={String(pod._id)} />
-                                            <MetaRow label="Created At" value={fmtDateTime(normalized.createdAt)} />
-                                            <MetaRow label="Updated At" value={fmtDateTime(normalized.updatedAt)} />
-                                            <MetaRow
-                                                label="Active Members"
-                                                value={String(normalized.stats?.activeMembers ?? normalized.members.length)}
-                                            />
-                                        </View>
-                                    )}
-
-                                    <View style={tw`mt-10`}>
-                                        <TouchableOpacity
-                                            onPress={closeSettings}
-                                            style={tw`bg-purple-700 py-4 rounded-2xl`}
-                                            activeOpacity={0.85}
-                                        >
-                                            <Text
-                                                style={[
-                                                    tw`text-white text-center`,
-                                                    { fontFamily: "Poppins-SemiBold" },
-                                                ]}
-                                            >
-                                                Done
-                                            </Text>
-                                        </TouchableOpacity>
-
-                                        <Text
-                                            style={[
-                                                tw`text-gray-400 text-xs text-center mt-3`,
-                                                { fontFamily: "Poppins-Regular" },
-                                            ]}
-                                        >
-                                            Saving these settings requires an update endpoint. UI is ready.
-                                        </Text>
-                                    </View>
-                                </ScrollView>
-                            </SafeAreaView>
-                        </Animated.View>
-                    </Pressable>
-                </Pressable>
-            </Modal>
+                            <Text
+                                style={[
+                                    tw`text-gray-400 text-xs text-center mt-3`,
+                                    { fontFamily: "Poppins-Regular" },
+                                ]}
+                            >
+                                Saving these settings requires an update endpoint. UI is ready.
+                            </Text>
+                        </View>
+                    </ScrollView>
+                </SafeAreaView>
+            </Animated.View>
+        </Pressable>
+    </Pressable>
+</Modal>
+*/}
 
             {/* ================= SELECT MODAL ================= */}
             <SelectModal
@@ -1041,6 +1057,74 @@ export default function PodDetailsScreen() {
                 </Modal>
             )}
 
+            {/* ================= SHARE MODAL ================= */}
+            <Modal visible={showShareModal} transparent animationType="fade">
+                <Pressable
+                    style={tw`flex-1 bg-black/40 items-center justify-center`}
+                    onPress={() => setShowShareModal(false)}
+                >
+                    <Pressable
+                        style={tw`bg-white rounded-2xl p-6 w-11/12`}
+                        onPress={() => { }}
+                    >
+
+                        <Text style={[tw`text-lg mb-4`, { fontFamily: "Poppins-Bold" }]}>
+                            Share Pod
+                        </Text>
+
+                        <Text
+                            style={[
+                                tw`text-gray-500 mb-4`,
+                                { fontFamily: "Poppins-Regular" },
+                            ]}
+                        >
+                            Share this invite link with others to join the pod.
+                        </Text>
+
+                        <View style={tw`bg-gray-100 rounded-xl px-3 py-3`}>
+                            <Text
+                                selectable
+                                style={[
+                                    tw`text-gray-800`,
+                                    { fontFamily: "Poppins-Medium", fontSize: 13 },
+                                ]}
+                            >
+                                {inviteLink}
+                            </Text>
+                        </View>
+
+                        <TouchableOpacity
+                            onPress={copyInviteLink}
+                            style={tw`bg-purple-700 mt-4 py-3 rounded-xl`}
+                        >
+                            <Text
+                                style={[
+                                    tw`text-white text-center`,
+                                    { fontFamily: "Poppins-SemiBold" },
+                                ]}
+                            >
+                                Copy Link
+                            </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            onPress={() => setShowShareModal(false)}
+                            style={tw`mt-3 py-2`}
+                        >
+                            <Text
+                                style={[
+                                    tw`text-center text-gray-500`,
+                                    { fontFamily: "Poppins-Regular" },
+                                ]}
+                            >
+                                Close
+                            </Text>
+                        </TouchableOpacity>
+
+                    </Pressable>
+                </Pressable>
+            </Modal>
+
             {/* ================= MAIN SCROLL ================= */}
             <Animated.ScrollView style={{ opacity: fadeAnim }} showsVerticalScrollIndicator={false}>
                 {/* ================= HEADER ================= */}
@@ -1053,9 +1137,21 @@ export default function PodDetailsScreen() {
                             <Ionicons name="arrow-back" size={24} color="white" />
                         </TouchableOpacity>
 
-                        <TouchableOpacity onPress={openSettings} style={tw`p-2 -mr-2`}>
-                            <Ionicons name="settings-outline" size={22} color="white" />
-                        </TouchableOpacity>
+                        <View style={tw`flex-row items-center`}>
+                            {(normalized.settings?.privacy === "private" ||
+                                normalized.settings?.privacy === "invite-only") && (
+                                    <TouchableOpacity
+                                        onPress={generateInviteLink}
+                                        style={tw`p-2 mr-1`}
+                                    >
+                                        <Ionicons name="share-outline" size={22} color="white" />
+                                    </TouchableOpacity>
+                                )}
+
+                            {/* <TouchableOpacity onPress={openSettings} style={tw`p-2 -mr-2`}>
+                                <Ionicons name="settings-outline" size={22} color="white" />
+                            </TouchableOpacity> */}
+                        </View>
                     </View>
 
                     <Text
@@ -1326,7 +1422,7 @@ export default function PodDetailsScreen() {
                     {historyTab === "left" ? (
                         <>
                             <SectionTitle title="Contribution History" />
-                            
+
                             {/* ================= CONTRIBUTION FILTERS ================= */}
                             <View style={tw`flex-row items-center justify-between mb-4`}>
                                 <View style={tw`flex-row flex-wrap`}>
@@ -1382,7 +1478,7 @@ export default function PodDetailsScreen() {
                                             ]}
                                         />
                                     ))}
-                                    
+
                                     {/* Show All / Hide toggle */}
                                     {filteredContributions.length > 10 && (
                                         <TouchableOpacity

@@ -15,6 +15,7 @@ import {
   // - updateMessageReactions
   // - markMessageDeleted
   // If you don’t yet, I’ll give you exact reducers next.
+  markChatRead,
   updateMessageReactions,
   markMessageDeleted,
   updatePinnedMessage,
@@ -152,6 +153,22 @@ export default function useCommunitySocket() {
     };
 
     /* =====================================================
+    READ
+    backend emits: { chatId, seq, userId }
+  ===================================================== */
+    const onGroupReadUpdate = ({ chatId, userId, seq }) => {
+      if (!chatId || !userId || typeof seq !== "number") return;
+
+      dispatch(
+        markChatRead({
+          chatId,
+          userId,
+          seq,
+        })
+      );
+    };
+
+    /* =====================================================
        REGISTER LISTENERS (AUTHORITATIVE)
     ===================================================== */
     socket.on("connect", onConnect);
@@ -169,7 +186,7 @@ export default function useCommunitySocket() {
     // Reactions + delete realtime (controller emits these)
     socket.on("message:reaction:update", onReactionUpdate);
     socket.on("message:deleted", onMessageDeleted);
-
+    socket.on("group:read:update", onGroupReadUpdate);
     /* =====================================================
        CLEANUP
        ✅ Remove listeners only
@@ -189,6 +206,7 @@ export default function useCommunitySocket() {
         socket.off("message:pin:update", onPinUpdate);
 
         socket.off("message:deleted", onMessageDeleted);
+        socket.off("group:read:update", onGroupReadUpdate);
       } catch { }
 
       socketRef.current = null;

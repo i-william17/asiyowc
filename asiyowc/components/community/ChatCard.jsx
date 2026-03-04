@@ -33,18 +33,49 @@ export default function ChatCard({
       onPress={() => onPress?.(id)}
       style={tw`flex-row items-center bg-white px-4 py-4 mb-3 rounded-2xl border border-gray-200`}
     >
-      {/* ================= AVATAR ================= */}
-      <View
-        style={tw`w-12 h-12 rounded-full bg-gray-200 overflow-hidden items-center justify-center`}
-      >
-        {avatar ? (
-          <Image
-            source={{ uri: avatar }}
-            style={tw`w-full h-full`}
-            resizeMode="cover"
-          />
-        ) : (
-          <Ionicons name="person" size={22} color="#9CA3AF" />
+      {/* ================= AVATAR + UNREAD BADGE ================= */}
+      <View style={{ position: "relative" }}>
+        <View
+          style={tw`w-12 h-12 rounded-full bg-gray-200 overflow-hidden items-center justify-center`}
+        >
+          {avatar ? (
+            <Image
+              source={{ uri: avatar }}
+              style={tw`w-full h-full`}
+              resizeMode="cover"
+            />
+          ) : (
+            <Ionicons name="person" size={22} color="#9CA3AF" />
+          )}
+        </View>
+
+        {unreadCount > 0 && (
+          <View
+            style={{
+              position: "absolute",
+              right: -2,
+              top: -2,
+              minWidth: 20,
+              height: 20,
+              paddingHorizontal: unreadCount > 9 ? 5 : 0,
+              borderRadius: 999,
+              backgroundColor: "#6A1B9A", // same purple
+              alignItems: "center",
+              justifyContent: "center",
+              borderWidth: 2,
+              borderColor: "#FFFFFF",
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: "Poppins-SemiBold",
+                fontSize: 10,
+                color: "#FFFFFF",
+              }}
+            >
+              {displayCount}
+            </Text>
+          </View>
         )}
       </View>
 
@@ -55,7 +86,7 @@ export default function ChatCard({
             numberOfLines={1}
             style={{
               fontFamily: "Poppins-SemiBold",
-              fontSize: 15,
+              fontSize: 14,
               color: "#111827",
               flex: 1,
             }}
@@ -63,31 +94,6 @@ export default function ChatCard({
             {title}
           </Text>
 
-          {/* ================= UNREAD BADGE ================= */}
-          {unreadCount > 0 && (
-            <View
-              style={{
-                minWidth: 22,
-                height: 22,
-                paddingHorizontal: 6,
-                borderRadius: 11,
-                backgroundColor: "#2563EB", // blue (matches read ticks)
-                alignItems: "center",
-                justifyContent: "center",
-                marginLeft: 8,
-              }}
-            >
-              <Text
-                style={{
-                  fontFamily: "Poppins-SemiBold",
-                  fontSize: 11,
-                  color: "#FFFFFF",
-                }}
-              >
-                {displayCount}
-              </Text>
-            </View>
-          )}
         </View>
 
         {/* ================= LAST MESSAGE ================= */}
@@ -95,7 +101,7 @@ export default function ChatCard({
           numberOfLines={1}
           style={{
             fontFamily: "Poppins-Regular",
-            fontSize: 13,
+            fontSize: 11.5,
             color: "#6B7280",
             marginTop: 4,
           }}

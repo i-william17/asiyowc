@@ -161,6 +161,9 @@ module.exports = (io, socket) => {
 
       if (!chat) return;
 
+      // increment chat sequence
+      chat.lastSeq = (chat.lastSeq || 0) + 1;
+
       const message = {
         _id: new mongoose.Types.ObjectId(),
         sender: userId,
@@ -169,45 +172,68 @@ module.exports = (io, socket) => {
         replyTo: payload.replyTo || null,
         reactions: [],
         readBy: [],
+        seq: chat.lastSeq,
         createdAt: new Date(),
       };
 
       chat.messages.push(message);
       await chat.save();
 
-      /* ================= PUSH NOTIFICATION ================= */
+      /* ================= PUSH NOTIFICATION (OPTIMIZED + AVATAR) ================= */
+
       const groupDoc = await Group.findById(gid)
         .select("name members.user")
         .lean();
 
       if (groupDoc?.members?.length) {
-        const senderName = socket.user?.profile?.fullName || "Someone";
+
+        const senderName =
+          socket.user?.profile?.fullName ||
+          socket.user?.fullName ||
+          "Someone";
+
+        const senderAvatar =
+          socket.user?.profile?.avatar?.url ||
+          socket.user?.avatar ||
+          null;
 
         const preview =
           payload.type === "text"
-            ? payload.ciphertext?.slice(0, 60) || "New message"
+            ? (payload.ciphertext || "").substring(0, 60)
             : "New message";
 
-        for (const member of groupDoc.members) {
-          const memberId = String(member.user);
+        /* ======================================
+           Build recipient list
+        ====================================== */
 
-          if (memberId === String(userId)) continue;
+        const memberIds = groupDoc.members
+          .map((m) => normalizeId(m.user))
+          .filter(Boolean)
+          .filter((uid) => String(uid) !== String(userId)) // skip sender
+          .filter((uid) => !isOnline(uid)); // skip online users
 
-          // Skip if online (optional smart delivery)
-          if (isOnline(memberId)) continue;
+        if (memberIds.length) {
 
-          const recipient = await User.findById(memberId).select("pushTokens");
-          if (!recipient) continue;
+          const recipients = await User.find({
+            _id: { $in: memberIds },
+          }).select("pushTokens");
 
-          await sendExpoPushToUser(recipient, {
-            title: groupDoc.name || "Group Message",
-            body: `${senderName}: ${preview}`,
-            data: {
-              type: "community",
-              groupId: String(gid),
-              chatId: String(group.chat),
-            },
-          });
+          for (const recipient of recipients) {
+            await sendExpoPushToUser(recipient, {
+              title: groupDoc.name || "Group Message",
+              body: `${senderName}: ${preview}`,
+              data: {
+                type: "community",
+                groupId: String(gid),
+                chatId: String(group.chat),
+
+                // 🔥 sender metadata for banner UI
+                fullName: senderName,
+                avatar: senderAvatar,
+              },
+            });
+          }
+
         }
       }
 
@@ -354,6 +380,63 @@ module.exports = (io, socket) => {
 
     } catch (e) {
       console.error("group:read:batch error", e);
+    }
+  });
+
+  /* =====================================================
+     READ RECEIPT
+  ===================================================== */
+  socket.on("group:read", async ({ chatId, seq }, cb) => {
+    try {
+      if (!isValidId(chatId)) {
+        return cb?.({ success: false });
+      }
+
+      const chat = await Chat.findOne({
+        _id: chatId,
+        type: "group",
+        participants: userId,
+      });
+
+      if (!chat) {
+        return cb?.({ success: false });
+      }
+
+      // ensure readState exists
+      if (!Array.isArray(chat.readState)) {
+        chat.readState = [];
+      }
+
+      const safeSeq = Math.min(Number(seq || 0), chat.lastSeq || 0);
+
+      let state = chat.readState.find(
+        (r) => String(r.user) === String(userId)
+      );
+
+      if (state) {
+        state.lastReadSeq = Math.max(state.lastReadSeq || 0, safeSeq);
+        state.lastReadAt = new Date();
+      } else {
+        chat.readState.push({
+          user: userId,
+          lastReadSeq: safeSeq,
+          lastReadAt: new Date(),
+        });
+      }
+
+      await chat.save();
+
+      io.to(`chat:${chatId}`).emit("group:read:update", {
+        chatId,
+        userId,
+        lastReadSeq: safeSeq,
+      });
+
+      cb?.({ success: true });
+
+    } catch (err) {
+      console.error("group:read error", err);
+      cb?.({ success: false });
     }
   });
 

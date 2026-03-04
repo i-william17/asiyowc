@@ -1,5 +1,5 @@
 // app/_layout.js
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Stack, useRouter } from "expo-router";
 import { Provider, useDispatch, useSelector } from "react-redux";
 import { store, persistor } from "../store/store";
@@ -27,9 +27,11 @@ import {
 import useCommunitySocket from "../hooks/useCommunitySocket";
 import { Audio } from "expo-av";
 
-import { server } from "../server"; // ✅ IMPORT YOUR BACKEND URL
+import { server } from "../server";
 
-SplashScreen.preventAutoHideAsync().catch(() => { });
+import InAppNotificationBanner from "../components/ui/InAppNotificationBanner";
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 /* ================= GLOBAL NOTIFICATION BEHAVIOR ================= */
 Notifications.setNotificationHandler({
@@ -52,6 +54,15 @@ function AppShell() {
 
   useCommunitySocket();
 
+  /* ================= BANNER STATE ================= */
+  const [banner, setBanner] = useState({
+    visible: false,
+    title: "",
+    body: "",
+    avatar: null,
+    data: null,
+  });
+
   /* ================= GLOBAL AUDIO MODE ================= */
   useEffect(() => {
     (async () => {
@@ -65,9 +76,7 @@ function AppShell() {
           shouldDuckAndroid: true,
           playThroughEarpieceAndroid: false,
         });
-      } catch (e) {
-        console.warn("Global audio mode error:", e);
-      }
+      } catch (e) {}
     })();
   }, []);
 
@@ -87,7 +96,7 @@ function AppShell() {
       } catch (e) {
         router.replace("/onboarding");
       } finally {
-        SplashScreen.hideAsync().catch(() => { });
+        SplashScreen.hideAsync().catch(() => {});
       }
     })();
   }, []);
@@ -106,12 +115,8 @@ function AppShell() {
     const registerForPush = async () => {
       try {
         const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== "granted") {
-          console.log("❌ Push permission not granted");
-          return;
-        }
+        if (status !== "granted") return;
 
-        // ✅ Expo Go + Build safe token retrieval (fallback)
         let pushToken = null;
 
         try {
@@ -122,19 +127,14 @@ function AppShell() {
               await Notifications.getExpoPushTokenAsync({ projectId })
             ).data;
           } else {
-            // Expo Go fallback
             pushToken = (await Notifications.getExpoPushTokenAsync()).data;
           }
         } catch (err) {
-          console.warn("❌ Push token generation failed:", err);
           return;
         }
 
         if (!pushToken) return;
 
-        console.log("📱 Expo Push Token:", pushToken);
-
-        // ✅ Send token to backend
         await fetch(`${server}/auth/save-push-token`, {
           method: "POST",
           headers: {
@@ -146,13 +146,65 @@ function AppShell() {
             platform: Platform.OS,
           }),
         });
-      } catch (e) {
-        console.warn("Push registration error:", e);
-      }
+      } catch (e) {}
     };
 
     registerForPush();
   }, [token]);
+
+  /* ================= FOREGROUND NOTIFICATIONS ================= */
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+
+    const sub = Notifications.addNotificationReceivedListener(
+      (notification) => {
+        const { title, body, data } = notification.request.content;
+
+        setBanner({
+          visible: true,
+          title: title || "Notification",
+          body: body || "",
+          avatar: data?.avatar || null,
+          data: data || null,
+        });
+      }
+    );
+
+    return () => sub.remove();
+  }, []);
+
+  /* ================= BANNER PRESS NAVIGATION ================= */
+  const handleBannerPress = () => {
+    const data = banner.data || {};
+
+    if (data?.type === "program" && data?.programId) {
+      router.push(`/programs/${data.programId}`);
+    }
+
+    else if (data?.type === "post" && data?.postId) {
+      router.push(`/feed/${data.postId}`);
+    }
+
+    else if (data?.type === "savings" && data?.podId) {
+      router.push(`/savings/${data.podId}`);
+    }
+
+    else if (data?.type === "community") {
+      if (data?.chatId) {
+        router.push(`/community/chat/${data.chatId}`);
+      } else if (data?.groupId) {
+        router.push(`/community/groups/${data.groupId}`);
+      } else if (data?.voiceId) {
+        router.push(`/community/voices/${data.voiceId}`);
+      } else if (data?.hubId) {
+        router.push(`/community/hubs/${data.hubId}`);
+      } else {
+        router.push("/(tabs)/community");
+      }
+    }
+
+    setBanner((b) => ({ ...b, visible: false }));
+  };
 
   /* ================= HANDLE NOTIFICATION TAP ================= */
   useEffect(() => {
@@ -160,25 +212,21 @@ function AppShell() {
       const data = response?.notification?.request?.content?.data || {};
       if (!data) return;
 
-      // PROGRAM
       if (data?.type === "program" && data?.programId) {
         router.push(`/programs/${data.programId}`);
         return;
       }
 
-      // POST
       if (data?.type === "post" && data?.postId) {
         router.push(`/feed/${data.postId}`);
         return;
       }
 
-      // SAVINGS
       if (data?.type === "savings" && data?.podId) {
         router.push(`/savings/${data.podId}`);
         return;
       }
 
-      // COMMUNITY
       if (data?.type === "community") {
         if (data?.chatId) {
           router.push(`/community/chat/${data.chatId}`);
@@ -204,16 +252,13 @@ function AppShell() {
       router.push("/(tabs)");
     };
 
-    // ✅ Web guard (expo-notifications tap APIs are native-only)
     if (Platform.OS !== "web") {
-      // Cold start (native only)
       Notifications.getLastNotificationResponseAsync()
         .then((response) => {
           if (response) handleNotification(response);
         })
-        .catch(() => { });
+        .catch(() => {});
 
-      // Foreground/background taps (native only)
       const sub = Notifications.addNotificationResponseReceivedListener(
         handleNotification
       );
@@ -221,18 +266,32 @@ function AppShell() {
       return () => sub.remove();
     }
 
-    // ✅ Web: do nothing
     return undefined;
   }, []);
 
   if (!fontsLoaded) return null;
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="modals" />
-    </Stack>
+    <>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="modals" />
+      </Stack>
+
+      {/* ================= IN APP BANNER ================= */}
+      <InAppNotificationBanner
+        visible={banner.visible}
+        title={banner.title}
+        body={banner.body}
+        avatar={banner.avatar}
+        data={banner.data}
+        onPress={handleBannerPress}
+        onHide={() =>
+          setBanner((b) => ({ ...b, visible: false }))
+        }
+      />
+    </>
   );
 }
 

@@ -23,7 +23,7 @@ import ProgramCard from "../../components/programs/ProgramCard";
 import { programService } from "../../services/program";
 import tw from "../../utils/tw";
 import { useSelector, useDispatch } from "react-redux";
-import { fetchPublicPrograms, clearPrograms } from "../../store/slices/programsSlice";
+import { fetchPublicPrograms, clearProgram } from "../../store/slices/programsSlice";
 import { fetchGamification } from "../../store/slices/authSlice";
 
 const ProgramsScreen = () => {
@@ -118,7 +118,7 @@ const ProgramsScreen = () => {
 
     // Cleanup on unmount
     return () => {
-      dispatch(clearPrograms());
+      dispatch(clearProgram());
     };
   }, [dispatch]);
 

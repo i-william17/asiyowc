@@ -459,13 +459,13 @@ exports.savePushToken = async (req, res) => {
       });
     }
 
-    // ✅ 1) Remove any previous record of this token
-    await User.updateOne(
-      { _id: req.user.id },
+    // 1️⃣ Remove this token from ANY user (device switched accounts)
+    await User.updateMany(
+      { "pushTokens.token": token },
       { $pull: { pushTokens: { token } } }
     );
 
-    // ✅ 2) Add fresh record
+    // 2️⃣ Add token to current user
     await User.updateOne(
       { _id: req.user.id },
       {
@@ -483,8 +483,10 @@ exports.savePushToken = async (req, res) => {
       success: true,
       message: "Push token saved",
     });
+
   } catch (error) {
     console.error("SAVE PUSH TOKEN ERROR:", error);
+
     return res.status(500).json({
       success: false,
       message: "Failed to save push token",

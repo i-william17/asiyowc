@@ -199,6 +199,12 @@ module.exports = (io, socket) => {
         return cb?.({ success: false, message: "You are blocked from sending messages in this chat" });
       }
 
+      /* =====================
+         SEQUENCE + MESSAGE
+      ===================== */
+
+      chat.lastSeq = (chat.lastSeq || 0) + 1;
+
       const message = {
         _id: new mongoose.Types.ObjectId(),
         sender: new mongoose.Types.ObjectId(userId),
@@ -207,49 +213,72 @@ module.exports = (io, socket) => {
         replyTo: payload.replyTo || null,
         reactions: [],
         readBy: [],
+        seq: chat.lastSeq,
         createdAt: new Date(),
       };
 
       chat.messages.push(message);
       await chat.save();
 
-      /* ================= DM PUSH NOTIFICATION ================= */
+      /* ================= DM PUSH NOTIFICATION (OPTIMIZED + AVATAR) ================= */
 
-      // Only for DM chats
       if (chat.type === "dm") {
-        const senderName = socket.user?.profile?.fullName || "Someone";
+
+        const senderName =
+          socket.user?.profile?.fullName ||
+          socket.user?.fullName ||
+          "Someone";
+
+        const senderAvatar =
+          socket.user?.profile?.avatar?.url ||
+          socket.user?.avatar ||
+          null;
 
         const preview =
           payload.type === "text"
-            ? payload.ciphertext?.slice(0, 60) || "New message"
+            ? (payload.ciphertext || "").substring(0, 60)
             : "New message";
 
-        for (const participant of chat.participants) {
-          const participantId = String(participant);
+        /* ======================================
+           Build recipient list
+        ====================================== */
 
-          // Skip sender
-          if (participantId === String(userId)) continue;
+        const recipientsIds = chat.participants
+          .map(normalizeId)
+          .filter(Boolean)
+          .filter(uid => String(uid) !== String(userId)) // skip sender
+          .filter(uid => !isOnline(uid)); // skip online users
 
-          // Skip if online
-          if (isOnline(participantId)) continue;
+        if (recipientsIds.length) {
 
-          const recipient = await User.findById(participantId).select("pushTokens");
-          if (!recipient) continue;
+          const recipients = await User.find({
+            _id: { $in: recipientsIds }
+          }).select("pushTokens");
 
-          await sendExpoPushToUser(recipient, {
-            title: senderName,
-            body: preview,
-            data: {
-              type: "community",
-              chatId: String(cid),
-            },
-          });
+          await Promise.all(
+            recipients.map((recipient) =>
+              sendExpoPushToUser(recipient, {
+                title: senderName,
+                body: preview,
+                data: {
+                  type: "community",
+                  chatId: String(cid),
+
+                  // 🔥 banner metadata
+                  fullName: senderName,
+                  avatar: senderAvatar,
+                },
+              })
+            )
+          );
+
         }
       }
 
       io.to(`chat:${cid}`).emit('message:new', {
         chatId: cid,
         message,
+        lastSeq: chat.lastSeq,
       });
 
       cb?.({ success: true, message });
@@ -588,6 +617,60 @@ module.exports = (io, socket) => {
       });
     } catch (err) {
       console.error("❌ message:read:batch error", err);
+    }
+  });
+
+  /* =====================================================
+   CHAT READ MARKER (FOR UNREAD SYSTEM)
+===================================================== */
+  socket.on("chat:read", async ({ chatId, seq }, cb) => {
+    try {
+      const cid = normalizeId(chatId);
+      if (!isValidId(cid)) return;
+
+      const chat = await Chat.findOne({
+        _id: cid,
+        participants: userId,
+        isRemoved: false,
+      }).select("lastSeq readState");
+
+      if (!chat) return;
+
+      // ⭐ FIX
+      if (!Array.isArray(chat.readState)) {
+        chat.readState = [];
+      }
+
+      const safeSeq = Math.min(Number(seq || 0), chat.lastSeq || 0);
+
+      const existing = chat.readState.find(
+        r => String(r.user) === String(userId)
+      );
+
+      if (existing) {
+        existing.lastReadSeq = Math.max(existing.lastReadSeq || 0, safeSeq);
+        existing.lastReadAt = new Date();
+      } else {
+        chat.readState.push({
+          user: userId,
+          lastReadSeq: safeSeq,
+          lastReadAt: new Date(),
+        });
+      }
+
+      await chat.save();
+
+      socket.emit("chat:read:update", {
+        chatId: cid,
+        userId,
+        lastReadSeq: safeSeq
+      });
+
+      cb?.({ success: true });
+
+    } catch (err) {
+      console.error("chat:read error", err);
+      cb?.({ success: false });
     }
   });
 

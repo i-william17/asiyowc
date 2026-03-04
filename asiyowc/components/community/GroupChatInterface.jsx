@@ -32,6 +32,7 @@ import {
   deleteMessageForMe,
   deleteMessageForEveryone,
   leaveGroup,
+  markChatRead,
   updateMessageReceipt,
   clearSelectedChat,
   reportContent,
@@ -662,6 +663,15 @@ export default function GroupChatInterface({ chatId }) {
     };
   }, [chatId]);
 
+
+  useEffect(() => {
+    console.log("selectedChat", selectedChat);
+
+    console.log("lastSeq direct", selectedChat?.lastSeq);
+    console.log("lastSeq nested", selectedChat?.chat?.lastSeq);
+
+  }, [selectedChat]);
+
   /* =====================================================
      SOCKET (REALTIME WITH ALL FEATURES)
   ===================================================== */
@@ -675,6 +685,20 @@ export default function GroupChatInterface({ chatId }) {
     socket.emit("group:join", { groupId }, (res) => {
       if (!res?.success) {
         console.warn("❌ Failed to join group room", res);
+        return;
+      }
+
+      // 🔥 JOIN CHAT ROOM
+      if (res.chatId) {
+        socket.emit("chat:join", { chatId: res.chatId });
+      }
+
+      // 🔥 NOW SAFE TO MARK READ
+      if (selectedChat?.lastSeq && myId) {
+        socket.emit("group:read", {
+          chatId,
+          seq: selectedChat.lastSeq,
+        });
       }
     });
 
@@ -758,6 +782,9 @@ export default function GroupChatInterface({ chatId }) {
       });
     });
 
+    // ================= JOIN CHAT =================//
+    socket.emit("chat:join", { chatId });
+
     /* ================= GROUP PRESENCE ================= */
     socket.emit("group:presence:whois", { groupId }, (res) => {
 
@@ -839,6 +866,40 @@ export default function GroupChatInterface({ chatId }) {
       clearTimeout(readFlushTimerRef.current);
     };
   }, [groupId, token, chatId, myId]);
+
+
+  /* =====================================================
+     UNREAD CLEAR (IMPORTANT)
+  ===================================================== */
+  useEffect(() => {
+    if (!socketRef.current) return;
+    if (!chatId || !myId) return;
+    if (!selectedChat?.lastSeq) return;
+
+    const seq = Number(selectedChat.lastSeq) || 0;
+
+    // do not emit if nothing to mark
+    const state = selectedChat?.readState?.find(
+      (r) => String(r.user) === String(myId)
+    );
+
+    const lastReadSeq = state?.lastReadSeq || 0;
+
+    if (seq <= lastReadSeq) return;
+
+    // 🔹 update backend
+    socketRef.current.emit("group:read", { chatId, seq });
+
+    // 🔹 update redux immediately (UI clears badge instantly)
+    dispatch(
+      markChatRead({
+        chatId,
+        userId: myId,
+        seq,
+      })
+    );
+
+  }, [chatId, selectedChat?.lastSeq, myId]);
 
   /* =====================================================
      SEND MESSAGE

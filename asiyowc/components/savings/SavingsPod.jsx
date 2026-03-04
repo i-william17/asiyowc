@@ -1,18 +1,11 @@
 import React, { useMemo } from "react";
 import { View, Text, Image, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import Svg, { Circle } from "react-native-svg";
 import tw from "../../utils/tw";
 
 /**
  * SavingsPod Component
- *
- * Props:
- * - pod: backend pod object (raw)
- * - style: animated style
- * - onPress: view pod
- * - onJoin: join pod
- * - onContribute: contribute to pod
- * - currentUserId: logged in user id (optional, for contribution calc)
  */
 
 const SavingsPod = ({
@@ -39,7 +32,9 @@ const SavingsPod = ({
   } = useMemo(() => {
     const id = pod._id || pod.id;
 
-    const image = "https://res.cloudinary.com/ducckh8ip/image/upload/v1766603798/asiyo-app/a8vl3ff1muzlnnunkjy3.jpg";
+    const image =
+      pod.image ||
+      "https://res.cloudinary.com/ducckh8ip/image/upload/v1766603798/asiyo-app/a8vl3ff1muzlnnunkjy3.jpg";
 
     const membersCount =
       pod.membersCount ??
@@ -57,10 +52,10 @@ const SavingsPod = ({
       pod.contributions
         ?.filter(
           (c) =>
-            c.user === currentUserId ||
-            c.member === currentUserId
+            String(c.user) === String(currentUserId) ||
+            String(c.member) === String(currentUserId)
         )
-        ?.reduce((s, c) => s + c.amount, 0) ??
+        ?.reduce((s, c) => s + (c.amount || 0), 0) ??
       0;
 
     const goalAmount =
@@ -78,8 +73,8 @@ const SavingsPod = ({
         ? pod.isMember
         : pod.members?.some(
           (m) =>
-            m === currentUserId ||
-            m?._id === currentUserId
+            String(m) === String(currentUserId) ||
+            String(m?._id) === String(currentUserId)
         );
 
     return {
@@ -100,10 +95,7 @@ const SavingsPod = ({
 
   const progress =
     goalAmount > 0
-      ? Math.min(
-        Math.round((savedAmount / goalAmount) * 100),
-        100
-      )
+      ? Math.min(Math.round((savedAmount / goalAmount) * 100), 100)
       : 0;
 
   const daysLeft = targetDate
@@ -116,6 +108,13 @@ const SavingsPod = ({
     )
     : "--";
 
+  const size = 64;
+  const strokeWidth = 4;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const progressOffset =
+    circumference - (progress / 100) * circumference;
+
   /* ============================================================
      UI
   ============================================================ */
@@ -123,205 +122,188 @@ const SavingsPod = ({
   return (
     <TouchableOpacity
       activeOpacity={0.9}
-      onPress={onPress}
+      onPress={() => onPress?.(id)}
       style={[
-        tw`bg-white rounded-3xl p-4 shadow-md`,
+        tw`bg-white rounded-3xl p-4`,
         {
           borderCurve: "continuous",
-          shadowColor: "#000",
-          shadowOpacity: 0.08,
-          shadowRadius: 8,
+          shadowColor: "#1e1e2f",
+          shadowOpacity: 0.04,
+          shadowRadius: 10,
           shadowOffset: { width: 0, height: 4 },
+          borderWidth: 1.5,
+          borderColor: "#FFD700",
+          shadowColor: "#FFD700",
         },
         style,
       ]}
     >
-      {/* ================= HEADER ================= */}
-      <View style={tw`flex-row items-start`}>
-        <Image
-          source={{ uri: image }}
-          style={tw`w-20 h-20 rounded-2xl`}
-        />
+      {/* HEADER */}
+      <View style={tw`flex-row items-center justify-between`}>
+        <View style={tw`flex-row items-center flex-1`}>
+          <Image
+            source={{ uri: image }}
+            style={[
+              tw`w-14 h-14`,
+              {
+                borderRadius: 28,
+                borderWidth: 2,
+                borderColor: "#f8f4ff",
+              },
+            ]}
+          />
 
-        <View style={tw`flex-1 ml-4`}>
-          <Text
-            numberOfLines={2}
-            style={{
-              fontFamily: "Poppins-SemiBold",
-              fontSize: 18,
-              color: "#111827",
-            }}
-          >
-            {pod.name}
-          </Text>
-
-          <View style={tw`flex-row items-center mt-1`}>
-            <Ionicons name="people" size={18} color="#6A1B9A" />
+          <View style={tw`ml-3 flex-1`}>
             <Text
+              numberOfLines={1}
               style={{
-                fontFamily: "Poppins-Medium",
-                color: "#6A1B9A",
-                marginLeft: 6,
-                fontSize: 13,
+                fontFamily: "Poppins-SemiBold",
+                fontSize: 16,
+                color: "#1e1e2f",
+                marginBottom: 2,
               }}
             >
-              {membersCount} members
+              {pod.name}
+            </Text>
+
+            <View style={tw`flex-row items-center`}>
+              <Ionicons
+                name="people-outline"
+                size={14}
+                color="#6b7280"
+              />
+              <Text
+                style={{
+                  fontFamily: "Poppins-Regular",
+                  color: "#6b7280",
+                  marginLeft: 4,
+                  fontSize: 12,
+                }}
+              >
+                {membersCount}{" "}
+                {membersCount === 1 ? "person" : "people"}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* PROGRESS RING */}
+        <View style={tw`relative items-center justify-center`}>
+          <Svg width={size} height={size}>
+            <Circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              stroke="#f0f0f5"
+              strokeWidth={strokeWidth}
+            />
+
+            <Circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              stroke="#6A1B9A"
+              strokeWidth={strokeWidth}
+              strokeDasharray={circumference}
+              strokeDashoffset={progressOffset}
+              strokeLinecap="round"
+              rotation="-90"
+              origin={`${size / 2}, ${size / 2}`}
+            />
+          </Svg>
+
+          <View style={tw`absolute items-center justify-center`}>
+            <Text
+              style={{
+                fontFamily: "Poppins-SemiBold",
+                fontSize: 13,
+                color: "#1e1e2f",
+              }}
+            >
+              {progress}%
             </Text>
           </View>
         </View>
       </View>
 
-      {/* ================= PROGRESS ================= */}
-      <View style={tw`mt-4`}>
-        <View style={tw`h-3 bg-gray-200 rounded-full overflow-hidden`}>
-          <View
-            style={{
-              width: `${progress}%`,
-              height: "100%",
-              backgroundColor: "#6A1B9A",
-              borderRadius: 20,
-            }}
-          />
-        </View>
-
-        <Text
-          style={{
-            fontFamily: "Poppins-Medium",
-            marginTop: 6,
-            color: "#6B7280",
-            fontSize: 12,
-          }}
-        >
-          {progress}% of KES {goalAmount.toLocaleString()}
-        </Text>
-      </View>
-
-      {/* ================= METRICS ================= */}
-      <View style={tw`flex-row justify-between mt-5`}>
+      {/* METRICS */}
+      <View
+        style={tw`flex-row justify-between mt-4 pt-3 border-t border-gray-100`}
+      >
         <Metric
-          label="Total Saved"
+          label="Saved"
           value={`KES ${savedAmount.toLocaleString()}`}
-          strong
+          size="small"
         />
+
+        <View style={tw`w-px h-8 bg-gray-100`} />
+
         <Metric
-          label="My Contribution"
-          value={`KES ${myContribution.toLocaleString()}`}
-          color="#6A1B9A"
-          strong
+          label="Goal"
+          value={`KES ${goalAmount.toLocaleString()}`}
+          size="small"
         />
-        <Metric label="Days Left" value={daysLeft} />
+
+        <View style={tw`w-px h-8 bg-gray-100`} />
+
+        <Metric
+          label="My share"
+          value={`KES ${myContribution.toLocaleString()}`}
+          highlight={myContribution > 0}
+          size="small"
+        />
+
+        <View style={tw`w-px h-8 bg-gray-100`} />
+
+        <Metric
+          label="Time left"
+          value={daysLeft === "--" ? "—" : `${daysLeft}d`}
+          size="small"
+        />
       </View>
 
-      {/* ================= ACTIONS ================= */}
-      <View style={tw`flex-row justify-between mt-6`}>
-        {/* VIEW */}
-        <TouchableOpacity
-          style={tw`flex-1 bg-purple-600 rounded-xl py-3 mr-2`}
-          onPress={onPress}
-        >
-          <Text
-            style={{
-              fontFamily: "Poppins-SemiBold",
-              textAlign: "center",
-              color: "#FFFFFF",
-              fontSize: 14,
-            }}
-          >
-            View Pod
-          </Text>
-        </TouchableOpacity>
-
-        {/* JOIN */}
-        {/* ================= ACTIONS ================= */}
-        <View style={tw`flex-row justify-between mt-6`}>
-          {/* MEMBER ACTIONS */}
-          {isMember && (
-            <>
-              <TouchableOpacity
-                style={tw`flex-1 bg-purple-600 rounded-xl py-3 mr-2`}
-                onPress={onPress}
-              >
-                <Text
-                  style={{
-                    fontFamily: "Poppins-SemiBold",
-                    textAlign: "center",
-                    color: "#FFFFFF",
-                    fontSize: 14,
-                  }}
-                >
-                  View Pod
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={tw`flex-1 bg-green-600 rounded-xl py-3 ml-2`}
-                onPress={() => onContribute?.(id)}
-              >
-                <Text
-                  style={{
-                    fontFamily: "Poppins-SemiBold",
-                    textAlign: "center",
-                    color: "#FFFFFF",
-                    fontSize: 14,
-                  }}
-                >
-                  Contribute
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
-
-          {/* NON-MEMBER ACTION */}
-          {/* {!isMember && (
-            <TouchableOpacity
-              style={tw`flex-1 bg-gray-800 rounded-xl py-3`}
-              onPress={() => onJoin?.(id)}
-            >
-              <Text
-                style={{
-                  fontFamily: "Poppins-SemiBold",
-                  textAlign: "center",
-                  color: "#FFFFFF",
-                  fontSize: 14,
-                }}
-              >
-                Join Pod
-              </Text>
-            </TouchableOpacity>
-          )} */}
-        </View>
-
-      </View>
     </TouchableOpacity>
   );
 };
 
 /* ============================================================
-   SMALL METRIC COMPONENT
+   METRIC COMPONENT
 ============================================================ */
 
-const Metric = ({ label, value, strong, color }) => (
-  <View style={tw`flex-1 items-center`}>
-    <Text
-      style={{
-        fontFamily: strong ? "Poppins-SemiBold" : "Poppins-Regular",
-        fontSize: 16,
-        color: color || "#111827",
-      }}
-    >
-      {value}
-    </Text>
-    <Text
-      style={{
-        fontFamily: "Poppins-Regular",
-        color: "#6B7280",
-        fontSize: 12,
-        marginTop: 4,
-      }}
-    >
-      {label}
-    </Text>
-  </View>
-);
+const Metric = ({ label, value, highlight, size = "normal" }) => {
+  const textSize = size === "small" ? 14 : 16;
+  const labelSize = size === "small" ? 11 : 12;
+
+  return (
+    <View style={tw`flex-1 items-center`}>
+      <Text
+        style={{
+          fontFamily: highlight
+            ? "Poppins-SemiBold"
+            : "Poppins-Medium",
+          fontSize: textSize,
+          color: highlight ? "#6A1B9A" : "#1e1e2f",
+        }}
+      >
+        {value}
+      </Text>
+
+      <Text
+        style={{
+          fontFamily: "Poppins-Regular",
+          color: "#94a3b8",
+          fontSize: labelSize,
+          marginTop: 2,
+          textTransform: "uppercase",
+          letterSpacing: 0.3,
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+};
 
 export default React.memo(SavingsPod);

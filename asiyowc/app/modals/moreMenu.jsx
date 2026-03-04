@@ -37,12 +37,12 @@ export default function MoreMenu() {
       icon: "leaf-outline",
       route: "/more/wellness",
     },
-    {
-      title: "Marketplace",
-      subtitle: "Products, services, and partnerships",
-      icon: "cart-outline",
-      route: "/more/marketplace",
-    },
+    // {
+    //   title: "Marketplace",
+    //   subtitle: "Products, services, and partnerships",
+    //   icon: "cart-outline",
+    //   route: "/more/marketplace",
+    // },
     // {
     //   title: "Global Impact Tracker",
     //   subtitle: "Track community and social impact",
@@ -72,7 +72,7 @@ export default function MoreMenu() {
         colors={[PURPLE, "#4A148C"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={tw`px-6 pt-16 pb-8 rounded-b-3xl`}
+        style={tw`px-6 pt-8 pb-8 rounded-b-3xl`}
       >
         <View style={tw`flex-row items-center`}>
           <View
@@ -144,7 +144,7 @@ export default function MoreMenu() {
                 <Text
                   style={{
                     fontFamily: "Poppins-Medium",
-                    fontSize: 16,
+                    fontSize: 15,
                     color: "#111",
                   }}
                 >
@@ -154,7 +154,7 @@ export default function MoreMenu() {
                 <Text
                   style={{
                     fontFamily: "Poppins-Regular",
-                    fontSize: 13,
+                    fontSize: 12,
                     color: "#6B7280",
                     marginTop: 2,
                   }}

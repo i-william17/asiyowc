@@ -37,7 +37,7 @@ export default function VoiceCard({
               numberOfLines={1}
               style={{
                 fontFamily: "Poppins-SemiBold",
-                fontSize: 16,
+                fontSize: 15,
                 color: "#111827",
               }}
             >
@@ -49,7 +49,7 @@ export default function VoiceCard({
                 numberOfLines={1}
                 style={{
                   fontFamily: "Poppins-Regular",
-                  fontSize: 13,
+                  fontSize: 12,
                   color: "#6B7280",
                   marginTop: 2,
                 }}
@@ -83,7 +83,7 @@ export default function VoiceCard({
           <Text
             style={{
               fontFamily: "Poppins-Medium",
-              fontSize: 13,
+              fontSize: 12,
               color: "#7C3AED",
               marginLeft: 6,
             }}

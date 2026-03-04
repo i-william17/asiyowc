@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { View, TouchableOpacity, Image, Platform, Text } from "react-native";
 import { Tabs, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,10 +7,58 @@ import { fetchUserProfile } from "../../store/slices/userSlice";
 import ShimmerLoader from "../../components/ui/ShimmerLoader";
 import tw from "../../utils/tw";
 
+// ⏰ Dynamic Greeting Based on Time
+const generateGreeting = () => {
+  const hour = new Date().getHours();
+
+  const morning = [
+    "Rise & Thrive",
+    "Own Today",
+    "You Matter",
+    "You Belong",
+    "Shine on",
+  ];
+
+  const afternoon = [
+    "Keep Winning",
+    "Keep Going",
+    "Make it Count",
+    "Command Growth",
+    "Drive Impact",
+    "Steady Wins",
+  ];
+
+  const evening = [
+    "Well Done",
+    "Reset & Rewind",
+    "Invest in Rest",
+    "Celebrate Yourself",
+    "You did it",
+  ];
+
+  const night = [
+    "Tomorrow awaits",
+    "You’re Enough",
+    "Be Gentle",
+    "Stay Hopeful",
+    "Stay Strong",
+    "You’re Growing",
+  ];
+
+  const pickRandom = (arr) =>
+    arr[Math.floor(Math.random() * arr.length)];
+
+  if (hour >= 5 && hour < 12) return pickRandom(morning);
+  if (hour >= 12 && hour < 17) return pickRandom(afternoon);
+  if (hour >= 17 && hour < 21) return pickRandom(evening);
+  return pickRandom(night);
+};
+
 export default function TabLayout() {
   const router = useRouter();
   const dispatch = useDispatch();
   const { user, loading } = useSelector((state) => state.user);
+  const [greeting] = useState(() => generateGreeting());
 
   const fullName = user?.profile?.fullName || "User";
   const firstName = fullName?.split(" ")[0] || "User";
@@ -19,53 +67,6 @@ export default function TabLayout() {
   useEffect(() => {
     dispatch(fetchUserProfile());
   }, [dispatch]);
-
-  // ⏰ Dynamic Greeting Based on Time
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-
-    const morning = [
-      "Rise & Thrive",
-      "Own Today",
-      "You Matter",
-      "You Belong",
-      "Shine on",
-    ];
-
-    const afternoon = [
-      "Keep Winning",
-      "Keep Going",
-      "Make it Count",
-      "Command Growth",
-      "Drive Impact",
-      "Steady Wins",
-    ];
-
-    const evening = [
-      "Well Done",
-      "Reset & Rewind",
-      "Invest in Rest",
-      "Celebrate Yourself",
-      "You did it",
-    ];
-
-    const night = [
-      "Tomorrow awaits",
-      "You’re Enough",
-      "Be Gentle",
-      "Stay Hopeful",
-      "Stay Strong",
-      "You’re Growing",
-    ];
-
-    const pickRandom = (arr) =>
-      arr[Math.floor(Math.random() * arr.length)];
-
-    if (hour >= 5 && hour < 12) return pickRandom(morning);
-    if (hour >= 12 && hour < 17) return pickRandom(afternoon);
-    if (hour >= 17 && hour < 21) return pickRandom(evening);
-    return pickRandom(night);
-  };
 
   // ⭐ Loading State
   if (!user) {
@@ -94,7 +95,7 @@ export default function TabLayout() {
 
           tabBarLabelStyle: {
             fontFamily: "Poppins-Medium",
-            fontSize: 12,
+            fontSize: 11,
             marginBottom: Platform.OS === "android" ? 4 : -2,
           },
         }}
@@ -158,7 +159,7 @@ export default function TabLayout() {
                     fontSize: 18,
                   }}
                 >
-                  {getGreeting()}, {firstName}
+                  {greeting}, {firstName}
                 </Text>
               </View>
             ),

@@ -392,6 +392,7 @@ export default function ChatInterface({ chatId }) {
     const firstMessage = selectedChat?.messages?.[0];
     if (!firstMessage?._id) return;
 
+    readEmittedRef.current.clear(); // ✅ prevents pagination duplication
     try {
       setLoadingOlder(true);
 
@@ -450,7 +451,9 @@ export default function ChatInterface({ chatId }) {
       if (readEmittedRef.current.has(messageId)) return;
 
       // 🧠 Queue instead of emit
-      readQueueRef.current.add(messageId);
+      if (!readQueueRef.current.has(messageId)) {
+        readQueueRef.current.add(messageId);
+      }
       readEmittedRef.current.add(messageId);
     });
 
@@ -466,8 +469,9 @@ export default function ChatInterface({ chatId }) {
     if (readFlushTimerRef.current) return;
 
     readFlushTimerRef.current = setTimeout(() => {
+      readFlushTimerRef.current = null;
       flushReadQueue();
-    }, 500); // WhatsApp-like delay
+    }, 500);
   };
 
   const flushReadQueue = () => {
@@ -805,6 +809,17 @@ export default function ChatInterface({ chatId }) {
     };
   }, [chatId, token, receiverId, myId]);
 
+  useEffect(() => {
+    if (!socketRef.current) return;
+    if (!selectedChat?.lastSeq) return;
+    if (!chatId) return;
+
+    socketRef.current.emit("chat:read", {
+      chatId,
+      seq: selectedChat.lastSeq,
+    });
+
+  }, [selectedChat?.lastSeq, chatId]);
   /* =====================================================
      KEYBOARD HANDLING (MANUAL - PROFESSIONAL APPROACH)
   ===================================================== */
@@ -1628,7 +1643,7 @@ export default function ChatInterface({ chatId }) {
         initialNumToRender={25}
         maxToRenderPerBatch={25}
         windowSize={10}
-        removeClippedSubviews
+        removeClippedSubviews={false} // 🔥 CHANGED: Disable for better UX during fast scroll
         onScrollToIndexFailed={(info) => {
           setTimeout(() => {
             listRef.current?.scrollToIndex({

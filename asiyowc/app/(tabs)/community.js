@@ -81,7 +81,7 @@ export default function CommunityScreen() {
   const [showWebTimePicker, setShowWebTimePicker] = useState(false);
   const [tempHour, setTempHour] = useState(null);
   const [pickerFadeAnim] = useState(new Animated.Value(0));
-  
+
   // Group creation states
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
@@ -94,8 +94,6 @@ export default function CommunityScreen() {
   const minuteScrollRef = useRef(null);
 
   const fadeAnim = useState(new Animated.Value(0))[0];
-
-  console.log("Hubs:", hubs);
 
   /* =====================================================
      ANIMATIONS
@@ -194,30 +192,16 @@ export default function CommunityScreen() {
   };
 
   const getUnreadCount = (chat, myId) => {
-    if (!chat?.messages || !myId) return 0;
+    if (!chat || !myId) return 0;
 
-    return chat.messages.filter((m) => {
-      if (!m?._id) return false;
+    const state = Array.isArray(chat.readState)
+      ? chat.readState.find((r) => String(r.user) === String(myId))
+      : null;
 
-      // Ignore my own messages
-      if (String(m.sender?._id || m.sender) === String(myId)) return false;
+    const lastReadSeq = state?.lastReadSeq || 0;
+    const lastSeq = chat.lastSeq || 0;
 
-      // Ignore deleted-for-me
-      if (
-        Array.isArray(m.deletedFor) &&
-        m.deletedFor.map(String).includes(String(myId))
-      ) {
-        return false;
-      }
-
-      // Unread if readBy does NOT include me
-      const readBy = Array.isArray(m.readBy) ? m.readBy : [];
-      const hasRead = readBy.some(
-        (r) => String(r.user || r) === String(myId)
-      );
-
-      return !hasRead;
-    }).length;
+    return Math.max(0, lastSeq - lastReadSeq);
   };
 
   const handleCreateVoice = async () => {
@@ -436,6 +420,7 @@ export default function CommunityScreen() {
   const renderList = () => {
     if (loadingList) return <LoadingBlock />;
 
+
     /* -------- GROUPS -------- */
     if (activeTab === "groups") {
       return (
@@ -448,24 +433,33 @@ export default function CommunityScreen() {
               subtitle="Join groups to connect with others."
             />
           ) : (
-            groups.map((g) => (
-              <GroupCard
-                key={g._id}
-                id={g._id}
-                name={g.name}
-                description={g.description}
-                avatar={g.avatar}
-                membersCount={g.membersCount}
-                isJoined={g.isMember}
-                onPress={(id) => {
-                  if (g.isMember && g.chatId) {
-                    router.push(`/community/group-chat/${g.chatId}`);
-                  } else {
-                    router.push(`/community/group/${id}`);
-                  }
-                }}
-              />
-            ))
+            groups.map((g) => {
+
+
+
+              // 🔵 Calculate unread
+              const unreadCount = g.unreadCount || 0;
+
+              return (
+                <GroupCard
+                  key={g._id}
+                  id={g._id}
+                  name={g.name}
+                  description={g.description}
+                  avatar={g.avatar}
+                  membersCount={g.membersCount}
+                  isJoined={g.isMember}
+                  unreadCount={unreadCount}   // ⭐ PASS UNREAD
+                  onPress={(id) => {
+                    if (g.isMember && g.chatId) {
+                      router.push(`/community/group-chat/${g.chatId}`);
+                    } else {
+                      router.push(`/community/group/${id}`);
+                    }
+                  }}
+                />
+              );
+            })
           )}
         </>
       );
@@ -520,7 +514,7 @@ export default function CommunityScreen() {
                     null
                   }
                   lastMessage={lastMessage}
-                  // unreadCount={unreadCount}
+                  unreadCount={unreadCount}
                   onPress={(id) => router.push(`/community/chat/${id}`)}
                 />
               );
