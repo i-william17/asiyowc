@@ -916,17 +916,11 @@ export default function MentorDetailsScreen() {
 
         {/* ================= META ================= */}
         <Animated.View entering={FadeInUp} style={tw`bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-2`}>
-          <SectionTitle icon={Info} title="Profile Meta" subtitle="System info" />
+          <SectionTitle icon={Info} title="Profile Meta" />
 
           <View style={tw`mt-3`}>
-            <MetaRow label="Mentor ID" value={String(safeMentor._id)} />
-            <MetaRow label="User ID" value={String(safeMentor.user)} />
-            <MetaRow label="Created" value={formatDate(createdAt) || "—"} />
-            <MetaRow label="Updated" value={formatDate(updatedAt) || "—"} />
-            <MetaRow label="Version" value={String(safeMentor.__v ?? 0)} />
 
             <Divider />
-
             <MetaRow label="Active" value={isActive ? "Yes" : "No"} />
             <MetaRow label="Suspended" value={isSuspended ? "Yes" : "No"} />
           </View>
@@ -1132,7 +1126,7 @@ export default function MentorDetailsScreen() {
               </View>
 
               <View style={tw`mt-4`}>
-                <ActionRow
+                {/* <ActionRow
                   icon={Share2}
                   title="Share mentor profile"
                   subtitle="Send this profile to someone"
@@ -1140,8 +1134,8 @@ export default function MentorDetailsScreen() {
                     setShowActionsSheet(false);
                     await handleShareProfile();
                   }}
-                />
-                                <ActionRow
+                /> */}
+                                {/* <ActionRow
                   icon={Star}
                   title="Rate mentor"
                   subtitle="Provide feedback on your experience with this mentor"
@@ -1149,7 +1143,7 @@ export default function MentorDetailsScreen() {
                     setShowActionsSheet(false);
                     Alert.alert("Rate Mentor", "Rating functionality will be added soon.");
                   }}
-                />
+                /> */}
                 <ActionRow
                   icon={Info}
                   title="About verification"

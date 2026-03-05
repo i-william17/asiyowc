@@ -58,7 +58,6 @@ const documentSchema = new mongoose.Schema(
     url: {
       type: String,
       required: true,
-      match: /^https?:\/\/.+/,
     },
 
     provider: {
@@ -126,9 +125,9 @@ const mentorSchema = new mongoose.Schema(
     },
 
     experience: {
-      type: String, // "10+ years"
+      type: Number,
+      default: 0,
     },
-
     skills: [String],
 
     languages: [String],

@@ -318,16 +318,16 @@ export default function FullStoryScreen() {
             </View>
           </View>
           
-          <TouchableOpacity
+          {/* <TouchableOpacity
             style={tw`bg-purple-600 rounded-xl py-3.5 flex-row items-center justify-center`}
             activeOpacity={0.8}
-            onPress={() => router.push('/mentorship')}
+            onPress={() => router.push('/more/mentorship')}
           >
             <Text style={[tw`text-white text-sm mr-2`, { fontFamily: 'Poppins-SemiBold' }]}>
               Find a Mentor
             </Text>
             <ChevronRight size={18} color="#FFFFFF" />
-          </TouchableOpacity>
+          </TouchableOpacity> */}
         </View>
       </ScrollView>
 

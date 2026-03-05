@@ -44,9 +44,13 @@ export default function SafetyHubScreen() {
   const [pendingCall, setPendingCall] = useState(null);
 
   const router = useRouter();
-  
+
   const onBackPress = () => {
-    router.back();
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/more"); // or your parent screen
+    }
   };
 
   /* ================= INLINE SNACKBAR ================= */
@@ -65,17 +69,17 @@ export default function SafetyHubScreen() {
   };
 
   const resources = [
+    // {
+    //   id: 1,
+    //   title: "24/7 Crisis Helpline",
+    //   description: "Speak with trained counselors anytime",
+    //   icon: Phone,
+    //   color: "bg-red-100",
+    //   textColor: "text-red-600",
+    //   urgent: true,
+    // },
     {
       id: 1,
-      title: "24/7 Crisis Helpline",
-      description: "Speak with trained counselors anytime",
-      icon: Phone,
-      color: "bg-red-100",
-      textColor: "text-red-600",
-      urgent: true,
-    },
-    {
-      id: 2,
       title: "Anonymous Support Chat",
       description: "Chat in a safe, private, anonymous space",
       icon: MessageCircle,
@@ -85,7 +89,7 @@ export default function SafetyHubScreen() {
       action: "anonymous-chat",
     },
     {
-      id: 3,
+      id: 2,
       title: "GBV Survivor Forum",
       description: "Safe space for survivors to connect",
       icon: Heart,
@@ -95,7 +99,7 @@ export default function SafetyHubScreen() {
       action: "gbv-forum",
     },
     {
-      id: 4,
+      id: 3,
       title: "Legal Resources",
       description: "Access to legal aid and information",
       icon: FileText,
@@ -107,7 +111,7 @@ export default function SafetyHubScreen() {
 
     // ✅ NEW
     {
-      id: 5,
+      id: 4,
       title: "Find Nearest Help",
       description: "Locate nearby police stations, hospitals, and safe spaces",
       icon: Shield,
@@ -394,7 +398,7 @@ export default function SafetyHubScreen() {
           </View> */}
 
           {/* MENTAL HEALTH */}
-          <View style={tw`mt-4 p-6 rounded-2xl bg-purple-600`}>
+          {/* <View style={tw`mt-4 p-6 rounded-2xl bg-purple-600`}>
             <View style={tw`flex-row items-center gap-3 mb-4`}>
               <Headphones size={32} color="#fff" />
               <View>
@@ -418,7 +422,7 @@ export default function SafetyHubScreen() {
                 Connect with a Counselor
               </Text>
             </TouchableOpacity>
-          </View>
+          </View> */}
 
           {/* FOOTER */}
           <View style={tw`mt-6 p-4 bg-purple-50 rounded-xl`}>

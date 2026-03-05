@@ -293,7 +293,7 @@ exports.getGroups = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .select("name description avatar privacy chat members.user")
+      .select("name description avatar privacy chat members.user createdBy createdAt")
       .lean();
 
     const total = await Group.countDocuments(query);
@@ -310,7 +310,7 @@ exports.getGroups = async (req, res) => {
       _id: { $in: chatIds },
       participants: user.id,
     })
-      .select("lastSeq readState")
+      .select("lastSeq readState lastMessageAt")
       .lean();
 
     /* =====================================================
@@ -320,6 +320,25 @@ exports.getGroups = async (req, res) => {
     const chatMap = {};
     chats.forEach((c) => {
       chatMap[String(c._id)] = c;
+    });
+
+    /* =====================================================
+   SORT GROUPS BY CHAT ACTIVITY (LATEST FIRST)
+===================================================== */
+
+    groups.sort((a, b) => {
+      const chatA = chatMap[String(a.chat)];
+      const chatB = chatMap[String(b.chat)];
+
+      const timeA = chatA?.lastMessageAt
+        ? new Date(chatA.lastMessageAt).getTime()
+        : new Date(a.createdAt).getTime();
+
+      const timeB = chatB?.lastMessageAt
+        ? new Date(chatB.lastMessageAt).getTime()
+        : new Date(b.createdAt).getTime();
+
+      return timeB - timeA;
     });
 
     /* =====================================================
@@ -937,6 +956,30 @@ exports.sendGroupMessage = async (req, res) => {
     ============================== */
 
     chat.lastSeq = (chat.lastSeq || 0) + 1;
+
+    /* =============================
+       FIX: UPDATE SENDER READ STATE
+       Prevent unread messages for sender
+    ============================== */
+
+    chat.readState = chat.readState || [];
+
+    const senderState = chat.readState.find(
+      (r) => String(r.user) === String(user.id)
+    );
+
+    if (senderState) {
+      senderState.lastReadSeq = chat.lastSeq;
+    } else {
+      chat.readState.push({
+        user: user.id,
+        lastReadSeq: chat.lastSeq,
+      });
+    }
+
+    /* =============================
+       BUILD MESSAGE
+    ============================== */
 
     const message = {
       sender: user.id,

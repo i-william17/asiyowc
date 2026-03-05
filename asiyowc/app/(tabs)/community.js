@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useFocusEffect, useRouter } from "expo-router";
 import {
   ScrollView,
@@ -55,6 +55,203 @@ const getUserIdFromToken = (token) => {
   }
 };
 
+const safeText = (v) => String(v ?? "").toLowerCase().trim();
+
+/* =====================================================
+   SEARCH CREATE ROW COMPONENT - MOVED OUTSIDE
+===================================================== */
+const SearchCreateRow = React.memo(({
+  tab,
+  searchOpen,
+  searchQuery,
+  setSearchQuery,
+  openSearchForTab,
+  closeSearchForTab,
+  getCreateAction,
+  getCreateIcon,
+  getSearchPlaceholder,
+  groupsSearchInputRef,
+  chatsSearchInputRef,
+  voicesSearchInputRef,
+}) => {
+  const isOpen = !!searchOpen[tab];
+  const query = searchQuery[tab] ?? "";
+  const setQuery = (v) =>
+    setSearchQuery((p) => ({ ...p, [tab]: v }));
+
+  const onCreate = getCreateAction(tab);
+  const createIcon = getCreateIcon(tab);
+
+  const inputRef =
+    tab === "groups"
+      ? groupsSearchInputRef
+      : tab === "chats"
+        ? chatsSearchInputRef
+        : voicesSearchInputRef;
+
+  return (
+    <View style={tw`flex-row items-center mb-3`}>
+      {/* LEFT: Create row (full when closed, icon-only when open) */}
+      {isOpen ? (
+        <TouchableOpacity
+          onPress={onCreate}
+          activeOpacity={0.85}
+          style={tw`bg-white border border-gray-200 rounded-2xl px-3 py-3 mr-3`}
+        >
+          <View
+            style={tw`w-11 h-11 rounded-full bg-[#6A1B9A] items-center justify-center`}
+          >
+            <Ionicons name={createIcon} size={22} color="#fff" />
+          </View>
+        </TouchableOpacity>
+      ) : (
+        <>
+          {tab === "chats" ? (
+            <TouchableOpacity
+              onPress={onCreate}
+              activeOpacity={0.85}
+              style={tw`flex-1 flex-row items-center px-4 py-4 bg-white border border-gray-200 rounded-2xl`}
+            >
+              <View
+                style={tw`w-11 h-11 rounded-full bg-purple-600 items-center justify-center`}
+              >
+                <Ionicons name="add" size={22} color="#fff" />
+              </View>
+
+              <View style={tw`ml-4`}>
+                <Text style={{ fontFamily: "Poppins-SemiBold", fontSize: 15 }}>
+                  New chat
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 13,
+                    color: "#6B7280",
+                    marginTop: 2,
+                  }}
+                >
+                  Start a conversation
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : tab === "groups" ? (
+            <TouchableOpacity
+              onPress={onCreate}
+              activeOpacity={0.85}
+              style={tw`flex-1 flex-row items-center px-4 py-4 bg-white border border-gray-200 rounded-2xl`}
+            >
+              <View
+                style={tw`w-11 h-11 rounded-full bg-[#6A1B9A] items-center justify-center`}
+              >
+                <Ionicons name="add" size={22} color="#fff" />
+              </View>
+
+              <View style={tw`ml-4`}>
+                <Text style={{ fontFamily: "Poppins-SemiBold", fontSize: 15 }}>
+                  Create Group
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 13,
+                    color: "#6B7280",
+                    marginTop: 2,
+                  }}
+                >
+                  Start a new community space
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={onCreate}
+              activeOpacity={0.85}
+              style={tw`flex-1 flex-row items-center px-4 py-4 bg-white border border-gray-200 rounded-2xl`}
+            >
+              <View
+                style={tw`w-11 h-11 rounded-full bg-[#6A1B9A] items-center justify-center`}
+              >
+                <Ionicons name="mic" size={22} color="#fff" />
+              </View>
+
+              <View style={tw`ml-4`}>
+                <Text style={{ fontFamily: "Poppins-SemiBold", fontSize: 15 }}>
+                  Create room
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: "Poppins-Regular",
+                    fontSize: 13,
+                    color: "#6B7280",
+                    marginTop: 2,
+                  }}
+                >
+                  Start a live voice conversation
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
+        </>
+      )}
+
+      {/* MIDDLE: Search input (only when open) */}
+      {isOpen && (
+        <View style={tw`flex-1 mr-3`}>
+          <View
+            style={tw`flex-row items-center bg-white border border-gray-200 rounded-2xl px-4 py-3`}
+          >
+            <Ionicons name="search" size={18} color="#6B7280" />
+            <TextInput
+              ref={inputRef}
+              value={query}
+              onChangeText={setQuery}
+              placeholder={getSearchPlaceholder(tab)}
+              placeholderTextColor="#9CA3AF"
+              style={{
+                flex: 1,
+                marginLeft: 10,
+                paddingVertical: 6,
+                fontFamily: "Poppins-Regular",
+                color: "#111827",
+              }}
+              autoCorrect={false}
+              autoCapitalize="none"
+              importantForAutofill="no"
+              returnKeyType="search"
+              blurOnSubmit={false}
+              // Important: prevents strange web focus/blur cascades in some layouts
+              // while still allowing taps elsewhere to dismiss via normal UX.
+              onSubmitEditing={() => {
+                // keep focus; do nothing
+                try {
+                  inputRef.current?.focus?.();
+                } catch { }
+              }}
+            />
+          </View>
+        </View>
+      )}
+
+      {/* RIGHT: Far-right icon (search when closed, X when open) */}
+      <TouchableOpacity
+        onPress={() => {
+          if (isOpen) closeSearchForTab(tab);
+          else openSearchForTab(tab);
+        }}
+        activeOpacity={0.85}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        style={tw`bg-white border border-gray-200 rounded-2xl px-4 py-4`}
+      >
+        <Ionicons
+          name={isOpen ? "close" : "search"}
+          size={18}
+          color={isOpen ? "#111827" : "#6B7280"}
+        />
+      </TouchableOpacity>
+    </View>
+  );
+});
+
 export default function CommunityScreen() {
   const router = useRouter();
   const dispatch = useDispatch();
@@ -94,6 +291,72 @@ export default function CommunityScreen() {
   const minuteScrollRef = useRef(null);
 
   const fadeAnim = useState(new Animated.Value(0))[0];
+
+  /* =====================================================
+     ✅ FRONT-END SEARCH (ADDED ONLY)
+     - One search per tab (groups/chats/voices)
+     - Search icon at far right
+     - On open: create row collapses to icon-only (left) + input expands left
+     - X icon closes and reverts
+     - Keeps TextInput stable to avoid focus loss (no remount, no overlay stealing)
+  ===================================================== */
+  const [searchOpen, setSearchOpen] = useState({
+    groups: false,
+    chats: false,
+    voices: false,
+  });
+
+  const [searchQuery, setSearchQuery] = useState({
+    groups: "",
+    chats: "",
+    voices: "",
+  });
+
+  const groupsSearchInputRef = useRef(null);
+  const chatsSearchInputRef = useRef(null);
+  const voicesSearchInputRef = useRef(null);
+
+  const openSearchForTab = (tab) => {
+    setSearchOpen((p) => ({ ...p, [tab]: true }));
+    // Focus after layout; do NOT rely on autoFocus to prevent web focus quirks
+    setTimeout(() => {
+      const ref =
+        tab === "groups"
+          ? groupsSearchInputRef
+          : tab === "chats"
+            ? chatsSearchInputRef
+            : voicesSearchInputRef;
+
+      try {
+        ref.current?.focus?.();
+      } catch { }
+    }, 50);
+  };
+
+  const closeSearchForTab = (tab) => {
+    Keyboard.dismiss();
+    setSearchOpen((p) => ({ ...p, [tab]: false }));
+    setSearchQuery((p) => ({ ...p, [tab]: "" }));
+  };
+
+  const getCreateAction = useCallback((tab) => {
+    if (tab === "groups") return () => setShowCreateGroup(true);
+    if (tab === "chats") return () => router.push("/community/new-chat");
+    if (tab === "voices") return () => setShowCreateVoice(true);
+    return () => { };
+  }, [router]);
+
+  const getCreateIcon = useCallback((tab) => {
+    if (tab === "voices") return "mic";
+    return "add";
+  }, []);
+
+  const getSearchPlaceholder = useCallback((tab) => {
+    if (tab === "groups") return "Search groups…";
+    if (tab === "chats") return "Search messages…";
+    if (tab === "voices") return "Search rooms…";
+    return "Search…";
+  }, []);
 
   /* =====================================================
      ANIMATIONS
@@ -231,9 +494,7 @@ export default function CommunityScreen() {
         payload.endsAt = endsAt.toISOString();
       }
 
-      const result = await dispatch(
-        createVoiceRoom(payload)
-      ).unwrap();
+      const result = await dispatch(createVoiceRoom(payload)).unwrap();
 
       setVoiceTitle("");
       setStartDate(new Date());
@@ -244,7 +505,6 @@ export default function CommunityScreen() {
       if (result?._id) {
         router.push(`/community/voice/${result._id}`);
       }
-
     } catch (err) {
       console.log("Create voice error:", err);
     } finally {
@@ -275,7 +535,6 @@ export default function CommunityScreen() {
       setGroupDescription("");
       setGroupAvatar("");
       setGroupPrivacy("public");
-
     } catch (err) {
       console.log("Create group error:", err);
     } finally {
@@ -332,7 +591,9 @@ export default function CommunityScreen() {
       activeOpacity={0.85}
       style={tw`flex-row items-center px-4 py-4 mb-3 bg-white border border-gray-200 rounded-2xl`}
     >
-      <View style={tw`w-11 h-11 rounded-full bg-purple-600 items-center justify-center`}>
+      <View
+        style={tw`w-11 h-11 rounded-full bg-purple-600 items-center justify-center`}
+      >
         <Ionicons name="add" size={22} color="#fff" />
       </View>
 
@@ -363,7 +624,9 @@ export default function CommunityScreen() {
       activeOpacity={0.85}
       style={tw`flex-row items-center px-4 py-4 mb-3 bg-white border border-gray-200 rounded-2xl`}
     >
-      <View style={tw`w-11 h-11 rounded-full bg-[#6A1B9A] items-center justify-center`}>
+      <View
+        style={tw`w-11 h-11 rounded-full bg-[#6A1B9A] items-center justify-center`}
+      >
         <Ionicons name="mic" size={22} color="#fff" />
       </View>
 
@@ -394,7 +657,9 @@ export default function CommunityScreen() {
       activeOpacity={0.85}
       style={tw`flex-row items-center px-4 py-4 mb-3 bg-white border border-gray-200 rounded-2xl`}
     >
-      <View style={tw`w-11 h-11 rounded-full bg-[#6A1B9A] items-center justify-center`}>
+      <View
+        style={tw`w-11 h-11 rounded-full bg-[#6A1B9A] items-center justify-center`}
+      >
         <Ionicons name="add" size={22} color="#fff" />
       </View>
 
@@ -402,12 +667,14 @@ export default function CommunityScreen() {
         <Text style={{ fontFamily: "Poppins-SemiBold", fontSize: 15 }}>
           Create Group
         </Text>
-        <Text style={{
-          fontFamily: "Poppins-Regular",
-          fontSize: 13,
-          color: "#6B7280",
-          marginTop: 2,
-        }}>
+        <Text
+          style={{
+            fontFamily: "Poppins-Regular",
+            fontSize: 13,
+            color: "#6B7280",
+            marginTop: 2,
+          }}
+        >
           Start a new community space
         </Text>
       </View>
@@ -420,46 +687,74 @@ export default function CommunityScreen() {
   const renderList = () => {
     if (loadingList) return <LoadingBlock />;
 
-
     /* -------- GROUPS -------- */
     if (activeTab === "groups") {
+      const q = safeText(searchQuery.groups);
+      const filteredGroups = !q
+        ? groups
+        : (groups || []).filter((g) => {
+          const hay = `${safeText(g?.name)} ${safeText(g?.description)}`;
+          return hay.includes(q);
+        });
+
       return (
         <>
-          <CreateGroupRow />
+          {/* ✅ Replace only the top create row area with combined create+search row */}
+          <SearchCreateRow
+            tab="groups"
+            searchOpen={searchOpen}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            openSearchForTab={openSearchForTab}
+            closeSearchForTab={closeSearchForTab}
+            getCreateAction={getCreateAction}
+            getCreateIcon={getCreateIcon}
+            getSearchPlaceholder={getSearchPlaceholder}
+            groupsSearchInputRef={groupsSearchInputRef}
+            chatsSearchInputRef={chatsSearchInputRef}
+            voicesSearchInputRef={voicesSearchInputRef}
+          />
 
-          {!groups.length ? (
+          {!filteredGroups.length ? (
             <EmptyState
-              title="No groups yet"
-              subtitle="Join groups to connect with others."
+              title={q ? "No matching groups" : "No groups yet"}
+              subtitle={
+                q
+                  ? "Try a different search term."
+                  : "Join groups to connect with others."
+              }
             />
           ) : (
-            groups.map((g) => {
+            [...filteredGroups]
+              .sort((a, b) => {
+                const aTime = a.lastActivityAt || a.createdAt || 0;
+                const bTime = b.lastActivityAt || b.createdAt || 0;
+                return new Date(bTime) - new Date(aTime);
+              })
+              .map((g) => {
+                // 🔵 Calculate unread
+                const unreadCount = g.unreadCount || 0;
 
-
-
-              // 🔵 Calculate unread
-              const unreadCount = g.unreadCount || 0;
-
-              return (
-                <GroupCard
-                  key={g._id}
-                  id={g._id}
-                  name={g.name}
-                  description={g.description}
-                  avatar={g.avatar}
-                  membersCount={g.membersCount}
-                  isJoined={g.isMember}
-                  unreadCount={unreadCount}   // ⭐ PASS UNREAD
-                  onPress={(id) => {
-                    if (g.isMember && g.chatId) {
-                      router.push(`/community/group-chat/${g.chatId}`);
-                    } else {
-                      router.push(`/community/group/${id}`);
-                    }
-                  }}
-                />
-              );
-            })
+                return (
+                  <GroupCard
+                    key={g._id}
+                    id={g._id}
+                    name={g.name}
+                    description={g.description}
+                    avatar={g.avatar}
+                    membersCount={g.membersCount}
+                    isJoined={g.isMember}
+                    unreadCount={unreadCount} // ⭐ PASS UNREAD
+                    onPress={(id) => {
+                      if (g.isMember && g.chatId) {
+                        router.push(`/community/group-chat/${g.chatId}`);
+                      } else {
+                        router.push(`/community/group/${id}`);
+                      }
+                    }}
+                  />
+                );
+              })
           )}
         </>
       );
@@ -467,58 +762,111 @@ export default function CommunityScreen() {
 
     /* -------- CHATS -------- */
     if (activeTab === "chats") {
+      const q = safeText(searchQuery.chats);
+
+      // Keep original behavior (only dm) + filter by other user's name (and last message preview)
+      const dmChats = (chats || []).filter((c) => c?.type === "dm");
+
+      const filteredChats = !q
+        ? dmChats
+        : dmChats.filter((c) => {
+          const other = c.participants?.find(
+            (p) => String(p?._id) !== String(myId)
+          );
+          const otherName = safeText(other?.profile?.fullName);
+          const lastMsgText =
+            safeText(
+              [...(c.messages || [])]
+                .reverse()
+                .find(
+                  (m) =>
+                    !m.isDeletedForEveryone &&
+                    !(
+                      Array.isArray(m.deletedFor) &&
+                      m.deletedFor.map(String).includes(String(myId))
+                    )
+                )?.ciphertext
+            ) || "";
+
+          return `${otherName} ${lastMsgText}`.includes(q);
+        });
+
       return (
         <>
-          <CreateChatRow />
+          {/* ✅ Replace only the top create row area with combined create+search row */}
+          <SearchCreateRow
+            tab="chats"
+            searchOpen={searchOpen}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            openSearchForTab={openSearchForTab}
+            closeSearchForTab={closeSearchForTab}
+            getCreateAction={getCreateAction}
+            getCreateIcon={getCreateIcon}
+            getSearchPlaceholder={getSearchPlaceholder}
+            groupsSearchInputRef={groupsSearchInputRef}
+            chatsSearchInputRef={chatsSearchInputRef}
+            voicesSearchInputRef={voicesSearchInputRef}
+          />
 
-          {!chats || chats.length === 0 ? (
+          {!filteredChats || filteredChats.length === 0 ? (
             <EmptyState
-              title="No chats yet"
-              subtitle="Start a conversation with someone."
+              title={q ? "No matching chats" : "No chats yet"}
+              subtitle={
+                q
+                  ? "Try a different search term."
+                  : "Start a conversation with someone."
+              }
             />
           ) : (
-            chats.map((c) => {
-              if (c.type !== "dm") return null;
+            [...filteredChats]
+              .sort(
+                (a, b) =>
+                  new Date(b.lastMessageAt || 0) -
+                  new Date(a.lastMessageAt || 0)
+              )
+              .map((c) => {
+                if (c.type !== "dm") return null;
 
-              // Resolve receiver
-              const other = c.participants?.find(
-                (p) => String(p?._id) !== String(myId)
-              );
+                // Resolve receiver
+                const other = c.participants?.find(
+                  (p) => String(p?._id) !== String(myId)
+                );
 
-              if (!other) return null;
+                if (!other) return null;
 
-              // 🔵 UNREAD COUNT (SOURCE OF TRUTH)
-              const unreadCount = getUnreadCount(c, myId);
+                // 🔵 UNREAD COUNT (SOURCE OF TRUTH)
+                const unreadCount = getUnreadCount(c, myId);
 
-              // Last visible message
-              const lastMessage =
-                [...(c.messages || [])]
-                  .reverse()
-                  .find(
-                    (m) =>
-                      !m.isDeletedForEveryone &&
-                      !(
-                        Array.isArray(m.deletedFor) &&
-                        m.deletedFor.map(String).includes(String(myId))
-                      )
-                  )?.ciphertext || "Open conversation";
+                // Last visible message
+                const lastMessage =
+                  [...(c.messages || [])]
+                    .reverse()
+                    .find(
+                      (m) =>
+                        !m.isDeletedForEveryone &&
+                        !(
+                          Array.isArray(m.deletedFor) &&
+                          m.deletedFor.map(String).includes(String(myId))
+                        )
+                    )?.ciphertext || "Open conversation";
 
-              return (
-                <ChatCard
-                  key={c._id}
-                  id={c._id}
-                  title={other.profile?.fullName || "Chat"}
-                  avatar={
-                    other.profile?.avatar?.url ||
-                    other.profile?.avatar ||
-                    null
-                  }
-                  lastMessage={lastMessage}
-                  unreadCount={unreadCount}
-                  onPress={(id) => router.push(`/community/chat/${id}`)}
-                />
-              );
-            })
+                return (
+                  <ChatCard
+                    key={c._id}
+                    id={c._id}
+                    title={other.profile?.fullName || "Chat"}
+                    avatar={
+                      other.profile?.avatar?.url ||
+                      other.profile?.avatar ||
+                      null
+                    }
+                    lastMessage={lastMessage}
+                    unreadCount={unreadCount}
+                    onPress={(id) => router.push(`/community/chat/${id}`)}
+                  />
+                );
+              })
           )}
         </>
       );
@@ -526,17 +874,43 @@ export default function CommunityScreen() {
 
     /* -------- VOICES -------- */
     if (activeTab === "voices") {
+      const q = safeText(searchQuery.voices);
+
+      const filteredVoices = !q
+        ? voices
+        : (voices || []).filter((v) => {
+          const title = safeText(v?.title);
+          const host = safeText(v?.host?.profile?.fullName);
+          return `${title} ${host}`.includes(q);
+        });
+
       return (
         <>
-          <CreateVoiceRow />
+          {/* ✅ Replace only the top create row area with combined create+search row */}
+          <SearchCreateRow
+            tab="voices"
+            searchOpen={searchOpen}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            openSearchForTab={openSearchForTab}
+            closeSearchForTab={closeSearchForTab}
+            getCreateAction={getCreateAction}
+            getCreateIcon={getCreateIcon}
+            getSearchPlaceholder={getSearchPlaceholder}
+            groupsSearchInputRef={groupsSearchInputRef}
+            chatsSearchInputRef={chatsSearchInputRef}
+            voicesSearchInputRef={voicesSearchInputRef}
+          />
 
-          {!voices.length ? (
+          {!filteredVoices.length ? (
             <EmptyState
-              title="No rooms yet"
-              subtitle="Create or join a voice room."
+              title={q ? "No matching rooms" : "No rooms yet"}
+              subtitle={
+                q ? "Try a different search term." : "Create or join a voice room."
+              }
             />
           ) : (
-            voices.map((v) => (
+            filteredVoices.map((v) => (
               <VoiceCard
                 key={v._id}
                 id={v._id}
@@ -566,11 +940,10 @@ export default function CommunityScreen() {
       return hubs.map((hub) => (
         <HubCard
           key={hub._id}
-          hub={hub}                 // 🔥 pass full object
+          hub={hub} // 🔥 pass full object
           onPress={(id) => router.push(`/community/hub/${id}`)}
         />
       ));
-
     }
 
     return null;
@@ -583,6 +956,7 @@ export default function CommunityScreen() {
     <SafeAreaView style={tw`flex-1 bg-gray-50`}>
       <Animated.ScrollView
         style={{ opacity: fadeAnim }}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -625,7 +999,6 @@ export default function CommunityScreen() {
       {/* ================= CREATE VOICE MODAL (SINGLE-CONTROL TIME PICKER) ================= */}
       <Modal visible={showCreateVoice} animationType="slide" transparent>
         <View style={tw`flex-1 justify-end`}>
-
           {/* DARK OVERLAY - TAP TO DISMISS KEYBOARD OR CLOSE PICKER */}
           <TouchableWithoutFeedback
             onPress={() => {
@@ -645,7 +1018,6 @@ export default function CommunityScreen() {
             keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
           >
             <View style={tw`bg-white rounded-t-3xl px-6 pt-6 pb-10`}>
-
               {/* HEADER */}
               <View style={tw`flex-row justify-between items-center mb-6`}>
                 <Text style={{ fontFamily: "Poppins-SemiBold", fontSize: 18 }}>
@@ -674,7 +1046,7 @@ export default function CommunityScreen() {
                   onPress={() => setScheduleMode("now")}
                   style={[
                     tw`flex-1 py-3 rounded-xl items-center flex-row justify-center`,
-                    scheduleMode === "now" && tw`bg-white`
+                    scheduleMode === "now" && tw`bg-white`,
                   ]}
                 >
                   <MaterialIcons
@@ -697,7 +1069,7 @@ export default function CommunityScreen() {
                   onPress={() => setScheduleMode("schedule")}
                   style={[
                     tw`flex-1 py-3 rounded-xl items-center flex-row justify-center`,
-                    scheduleMode === "schedule" && tw`bg-white`
+                    scheduleMode === "schedule" && tw`bg-white`,
                   ]}
                 >
                   <MaterialIcons
@@ -708,7 +1080,8 @@ export default function CommunityScreen() {
                   <Text
                     style={{
                       marginLeft: 6,
-                      color: scheduleMode === "schedule" ? "#6A1B9A" : "#6B7280",
+                      color:
+                        scheduleMode === "schedule" ? "#6A1B9A" : "#6B7280",
                       fontFamily: "Poppins-Medium",
                     }}
                   >
@@ -718,9 +1091,7 @@ export default function CommunityScreen() {
               </View>
 
               {/* TITLE */}
-              <Text style={tw`mb-2 text-gray-700 font-poppins`}>
-                Room Title
-              </Text>
+              <Text style={tw`mb-2 text-gray-700 font-poppins`}>Room Title</Text>
               <TextInput
                 placeholder="Enter room title"
                 value={voiceTitle}
@@ -732,7 +1103,6 @@ export default function CommunityScreen() {
               {/* SCHEDULE MODE UI */}
               {scheduleMode === "schedule" && (
                 <>
-
                   {/* TIME PICKER */}
                   <Text style={tw`mb-2 text-gray-700 font-poppins`}>
                     Start Time
@@ -748,23 +1118,30 @@ export default function CommunityScreen() {
                         style={tw`border border-gray-300 rounded-2xl px-4 py-4 mb-2 flex-row justify-between items-center`}
                       >
                         <Text style={tw`font-poppins`}>
-                          {`${String(startDate.getHours()).padStart(2, "0")}:${String(
-                            startDate.getMinutes()
-                          ).padStart(2, "0")}`}
+                          {`${String(startDate.getHours()).padStart(
+                            2,
+                            "0"
+                          )}:${String(startDate.getMinutes()).padStart(2, "0")}`}
                         </Text>
-                        <MaterialIcons name="access-time" size={20} color="#6A1B9A" />
+                        <MaterialIcons
+                          name="access-time"
+                          size={20}
+                          color="#6A1B9A"
+                        />
                       </TouchableOpacity>
 
                       {showWebTimePicker && (
                         <Animated.View
                           style={{
                             opacity: pickerFadeAnim,
-                            transform: [{
-                              translateY: pickerFadeAnim.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [-10, 0]
-                              })
-                            }]
+                            transform: [
+                              {
+                                translateY: pickerFadeAnim.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [-10, 0],
+                                }),
+                              },
+                            ],
                           }}
                         >
                           <View
@@ -800,7 +1177,9 @@ export default function CommunityScreen() {
                                     paddingVertical: 8,
                                     alignItems: "center",
                                     backgroundColor:
-                                      tempHour === hour ? "#6A1B9A" : "transparent",
+                                      tempHour === hour
+                                        ? "#6A1B9A"
+                                        : "transparent",
                                     borderRadius: 8,
                                     marginBottom: 4,
                                   }}
@@ -808,7 +1187,9 @@ export default function CommunityScreen() {
                                   <Text
                                     style={{
                                       color:
-                                        tempHour === hour ? "white" : "#374151",
+                                        tempHour === hour
+                                          ? "white"
+                                          : "#374151",
                                       fontFamily: "Poppins-Medium",
                                     }}
                                   >
@@ -915,7 +1296,11 @@ export default function CommunityScreen() {
                           })}
                         </Text>
 
-                        <MaterialIcons name="access-time" size={20} color="#6A1B9A" />
+                        <MaterialIcons
+                          name="access-time"
+                          size={20}
+                          color="#6A1B9A"
+                        />
                       </TouchableOpacity>
 
                       {showTimePicker && (
@@ -933,9 +1318,7 @@ export default function CommunityScreen() {
                   )}
 
                   {/* DURATION SELECTOR */}
-                  <Text style={tw`mb-2 text-gray-700 font-poppins`}>
-                    Duration
-                  </Text>
+                  <Text style={tw`mb-2 text-gray-700 font-poppins`}>Duration</Text>
 
                   <View style={tw`flex-row flex-wrap mb-6`}>
                     {[30, 60, 90, 120].map((min) => (
@@ -946,13 +1329,12 @@ export default function CommunityScreen() {
                           tw`px-4 py-3 rounded-xl mr-3 mb-3`,
                           durationMinutes === min
                             ? tw`bg-[#6A1B9A]`
-                            : tw`bg-gray-200`
+                            : tw`bg-gray-200`,
                         ]}
                       >
                         <Text
                           style={{
-                            color:
-                              durationMinutes === min ? "#fff" : "#374151",
+                            color: durationMinutes === min ? "#fff" : "#374151",
                             fontFamily: "Poppins-Medium",
                           }}
                         >
@@ -966,11 +1348,7 @@ export default function CommunityScreen() {
 
               {/* INFO */}
               <View style={tw`flex-row items-start mb-6`}>
-                <MaterialIcons
-                  name="info-outline"
-                  size={18}
-                  color="#6B7280"
-                />
+                <MaterialIcons name="info-outline" size={18} color="#6B7280" />
                 <Text
                   style={{
                     fontFamily: "Poppins-Regular",
@@ -980,8 +1358,8 @@ export default function CommunityScreen() {
                     flex: 1,
                   }}
                 >
-                  Room opens 10 minutes before start time.
-                  After the end time passes, the session ends.
+                  Room opens 10 minutes before start time. After the end time
+                  passes, the session ends.
                 </Text>
               </View>
 
@@ -991,9 +1369,7 @@ export default function CommunityScreen() {
                 disabled={creatingVoice || !voiceTitle.trim()}
                 style={[
                   tw`py-4 rounded-2xl items-center`,
-                  voiceTitle.trim()
-                    ? tw`bg-[#6A1B9A]`
-                    : tw`bg-gray-300`
+                  voiceTitle.trim() ? tw`bg-[#6A1B9A]` : tw`bg-gray-300`,
                 ]}
               >
                 {creatingVoice ? (
@@ -1010,10 +1386,8 @@ export default function CommunityScreen() {
                   </Text>
                 )}
               </TouchableOpacity>
-
             </View>
           </KeyboardAvoidingView>
-
         </View>
       </Modal>
 
@@ -1021,7 +1395,6 @@ export default function CommunityScreen() {
       <Modal visible={showCreateGroup} animationType="slide" transparent>
         <View style={tw`flex-1 justify-end bg-black/40`}>
           <View style={tw`bg-white rounded-t-3xl px-6 pt-6 pb-10`}>
-
             <View style={tw`flex-row justify-between items-center mb-6`}>
               <Text style={{ fontFamily: "Poppins-SemiBold", fontSize: 18 }}>
                 Create Group
@@ -1078,7 +1451,7 @@ export default function CommunityScreen() {
                     tw`flex-1 py-3 rounded-xl items-center`,
                     groupPrivacy === type
                       ? tw`bg-[#6A1B9A]`
-                      : tw`bg-gray-200`
+                      : tw`bg-gray-200`,
                   ]}
                 >
                   <Text
@@ -1098,9 +1471,7 @@ export default function CommunityScreen() {
               disabled={!groupName.trim() || creatingGroup}
               style={[
                 tw`py-4 rounded-2xl items-center`,
-                groupName.trim()
-                  ? tw`bg-[#6A1B9A]`
-                  : tw`bg-gray-300`
+                groupName.trim() ? tw`bg-[#6A1B9A]` : tw`bg-gray-300`,
               ]}
             >
               {creatingGroup ? (
@@ -1111,11 +1482,9 @@ export default function CommunityScreen() {
                 </Text>
               )}
             </TouchableOpacity>
-
           </View>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 }

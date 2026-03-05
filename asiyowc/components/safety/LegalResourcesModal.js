@@ -1,4 +1,11 @@
-import { Modal, View, Text, ScrollView, TouchableOpacity } from "react-native";
+import {
+  Modal,
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  Platform,
+} from "react-native";
 import {
   Video,
   Link as LinkIcon,
@@ -9,6 +16,11 @@ import * as Linking from "expo-linking";
 import tw from "../../utils/tw";
 
 export default function LegalResourcesModal({ visible, onClose }) {
+
+  /* ============================================================
+     RESOURCES
+  ============================================================ */
+
   const resources = [
     {
       section: "Know Your Rights",
@@ -16,12 +28,12 @@ export default function LegalResourcesModal({ visible, onClose }) {
         "Understand laws that protect women and survivors of gender-based violence.",
       items: [
         {
-          title: "What To Do After Sexual Assault",
+          title: "Understanding Violence Against Women (WHO)",
           type: "article",
           url: "https://www.who.int/news-room/fact-sheets/detail/violence-against-women",
         },
         {
-          title: "Legal Steps After GBV (PDF)",
+          title: "UN Women Handbook on Police Responses to GBV (PDF)",
           type: "pdf",
           url: "https://www.unwomen.org/sites/default/files/Headquarters/Attachments/Sections/Library/Publications/2019/Handbook-on-effective-police-responses-to-violence-against-women-and-girls-en.pdf",
         },
@@ -29,7 +41,8 @@ export default function LegalResourcesModal({ visible, onClose }) {
     },
     {
       section: "Mental Health & Healing",
-      description: "Trauma-informed resources to support emotional recovery.",
+      description:
+        "Trauma-informed resources to support emotional recovery.",
       items: [
         {
           title: "Coping With Trauma After Abuse (Video)",
@@ -37,7 +50,7 @@ export default function LegalResourcesModal({ visible, onClose }) {
           url: "https://www.youtube.com/watch?v=Q0YMdL7Z5mE",
         },
         {
-          title: "Mental Health Support Guide (PDF)",
+          title: "WHO Mental Health Support Guide (PDF)",
           type: "pdf",
           url: "https://www.mhinnovation.net/sites/default/files/downloads/resource/Mental_Health_in_Humanitarian_Settings_WHO.pdf",
         },
@@ -49,12 +62,12 @@ export default function LegalResourcesModal({ visible, onClose }) {
         "Information on reproductive rights, consent, and post-assault care.",
       items: [
         {
-          title: "Emergency Contraception & Care",
+          title: "Sexual & Reproductive Health Rights (UNFPA)",
           type: "article",
           url: "https://www.unfpa.org/sexual-reproductive-health",
         },
         {
-          title: "Post-Assault Medical Care (Video)",
+          title: "Medical Care After Sexual Assault (Video)",
           type: "video",
           url: "https://www.youtube.com/watch?v=Y6GzY6lJc2g",
         },
@@ -62,10 +75,11 @@ export default function LegalResourcesModal({ visible, onClose }) {
     },
     {
       section: "Reporting & Protection",
-      description: "Steps you can take to report abuse and seek protection.",
+      description:
+        "Steps you can take to report abuse and seek protection.",
       items: [
         {
-          title: "How to Report GBV Safely",
+          title: "Ending Violence Against Women – UN Women",
           type: "article",
           url: "https://www.unwomen.org/en/what-we-do/ending-violence-against-women",
         },
@@ -78,10 +92,27 @@ export default function LegalResourcesModal({ visible, onClose }) {
     },
   ];
 
+  /* ============================================================
+     LINK HANDLER
+  ============================================================ */
+
   const openLink = async (url) => {
-    const supported = await Linking.canOpenURL(url);
-    if (supported) await Linking.openURL(url);
+    try {
+      const supported = await Linking.canOpenURL(url);
+
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        console.warn("Cannot open URL:", url);
+      }
+    } catch (err) {
+      console.error("Link open error:", err);
+    }
   };
+
+  /* ============================================================
+     ICON
+  ============================================================ */
 
   const getIcon = (type) => {
     if (type === "video") return <Video size={18} color="#7c3aed" />;
@@ -93,73 +124,122 @@ export default function LegalResourcesModal({ visible, onClose }) {
     onClose?.();
   };
 
+  /* ============================================================
+     RENDER
+  ============================================================ */
+
   return (
     <Modal
       visible={visible}
       animationType="slide"
+      presentationStyle="fullScreen"
       onRequestClose={handleClose}
     >
       <View style={tw`flex-1 bg-gray-50`}>
+
         {/* HEADER */}
+
         <View style={tw`bg-purple-700 pt-14 pb-6 rounded-b-3xl`}>
-          <TouchableOpacity
+
+          {/* CLOSE BUTTON */}
+
+          <Pressable
             onPress={handleClose}
-            hitSlop={12}
-            style={tw`absolute top-14 left-4 w-10 h-10 items-center justify-center bg-white/20 rounded-full`}
+            style={[
+              tw`absolute top-14 left-4 w-10 h-10 items-center justify-center rounded-full`,
+              { backgroundColor: "rgba(255,255,255,0.2)", zIndex: 10 },
+            ]}
           >
             <Ionicons name="close" size={24} color="#fff" />
-          </TouchableOpacity>
+          </Pressable>
 
           <View style={tw`px-16 items-center`}>
-            <Text style={[tw`text-white text-2xl text-center`, { fontFamily: "Poppins-SemiBold" }]}>
+            <Text
+              style={[
+                tw`text-white text-2xl text-center`,
+                { fontFamily: "Poppins-SemiBold" },
+              ]}
+            >
               Legal & Safety Resources
             </Text>
-            <Text style={[tw`text-purple-100 mt-2 text-center`, { fontFamily: "Poppins-Regular" }]}>
+
+            <Text
+              style={[
+                tw`text-purple-100 mt-2 text-center`,
+                { fontFamily: "Poppins-Regular" },
+              ]}
+            >
               Information to help you stay safe, informed, and supported.
             </Text>
           </View>
         </View>
 
         {/* CONTENT */}
-        <ScrollView contentContainerStyle={tw`px-4 pt-6 pb-8`}>
+
+        <ScrollView contentContainerStyle={tw`px-4 pt-6 pb-10`}>
+
           {resources.map((section, idx) => (
             <View key={idx} style={tw`mb-8`}>
-              <Text style={[tw`text-purple-900 text-lg`, { fontFamily: "Poppins-SemiBold" }]}>
+
+              <Text
+                style={[
+                  tw`text-purple-900 text-lg`,
+                  { fontFamily: "Poppins-SemiBold" },
+                ]}
+              >
                 {section.section}
               </Text>
-              <Text style={[tw`text-gray-600 mt-1 mb-4`, { fontFamily: "Poppins-Regular" }]}>
+
+              <Text
+                style={[
+                  tw`text-gray-600 mt-1 mb-4`,
+                  { fontFamily: "Poppins-Regular" },
+                ]}
+              >
                 {section.description}
               </Text>
 
               {section.items.map((item, i) => (
-                <TouchableOpacity
+                <Pressable
                   key={i}
                   onPress={() => openLink(item.url)}
-                  activeOpacity={0.8}
                   style={tw`flex-row items-center gap-3 p-4 mb-3 bg-white rounded-2xl border border-gray-100`}
                 >
+
                   <View style={tw`w-9 h-9 rounded-full bg-purple-100 items-center justify-center`}>
                     {getIcon(item.type)}
                   </View>
 
                   <Text
                     numberOfLines={2}
-                    style={[tw`flex-1 text-gray-800`, { fontFamily: "Poppins-Medium" }]}
+                    style={[
+                      tw`flex-1 text-gray-800`,
+                      { fontFamily: "Poppins-Medium" },
+                    ]}
                   >
                     {item.title}
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </View>
           ))}
 
+          {/* FOOTER */}
+
           <View style={tw`p-4 bg-purple-50 rounded-2xl`}>
-            <Text style={[tw`text-sm text-gray-700 text-center`, { fontFamily: "Poppins-Regular" }]}>
+            <Text
+              style={[
+                tw`text-sm text-gray-700 text-center`,
+                { fontFamily: "Poppins-Regular" },
+              ]}
+            >
               You are not required to take any action before you are ready.
               Support and help are always available.
             </Text>
           </View>
+
         </ScrollView>
+
       </View>
     </Modal>
   );

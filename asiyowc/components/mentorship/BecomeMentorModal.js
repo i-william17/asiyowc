@@ -12,6 +12,7 @@ import {
   Platform,
   Keyboard,
 } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 
 import { useDispatch, useSelector } from "react-redux";
 import { applyMentor } from "../../store/slices/mentorshipSlice";
@@ -104,6 +105,7 @@ const InputField = ({
   </View>
 );
 
+
 const StepHeader = ({ title, description, icon: Icon }) => (
   <View style={tw`mb-6`}>
     <View style={tw`flex-row items-center mb-3`}>
@@ -153,25 +155,30 @@ const StepIndicator = ({ step }) => {
 
           return (
             <View key={number} style={tw`items-center flex-1`}>
-              <View style={[
-                tw`w-12 h-12 rounded-full items-center justify-center mb-2 border-2`,
-                isActive && tw`bg-purple-100 border-purple-600`,
-                isCompleted && tw`bg-green-100 border-green-500`,
-                (!isActive && !isCompleted) && tw`bg-gray-100 border-gray-300`
-              ]}>
+              <View
+                style={[
+                  tw`w-12 h-12 rounded-full items-center justify-center mb-2 border-2`,
+                  isActive && { backgroundColor: "#FFD700", borderColor: "#FFD700" }, // GOLD
+                  isCompleted && tw`bg-green-100 border-green-500`,
+                  !isActive && !isCompleted && tw`bg-white/10 border-white/40`,
+                ]}
+              >
                 {isCompleted ? (
                   <CheckCircle size={20} color="#10B981" />
                 ) : (
-                  <Icon size={20} color={isActive ? "#7C3AED" : "#9CA3AF"} />
+                  <Icon
+                    size={20}
+                    color={isActive ? "#FFFFFF" : "#E5E7EB"}
+                  />
                 )}
               </View>
-              <Text style={[
-                tw`text-xs text-center`,
-                { fontFamily: 'Poppins-Medium' },
-                isActive ? tw`text-purple-700` :
-                  isCompleted ? tw`text-green-700` :
-                    tw`text-gray-500`
-              ]}>
+
+              <Text
+                style={[
+                  tw`text-xs text-center text-white`,
+                  { fontFamily: "Poppins-Medium" },
+                ]}
+              >
                 {label}
               </Text>
             </View>
@@ -180,10 +187,10 @@ const StepIndicator = ({ step }) => {
       </View>
 
       {/* Progress Bar */}
-      <View style={tw`h-1.5 bg-gray-100 rounded-full overflow-hidden`}>
+      <View style={tw`h-1.5 bg-white/20 rounded-full overflow-hidden`}>
         <LinearGradient
-          colors={['#7C3AED', '#8B5CF6']}
-          style={{ width: `${((step - 1) / 3) * 100}%`, height: '100%' }}
+          colors={["#FFD700", "#F59E0B"]} // GOLD GRADIENT
+          style={{ width: `${((step - 1) / 3) * 100}%`, height: "100%" }}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
         />
@@ -191,7 +198,6 @@ const StepIndicator = ({ step }) => {
     </View>
   );
 };
-
 // Helper Component for Review Step
 const InfoRow = ({ label, value, multiline = false }) => (
   <View style={tw`py-3 border-b border-gray-100`}>
@@ -207,12 +213,30 @@ const InfoRow = ({ label, value, multiline = false }) => (
   </View>
 );
 
+const DAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
 // 🔽 THEN
 export default function BecomeMentorModal({ visible, onClose }) {
   const dispatch = useDispatch();
   const { loading } = useSelector((s) => s.mentorship);
   const { token, user } = useSelector((s) => s.auth);
 
+  const [successVisible, setSuccessVisible] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [timePicker, setTimePicker] = useState({
+    visible: false,
+    day: null,
+    field: null, // from | to
+  });
   const [step, setStep] = useState(1);
   const [errors, setErrors] = useState({});
 
@@ -222,14 +246,32 @@ export default function BecomeMentorModal({ visible, onClose }) {
     specialty: "",
     experience: "",
     bio: "",
-    skills: "",
-    languages: "",
+    skills: [],
+    languages: [],
     pricePerSession: 0,
     verificationDocs: [],
+    availability: [],
   });
 
   const [docLabel, setDocLabel] = useState("");
   const [docUrl, setDocUrl] = useState("");
+  const [skillInput, setSkillInput] = useState("");
+  const [languageInput, setLanguageInput] = useState("");
+
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", () => {
+      setKeyboardVisible(true);
+    });
+
+    const hide = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   /* ============================================================
      VALIDATION
@@ -239,16 +281,31 @@ export default function BecomeMentorModal({ visible, onClose }) {
 
     switch (step) {
       case 1:
-        if (!form.title.trim()) newErrors.title = "Professional title is required";
-        if (!form.specialty.trim()) newErrors.specialty = "Specialty is required";
-        if (!form.experience.trim()) newErrors.experience = "Experience is required";
-        if (!form.bio.trim()) newErrors.bio = "Bio is required";
-        if (form.bio.trim().length < 50) newErrors.bio = "Bio should be at least 50 characters";
+        if (!form.title.trim())
+          newErrors.title = "Professional title is required";
+
+        if (!form.specialty.trim())
+          newErrors.specialty = "Specialty is required";
+
+        if (!form.experience || Number(form.experience) <= 0)
+          newErrors.experience = "Experience is required";
+
+        if (!form.bio.trim())
+          newErrors.bio = "Bio is required";
+
+        if (form.bio.trim().length < 50)
+          newErrors.bio = "Bio should be at least 50 characters";
+
         break;
       case 2:
-        if (!form.skills.trim()) newErrors.skills = "At least one skill is required";
-        if (!form.languages.trim()) newErrors.languages = "At least one language is required";
-        if (!form.pricePerSession || form.pricePerSession < 0) newErrors.pricePerSession = "Valid price is required";
+        if (form.skills.length === 0)
+          newErrors.skills = "At least one skill is required";
+
+        if (form.languages.length === 0)
+          newErrors.languages = "At least one language is required";
+        if (form.pricePerSession < 0) {
+          newErrors.pricePerSession = "Price cannot be negative";
+        }
         break;
       case 3:
         if (form.verificationDocs.length === 0) {
@@ -284,9 +341,13 @@ export default function BecomeMentorModal({ visible, onClose }) {
 
   const update = (key, value) => {
     setForm((f) => ({ ...f, [key]: value }));
-    // Clear error when user starts typing
+
     if (errors[key]) {
       setErrors(prev => ({ ...prev, [key]: null }));
+    }
+
+    if (submitError) {
+      setSubmitError("");
     }
   };
 
@@ -321,23 +382,111 @@ export default function BecomeMentorModal({ visible, onClose }) {
   };
 
   const removeDoc = (index) => {
-    Alert.alert(
-      "Remove Document",
-      "Are you sure you want to remove this verification document?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: () => {
-            setForm((f) => ({
-              ...f,
-              verificationDocs: f.verificationDocs.filter((_, i) => i !== index),
-            }));
-          }
-        }
-      ]
-    );
+    setForm((f) => ({
+      ...f,
+      verificationDocs: f.verificationDocs.filter((_, i) => i !== index),
+    }));
+  };
+
+  const addSkill = () => {
+    const value = skillInput.trim();
+
+    if (!value) return;
+
+    if (form.skills.some(s => s.toLowerCase() === value.toLowerCase())) {
+      Alert.alert("Duplicate skill", "This skill has already been added.");
+      return;
+    }
+
+    setForm((f) => ({
+      ...f,
+      skills: [...f.skills, value],
+    }));
+
+    setSkillInput("");
+    Keyboard.dismiss();
+  };
+
+  const removeSkill = (index) => {
+    setForm((f) => ({
+      ...f,
+      skills: f.skills.filter((_, i) => i !== index),
+    }));
+  };
+
+  const addLanguage = () => {
+    const value = languageInput.trim();
+
+    if (!value) return;
+
+    if (form.languages.includes(value)) {
+      Alert.alert("Duplicate language", "Language already added.");
+      return;
+    }
+
+    setForm((f) => ({
+      ...f,
+      languages: [...f.languages, value],
+    }));
+
+    setLanguageInput("");
+    Keyboard.dismiss();
+  };
+
+  const removeLanguage = (index) => {
+    setForm((f) => ({
+      ...f,
+      languages: f.languages.filter((_, i) => i !== index),
+    }));
+  };
+
+  const toggleDay = (day) => {
+    const exists = form.availability.find((a) => a.day === day);
+
+    if (exists) {
+      setForm((f) => ({
+        ...f,
+        availability: f.availability.filter((a) => a.day !== day),
+      }));
+    } else {
+      setForm((f) => ({
+        ...f,
+        availability: [
+          ...f.availability,
+          { day, from: "09:00", to: "17:00" },
+        ],
+      }));
+    }
+  };
+
+  const updateTime = (day, field, value) => {
+    setForm((f) => ({
+      ...f,
+      availability: f.availability.map((a) =>
+        a.day === day ? { ...a, [field]: value } : a
+      ),
+    }));
+  };
+
+  const openTimePicker = (day, field) => {
+    setTimePicker({
+      visible: true,
+      day,
+      field,
+    });
+  };
+
+  const onTimeSelected = (event, selectedDate) => {
+    if (!selectedDate) {
+      setTimePicker({ visible: false, day: null, field: null });
+      return;
+    }
+
+    const time = selectedDate.toTimeString().slice(0, 5); // HH:MM
+
+    updateTime(timePicker.day, timePicker.field, time);
+
+    setTimePicker({ visible: false, day: null, field: null });
   };
 
   /* ============================================================
@@ -345,10 +494,11 @@ export default function BecomeMentorModal({ visible, onClose }) {
   ============================================================ */
   const submit = async () => {
     try {
+      setSubmitError("");
+
       const applicationData = {
         ...form,
-        skills: form.skills.split(",").map((s) => s.trim()).filter(s => s),
-        languages: form.languages.split(",").map((l) => l.trim()).filter(l => l),
+        experience: Number(form.experience) || 0,
       };
 
       await dispatch(
@@ -358,34 +508,11 @@ export default function BecomeMentorModal({ visible, onClose }) {
         })
       ).unwrap();
 
-      Alert.alert(
-        "Application Received",
-        "Thank you for applying to become a mentor. Our team will review your application and contact you within 3-5 business days.",
-        [
-          {
-            text: "Done",
-            onPress: () => {
-              onClose();
-              setStep(1);
-              setForm({
-                name: user?.profile?.fullName || "",
-                title: "",
-                specialty: "",
-                experience: "",
-                bio: "",
-                skills: "",
-                languages: "",
-                pricePerSession: 0,
-                verificationDocs: [],
-              });
-            }
-          }
-        ]
-      );
+      setSuccessVisible(true);
+
     } catch (err) {
-      Alert.alert(
-        "Submission Error",
-        err.message || "Unable to submit application. Please check your connection and try again."
+      setSubmitError(
+        err?.message || "Unable to submit application. Please try again."
       );
     }
   };
@@ -422,10 +549,14 @@ export default function BecomeMentorModal({ visible, onClose }) {
       <InputField
         icon={Clock}
         placeholder="Years of Experience"
-        value={form.experience}
-        onChangeText={(v) => update("experience", v)}
+        value={String(form.experience)}
+        onChangeText={(v) => {
+          const num = parseInt(v.replace(/[^0-9]/g, ""), 10);
+          update("experience", isNaN(num) ? "" : num);
+        }}
         error={errors.experience}
-        maxLength={30}
+        keyboardType="numeric"
+        maxLength={2}
       />
 
       <InputField
@@ -454,31 +585,179 @@ export default function BecomeMentorModal({ visible, onClose }) {
         icon={Briefcase}
       />
 
-      <InputField
-        icon={BookOpen}
-        placeholder="Skills & Expertise"
-        value={form.skills}
-        onChangeText={(v) => update("skills", v)}
-        error={errors.skills}
-        multiline={true}
-        maxLength={200}
-      />
+      <View style={tw`mb-6`}>
+        <Text style={[tw`text-gray-800 mb-2`, { fontFamily: "Poppins-Medium" }]}>
+          Skills *
+        </Text>
 
-      <InputField
-        icon={Globe}
-        placeholder="Languages You Speak"
-        value={form.languages}
-        onChangeText={(v) => update("languages", v)}
-        error={errors.languages}
-        multiline={true}
-        maxLength={100}
-      />
+        <View style={tw`flex-row`}>
+          <TextInput
+            value={skillInput}
+            onChangeText={setSkillInput}
+            placeholder="Add a skill"
+            style={[
+              tw`flex-1 bg-white border border-gray-300 rounded-l-lg px-4 py-3`,
+              { fontFamily: "Poppins-Regular" },
+            ]}
+          />
+
+          <TouchableOpacity
+            onPress={addSkill}
+            style={tw`bg-purple-600 px-4 justify-center rounded-r-lg`}
+          >
+            <Plus size={18} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={tw`flex-row flex-wrap mt-3`}>
+          {form.skills.map((skill, index) => (
+            <View
+              key={index}
+              style={tw`flex-row items-center bg-purple-100 px-3 py-1.5 rounded-full mr-2 mb-2`}
+            >
+              <Text style={[tw`text-purple-800 text-sm`, { fontFamily: "Poppins-Medium" }]}>
+                {skill}
+              </Text>
+
+              <TouchableOpacity onPress={() => removeSkill(index)}>
+                <X size={14} color="#6B21A8" />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+
+        {errors.skills && (
+          <Text style={tw`text-red-500 text-xs mt-1`}>
+            {errors.skills}
+          </Text>
+        )}
+      </View>
+
+      <View style={tw`mb-6`}>
+        <Text style={[tw`text-gray-800 mb-2`, { fontFamily: "Poppins-Medium" }]}>
+          Languages *
+        </Text>
+
+        <View style={tw`flex-row`}>
+          <TextInput
+            value={languageInput}
+            onChangeText={setLanguageInput}
+            placeholder="Add a language"
+            style={[
+              tw`flex-1 bg-white border border-gray-300 rounded-l-lg px-4 py-3`,
+              { fontFamily: "Poppins-Regular" },
+            ]}
+          />
+
+          <TouchableOpacity
+            onPress={addLanguage}
+            style={tw`bg-purple-600 px-4 justify-center rounded-r-lg`}
+          >
+            <Plus size={18} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={tw`flex-row flex-wrap mt-3`}>
+          {form.languages.map((lang, index) => (
+            <View
+              key={index}
+              style={tw`flex-row items-center bg-green-100 px-3 py-1.5 rounded-full mr-2 mb-2`}
+            >
+              <Text style={[tw`text-green-800 text-sm`, { fontFamily: "Poppins-Medium" }]}>
+                {lang}
+              </Text>
+
+              <TouchableOpacity onPress={() => removeLanguage(index)}>
+                <X size={14} color="#166534" />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+
+        {errors.languages && (
+          <Text style={tw`text-red-500 text-xs mt-1`}>
+            {errors.languages}
+          </Text>
+        )}
+      </View>
+
+      <View style={tw`mb-6`}>
+        <Text style={[tw`text-gray-800 mb-3`, { fontFamily: "Poppins-Medium" }]}>
+          Weekly Availability
+        </Text>
+
+        {DAYS.map((day) => {
+          const selected = form.availability.find((a) => a.day === day);
+
+          return (
+            <View key={day} style={tw`flex-row items-center mb-3`}>
+
+              {/* Day toggle */}
+              <TouchableOpacity
+                onPress={() => toggleDay(day)}
+                style={[
+                  tw`w-24 py-2 rounded-lg items-center mr-3`,
+                  selected ? tw`bg-purple-600` : tw`bg-gray-200`,
+                ]}
+              >
+                <Text
+                  style={[
+                    { fontFamily: "Poppins-Medium" },
+                    selected ? tw`text-white` : tw`text-gray-700`,
+                  ]}
+                >
+                  {day.slice(0, 3)}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Time pickers */}
+              {selected && (
+                <View style={tw`flex-row items-center`}>
+
+                  {Platform.OS === "web" ? (
+                    <TextInput
+                      type="time"
+                      value={selected.from}
+                      onChangeText={(v) => updateTime(day, "from", v)}
+                      style={tw`bg-white border border-gray-300 rounded px-3 py-2 w-24 mr-2`}
+                    />
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => openTimePicker(day, "from")}
+                      style={tw`bg-white border border-gray-300 rounded px-3 py-2 w-24 mr-2`}
+                    >
+                      <Text style={{ fontFamily: "Poppins-Regular" }}>
+                        {selected.from}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <Text style={tw`mx-1`}>—</Text>
+
+                  <TouchableOpacity
+                    onPress={() => openTimePicker(day, "to")}
+                    style={tw`bg-white border border-gray-300 rounded px-3 py-2 w-24 ml-2`}
+                  >
+                    <Text style={{ fontFamily: "Poppins-Regular" }}>
+                      {selected.to}
+                    </Text>
+                  </TouchableOpacity>
+
+                </View>
+              )}
+            </View>
+          );
+        })}
+      </View>
 
       <InputField
         icon={DollarSign}
         placeholder="Session Price (KES)"
         value={String(form.pricePerSession)}
-        onChangeText={(v) => update("pricePerSession", Number(v) || 0)}
+        onChangeText={(v) => {
+          const price = parseInt(v.replace(/[^0-9]/g, ""), 10);
+          update("pricePerSession", isNaN(price) ? 0 : price);
+        }}
         error={errors.pricePerSession}
         keyboardType="numeric"
         maxLength={10}
@@ -634,6 +913,7 @@ export default function BecomeMentorModal({ visible, onClose }) {
           <InfoRow label="Professional Title" value={form.title} />
           <InfoRow label="Specialty" value={form.specialty} />
           <InfoRow label="Experience" value={form.experience} />
+
         </View>
 
         {/* Expertise Section */}
@@ -646,9 +926,24 @@ export default function BecomeMentorModal({ visible, onClose }) {
               Expertise Details
             </Text>
           </View>
-          <InfoRow label="Skills" value={form.skills} multiline />
-          <InfoRow label="Languages" value={form.languages} />
-          <InfoRow label="Session Price" value={`KES ${form.pricePerSession.toLocaleString()}`} />
+          <InfoRow label="Skills" value={form.skills.join(", ")} multiline />
+          <InfoRow label="Languages" value={form.languages.join(", ")} />
+          <InfoRow label="Session Price" value={
+            form.pricePerSession === 0
+              ? "Free Session"
+              : `KES ${form.pricePerSession.toLocaleString()}`
+          } />
+          <InfoRow
+            label="Availability"
+            value={
+              form.availability.length
+                ? form.availability
+                  .map((a) => `${a.day}: ${a.from} - ${a.to}`)
+                  .join(", ")
+                : "Not set"
+            }
+            multiline
+          />
         </View>
 
         {/* Documents Section */}
@@ -687,12 +982,87 @@ export default function BecomeMentorModal({ visible, onClose }) {
               What happens next?
             </Text>
             <Text style={[tw`text-gray-600 text-sm`, { fontFamily: 'Poppins-Regular' }]}>
-              Our team reviews all applications within 3-5 business days. You'll receive an email notification once your application status is updated. You can track progress in your dashboard.
+              Our team reviews all applications within 3-5 business days. You can only make one application at a time, so please ensure all your information is accurate before submitting.
             </Text>
           </View>
         </View>
       </View>
     </>
+  );
+
+  const SuccessModal = () => (
+    <Modal
+      visible={successVisible}
+      transparent
+      animationType="fade"
+    >
+      <View style={tw`flex-1 bg-black/40 items-center justify-center px-6`}>
+
+        <View style={tw`bg-white rounded-2xl p-6 w-full max-w-md`}>
+
+          {/* Success Icon */}
+          <View style={tw`items-center mb-4`}>
+            <View style={tw`w-16 h-16 bg-green-100 rounded-full items-center justify-center`}>
+              <CheckCircle size={36} color="#10B981" />
+            </View>
+          </View>
+
+          {/* Title */}
+          <Text
+            style={[
+              tw`text-center text-xl text-gray-900 mb-2`,
+              { fontFamily: "Poppins-Bold" },
+            ]}
+          >
+            Application Submitted
+          </Text>
+
+          {/* Message */}
+          <Text
+            style={[
+              tw`text-center text-gray-600 mb-6`,
+              { fontFamily: "Poppins-Regular" },
+            ]}
+          >
+            Your mentor application has been received successfully.{" "}
+            <Text style={{ fontFamily: "Poppins-SemiBold" }}>
+              Our team will review it within 3–5 business days.
+            </Text>
+          </Text>
+          {/* Button */}
+          <TouchableOpacity
+            style={tw`bg-purple-600 py-3 rounded-lg`}
+            onPress={() => {
+              setSuccessVisible(false);
+              onClose();
+              setStep(1);
+
+              setForm({
+                name: user?.profile?.fullName || "",
+                title: "",
+                specialty: "",
+                experience: "",
+                bio: "",
+                skills: [],
+                languages: [],
+                pricePerSession: 0,
+                verificationDocs: [],
+                availability: [],
+              });
+            }}
+          >
+            <Text
+              style={[
+                tw`text-center text-white`,
+                { fontFamily: "Poppins-SemiBold" },
+              ]}
+            >
+              Done
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
 
   return (
@@ -707,32 +1077,33 @@ export default function BecomeMentorModal({ visible, onClose }) {
       >
         <View style={tw`flex-1 bg-gray-50`}>
           {/* Header */}
-          <LinearGradient
-            colors={["#4C1D95", "#5B21B6"]}
-            style={tw`pt-12 pb-6 px-5`}
-          >
-            <View style={tw`flex-row items-center justify-between mb-4`}>
-              <View>
-                <Text style={[tw`text-white text-2xl`, { fontFamily: 'Poppins-Bold' }]}>
-                  Become a Mentor
-                </Text>
-                <Text style={[tw`text-white/80 text-sm mt-1`, { fontFamily: 'Poppins-Regular' }]}>
-                  Step {step} of 4 • Complete all sections
-                </Text>
+          {!keyboardVisible && (
+            <LinearGradient
+              colors={["#4C1D95", "#5B21B6"]}
+              style={tw`pt-12 pb-6 px-5`}
+            >
+              <View style={tw`flex-row items-center justify-between mb-4`}>
+                <View>
+                  <Text style={[tw`text-white text-2xl`, { fontFamily: 'Poppins-Bold' }]}>
+                    Become a Mentor
+                  </Text>
+                  <Text style={[tw`text-white/80 text-sm mt-1`, { fontFamily: 'Poppins-Regular' }]}>
+                    Step {step} of 4 • Complete all sections
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  onPress={onClose}
+                  style={tw`w-10 h-10 rounded-full bg-white/10 items-center justify-center`}
+                  activeOpacity={0.7}
+                >
+                  <X size={22} color="#FFFFFF" />
+                </TouchableOpacity>
               </View>
 
-              <TouchableOpacity
-                onPress={onClose}
-                style={tw`w-10 h-10 rounded-full bg-white/10 items-center justify-center`}
-                activeOpacity={0.7}
-              >
-                <X size={22} color="#FFFFFF" />
-              </TouchableOpacity>
-            </View>
-
-            <StepIndicator step={step} />
-          </LinearGradient>
-
+              <StepIndicator step={step} />
+            </LinearGradient>
+          )}
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={tw`pb-28 px-5 pt-6`}
@@ -745,6 +1116,19 @@ export default function BecomeMentorModal({ visible, onClose }) {
 
           {/* Navigation Footer - Always Visible */}
           <View style={tw`absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-5 py-4`}>
+            {submitError ? (
+              <View style={tw`mb-3 flex-row items-center bg-red-50 border border-red-200 rounded-lg px-3 py-2`}>
+                <AlertCircle size={16} color="#EF4444" />
+                <Text
+                  style={[
+                    tw`text-red-700 text-sm ml-2`,
+                    { fontFamily: "Poppins-Regular" },
+                  ]}
+                >
+                  {submitError}
+                </Text>
+              </View>
+            ) : null}
             <View style={tw`flex-row items-center justify-between`}>
               <View style={tw`flex-1`}>
                 {step > 1 && (
@@ -775,7 +1159,10 @@ export default function BecomeMentorModal({ visible, onClose }) {
                   </TouchableOpacity>
                 ) : (
                   <TouchableOpacity
-                    style={tw`flex-row items-center justify-center py-3.5 px-4 bg-green-600 rounded-lg`}
+                    style={[
+                      tw`flex-row items-center justify-center py-3.5 px-4 rounded-lg`,
+                      loading ? tw`bg-gray-400` : tw`bg-green-600`
+                    ]}
                     onPress={submit}
                     activeOpacity={0.8}
                     disabled={loading}
@@ -801,6 +1188,17 @@ export default function BecomeMentorModal({ visible, onClose }) {
           </View>
         </View>
       </KeyboardAvoidingView>
+      <SuccessModal />
+
+      {timePicker.visible && Platform.OS !== "web" && (
+        <DateTimePicker
+          value={new Date(`1970-01-01T${selected.from}:00`)}
+          mode="time"
+          is24Hour={true}
+          display="default"
+          onChange={onTimeSelected}
+        />
+      )}
     </Modal>
   );
 }

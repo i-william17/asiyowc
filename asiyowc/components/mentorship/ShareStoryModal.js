@@ -147,11 +147,6 @@ export default function ShareStoryModal({
       newErrors.content = `Story exceeds ${MAX_CHARS} character limit`;
     }
 
-    // Optional image validation
-    if (image.trim() && !IMAGE_URL_REGEX.test(image.trim())) {
-      newErrors.image = "Please enter a valid image URL (jpg, png, webp, gif, bmp)";
-    }
-
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -166,28 +161,30 @@ export default function ShareStoryModal({
     setErrors({});
   };
 
-  const handleClose = () => {
-    if (title.trim() || content.trim()) {
-      Alert.alert(
-        "Unsaved Changes",
-        "You have unsaved changes. Are you sure you want to close?",
-        [
-          {
-            text: "Discard",
-            style: "destructive",
-            onPress: () => {
-              reset();
-              onClose();
-            }
+const handleClose = () => {
+  Keyboard.dismiss();
+
+  if (title.trim() || content.trim()) {
+    Alert.alert(
+      "Unsaved Changes",
+      "You have unsaved changes. Are you sure you want to close?",
+      [
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: () => {
+            reset();
+            onClose();
           },
-          { text: "Cancel", style: "cancel" },
-        ]
-      );
-    } else {
-      reset();
-      onClose();
-    }
-  };
+        },
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
+  } else {
+    reset();
+    onClose();
+  }
+};
 
   const submit = async () => {
     // Prevent double submit
@@ -224,18 +221,12 @@ export default function ShareStoryModal({
       // Success feedback
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
+      reset();
+      onClose();
+
       Alert.alert(
         "🎉 Success!",
-        "Your inspiring story has been shared with the community.",
-        [
-          {
-            text: "Continue",
-            onPress: () => {
-              reset();
-              onClose();
-            }
-          }
-        ]
+        "Your inspiring story has been shared with the community."
       );
     } catch (err) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);

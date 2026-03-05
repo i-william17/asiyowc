@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, ActivityIndicator } from "react-native";
+import { View, Text, ActivityIndicator, Platform } from "react-native";
 import { useDispatch, useSelector } from "react-redux";
 import { useRouter } from "expo-router";
 import tw from "../../utils/tw";
@@ -78,7 +78,13 @@ export default function GBVForumScreen() {
                 disableInvites
                 disableLeaving
                 hideGroupInfo
-                onLeave={() => router.replace("/more/safetyhub")}
+                onLeave={() => {
+                    if (Platform.OS === "web") {
+                        router.replace("/more/safetyhub");
+                    } else {
+                        router.back();
+                    }
+                }}
             />
 
             {/* SAFETY NOTICE */}

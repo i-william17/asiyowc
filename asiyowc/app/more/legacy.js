@@ -17,8 +17,13 @@ import {
     Scale,
     GraduationCap,
     Sparkles,
+    Users,
+    Globe,
+    Award,
+    BookOpen
 } from "lucide-react-native";
 import { useRouter } from "expo-router";
+import { Platform } from "react-native";
 
 import { LinearGradient } from 'expo-linear-gradient';
 import { useDispatch, useSelector } from "react-redux";
@@ -60,86 +65,145 @@ const { width: screenWidth } = Dimensions.get('window');
 
 // ========== LegacyListHeader Component ==========
 const LegacyListHeader = React.memo(({ onSharePress, onBackPress }) => {
-    // Achievement data for carousel
+
     const achievementsData = useMemo(() => [
         {
             id: '1',
-            title: "First Woman MP",
-            description: "Elected in Karachuonyo Constituency, breaking gender barriers in Kenyan politics",
-            icon: Landmark,
-            year: "1979",
-            image: "https://images.unsplash.com/photo-1574267432553-4b4628081c31?w=800"
+            title: "Maendeleo Ya Wanawake Leader",
+            description: "First African president of Kenya’s largest women’s movement, mobilizing women nationwide.",
+            icon: Users,
+            year: "1958",
+            image: "https://images.unsplash.com/photo-1551836026-d5c2e0c49b61?w=800"
         },
         {
             id: '2',
-            title: "Women's Rights Champion",
-            description: "Led the fight for gender equality and women's land ownership rights",
-            icon: Scale,
-            year: "1980s",
-            image: "https://images.unsplash.com/photo-1551135049-8a33b2fb9af3?w=800"
+            title: "Prison Service Pioneer",
+            description: "Became the first African woman Senior Superintendent of Women’s Prisons after independence.",
+            icon: Landmark,
+            year: "1963",
+            image: "https://images.unsplash.com/photo-1574267432553-4b4628081c31?w=800"
         },
         {
             id: '3',
-            title: "Education Advocate",
-            description: "Empowered thousands of girls through education scholarships and programs",
-            icon: GraduationCap,
-            year: "1990s",
-            image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800"
+            title: "Member of Parliament",
+            description: "Elected MP for Karachuonyo, becoming a powerful voice for women in Kenyan politics.",
+            icon: Scale,
+            year: "1980",
+            image: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?w=800"
         },
         {
             id: '4',
-            title: "Foundation Founder",
-            description: "Established Asiyo Foundation to continue empowering women across Africa",
-            icon: Sparkles,
-            year: "2007",
-            image: "https://images.unsplash.com/photo-1551836026-d5c2e0c49b61?w=800"
+            title: "Global Women’s Advocate",
+            description: "Served internationally with UNIFEM advancing women’s leadership and equality.",
+            icon: Globe,
+            year: "Late 1980s",
+            image: "https://images.unsplash.com/photo-1529336953121-a0d7e4c9a5a2?w=800"
         },
+        {
+            id: '5',
+            title: "Affirmative Action Champion",
+            description: "Introduced the historic motion calling for 33% women representation in leadership.",
+            icon: Award,
+            year: "1997",
+            image: "https://images.unsplash.com/photo-1551135049-8a33b2fb9af3?w=800"
+        },
+        {
+            id: '6',
+            title: "Constitution Reform Leader",
+            description: "Helped shape Kenya’s constitutional reforms and gender equality policies.",
+            icon: BookOpen,
+            year: "2000s",
+            image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800"
+        }
     ], []);
 
-    // Timeline data for carousel
     const timelineData = useMemo(() => [
         {
             id: '1',
-            year: "1936",
-            event: "Born in Nyanza, Kenya",
-            description: "The beginning of a remarkable journey dedicated to women's empowerment",
-            image: "https://images.unsplash.com/photo-1574267432553-4b4628081c31?w=800",
+            year: "1932",
+            event: "Born in Kendu Bay",
+            description: "Born in Nyanza, beginning a life devoted to public service and women’s empowerment.",
+            image: "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=800",
             featured: true
         },
         {
             id: '2',
-            year: "1979",
-            event: "Elected to Parliament",
-            description: "First woman elected in Karachuonyo Constituency, making history",
-            image: "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=800"
+            year: "1958",
+            event: "Maendeleo Ya Wanawake Leadership",
+            description: "Led Kenya’s largest women’s movement, empowering thousands nationwide.",
+            image: "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=800"
         },
         {
             id: '3',
-            year: "1980s–1990s",
-            event: "Women's Rights Crusade",
-            description: "Led national campaigns for gender equality and land rights legislation",
-            image: "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w-800"
+            year: "1963",
+            event: "Civil Service Pioneer",
+            description: "Broke barriers as the first African woman senior prison superintendent.",
+            image: "https://images.unsplash.com/photo-1574267432553-4b4628081c31?w=800"
         },
         {
             id: '4',
-            year: "2007",
-            event: "Founded Asiyo Foundation",
-            description: "Established a legacy institution for women's empowerment across Africa",
-            image: "https://res.cloudinary.com/ducckh8ip/image/upload/v1767077909/asiyo-app/u74vjvhuhs5fcydcivlw.jpg"
+            year: "1978",
+            event: "Global Leadership Training",
+            description: "Joined the CEDPA global women’s leadership program shaping her international advocacy.",
+            image: "https://images.unsplash.com/photo-1529336953121-a0d7e4c9a5a2?w=800"
         },
         {
             id: '5',
-            year: "2020",
-            event: "Legacy Continues",
-            description: "Her impact inspires new generations of African women leaders",
-            image: "https://res.cloudinary.com/ducckh8ip/image/upload/v1765555502/WhatsApp_Image_2025-09-11_at_18.54.09_d2731ab3_tue2xs.jpg"
+            year: "1980",
+            event: "Elected Member of Parliament",
+            description: "Entered parliament representing Karachuonyo and championing women’s rights.",
+            image: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?w=800"
         },
+        {
+            id: '6',
+            year: "1992",
+            event: "Return to Parliament",
+            description: "Re-elected during Kenya’s multi-party transition to continue her advocacy.",
+            image: "https://images.unsplash.com/photo-1551836026-d5c2e0c49b61?w=800"
+        },
+        {
+            id: '7',
+            year: "1997",
+            event: "Affirmative Action Motion",
+            description: "Proposed the landmark motion calling for 33% women representation.",
+            image: "https://images.unsplash.com/photo-1551135049-8a33b2fb9af3?w=800"
+        },
+        {
+            id: '8',
+            year: "2001",
+            event: "Constitution Review Commission",
+            description: "Helped shape Kenya’s democratic and gender equality reforms.",
+            image: "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=800"
+        },
+        {
+            id: '9',
+            year: "2000s",
+            event: "First Woman Luo Elder",
+            description: "Recognized as the first woman Luo elder, breaking cultural leadership barriers.",
+            image: "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=800"
+        },
+        {
+            id: '10',
+            year: "2025",
+            event: "A Lasting Legacy",
+            description: "Passed away at 92, leaving a transformative legacy in women’s leadership.",
+            image: "https://res.cloudinary.com/ducckh8ip/image/upload/v1765555502/WhatsApp_Image_2025-09-11_at_18.54.09_d2731ab3_tue2xs.jpg"
+        }
     ], []);
 
     return (
         <>
             <HeaderSection onBackPress={onBackPress} />
-            <View style={tw`px-5 pb-8`}>
+            <View
+                style={[
+                    tw`px-5 pb-8`,
+                    Platform.OS === "web" && {
+                        maxWidth: 1100,
+                        alignSelf: "center",
+                        width: "100%",
+                    },
+                ]}
+            >
                 <HeroSection />
 
                 {/* Key Achievements Carousel */}
@@ -295,6 +359,10 @@ export default function LegacyArchiveScreen() {
     // Tribute submission handler
     const handleSubmitTribute = useCallback(async () => {
         if (!newTribute.message.trim()) return;
+        const WORD_LIMIT = 250;
+        const wordCount = newTribute.message.trim().split(/\s+/).length;
+
+        if (wordCount > WORD_LIMIT) return;
         if (lastSubmitted && Date.now() - lastSubmitted < 60000) return;
 
         try {
@@ -324,8 +392,6 @@ export default function LegacyArchiveScreen() {
             setEditingTribute(null);
             setLastSubmitted(Date.now());
             setModalVisible(false);
-
-            if (wordCount > WORD_LIMIT) return;
 
         } catch (err) {
             console.error("Tribute submit failed", err);
@@ -420,7 +486,7 @@ export default function LegacyArchiveScreen() {
         {
             id: '1',
             title: "Mama Phoebe Asiyo.",
-            description: "She has been one of the faces if women in Kenyan politics.She enjoyed a colourful political career and was an outspoken advocate for women's rights in the country for more than two decades... Phoebe Asiyo was elected to parliament in 1992 as one of the six women who made it to Kenyans first multi party parliament after involvement in the  campaign for democracy.",
+            description: "She has been one of the faces of women in Kenyan politics.She enjoyed a colourful political career and was an outspoken advocate for women's rights in the country for more than two decades... Phoebe Asiyo was elected to parliament in 1992 as one of the six women who made it to Kenyans first multi party parliament after involvement in the  campaign for democracy.",
             date: "Sunday Live, CITIZEN TV, 2010",
             duration: "3:49",
             views: 45000,
@@ -460,7 +526,15 @@ export default function LegacyArchiveScreen() {
             const canShowLess = visibleTributes > 5;
 
             return (
-                <>
+                <View
+                    style={[
+                        Platform.OS === "web" && {
+                            maxWidth: 900,
+                            width: "100%",
+                            alignSelf: "center",
+                        },
+                    ]}
+                >
                     <TributeItem
                         tribute={item}
                         currentUserId={user?._id}
@@ -521,7 +595,7 @@ export default function LegacyArchiveScreen() {
                             )}
                         </View>
                     )}
-                </>
+                </View>
             );
         },
         [
@@ -542,7 +616,16 @@ export default function LegacyArchiveScreen() {
 
     // List Footer Component
     const ListFooterComponent = useMemo(() => (
-        <View style={tw`px-5 pb-8`}>
+        <View
+            style={[
+                tw`px-5 pb-8`,
+                Platform.OS === "web" && {
+                    maxWidth: 1100,
+                    alignSelf: "center",
+                    width: "100%",
+                },
+            ]}
+        >
             {/* Inspiring Words */}
             <Text style={[tw`text-2xl mt-8 mb-6`, { fontFamily: "Poppins-Bold" }]}>
                 <Text style={tw`text-purple-900`}>Inspiring </Text>

@@ -84,28 +84,125 @@ exports.getMentorStories = async (req, res) => {
 ===================================================== */
 
 /* POST /api/mentors/apply */
+/* ===================================================== */
 exports.applyMentor = async (req, res) => {
   try {
-    const exists = await Mentor.findOne({ user: req.user.id });
+    const userId = req.user.id;
 
-    if (exists) {
-      return res.status(400).json({ message: "Already applied as mentor" });
+    const {
+      name,
+      title,
+      specialty,
+      bio,
+      skills,
+      languages,
+      experience,
+      availability,
+      pricePerSession,
+      verificationDocs
+    } = req.body;
+
+    /* ================= VALIDATION ================= */
+
+    if (!name || !title || !specialty || !bio) {
+      return res.status(400).json({
+        message: "Name, title, specialty and bio are required",
+      });
     }
 
+    if (!skills || !Array.isArray(skills) || skills.length === 0) {
+      return res.status(400).json({
+        message: "At least one skill is required",
+      });
+    }
+
+    if (!languages || !Array.isArray(languages) || languages.length === 0) {
+      return res.status(400).json({
+        message: "At least one language is required",
+      });
+    }
+
+    if (verificationDocs && verificationDocs.length > 5) {
+      return res.status(400).json({
+        message: "Maximum 5 verification documents allowed",
+      });
+    }
+
+    /* ================= CHECK EXISTING ================= */
+
+    const existingMentor = await Mentor.findOne({ user: userId });
+
+    if (existingMentor) {
+
+      if (
+        existingMentor.verificationStatus === "pending" ||
+        existingMentor.verificationStatus === "approved"
+      ) {
+        return res.status(400).json({
+          message: "You have already applied as a mentor",
+        });
+      }
+
+      /* ===== REAPPLY (REJECTED) ===== */
+
+      if (existingMentor.verificationStatus === "rejected") {
+
+        existingMentor.name = name;
+        existingMentor.title = title;
+        existingMentor.specialty = specialty;
+        existingMentor.bio = bio;
+        existingMentor.skills = skills;
+        existingMentor.languages = languages;
+        existingMentor.experience = experience || 0;
+
+        existingMentor.pricePerSession = pricePerSession || 0;
+        existingMentor.availability = availability || [];
+        existingMentor.verificationDocs = verificationDocs || [];
+
+        existingMentor.verificationStatus = "pending";
+        existingMentor.verified = false;
+        existingMentor.rejectionReason = null;
+
+        await existingMentor.save();
+
+        return res.json({
+          message: "Mentor application resubmitted",
+          mentor: existingMentor,
+        });
+      }
+    }
+
+    /* ================= CREATE NEW ================= */
+
     const mentor = await Mentor.create({
-      user: req.user.id,
-      ...req.body,
+      user: userId,
+      name,
+      title,
+      specialty,
+      bio,
+      skills,
+      languages,
+      experience: experience || 0,
+      pricePerSession: pricePerSession || 0,
+      availability: availability || [],
+      verificationDocs: verificationDocs || [],
       verified: false,
       verificationStatus: "pending",
     });
 
-    res.status(201).json(mentor);
+    res.status(201).json({
+      message: "Mentor application submitted successfully",
+      mentor,
+    });
+
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Apply mentor error:", err);
+
+    res.status(500).json({
+      message: err.message
+    });
   }
 };
-
-
 
 /* GET /api/mentors/me/profile */
 exports.getMyMentorProfile = async (req, res) => {
@@ -191,25 +288,56 @@ exports.removeVerificationDoc = async (req, res) => {
 ===================================================== */
 
 /* POST /api/mentors/me/stories */
+/* =====================================================
+   POST /api/mentors/me/stories
+===================================================== */
 exports.addStory = async (req, res) => {
   try {
+
+    console.log("Incoming story payload:", req.body);
+
     const mentor = await Mentor.findOne({ user: req.user.id });
 
-    if (mentor.stories.length >= 10) {
-      return res.status(400).json({ message: "Maximum 10 stories allowed" });
+    if (!mentor) {
+      return res.status(404).json({
+        message: "Mentor profile not found",
+      });
     }
 
-    mentor.stories.push(req.body);
+    const { title, content, image } = req.body;
+
+    if (!title || !content) {
+      return res.status(400).json({
+        message: "Title and content are required",
+      });
+    }
+
+    if (mentor.stories.length >= 10) {
+      return res.status(400).json({
+        message: "Maximum 10 stories allowed",
+      });
+    }
+
+    const story = {
+      title: title.trim(),
+      content: content.trim(),
+      image: image || "",
+    };
+
+    mentor.stories.push(story);
 
     await mentor.save();
 
-    res.json(mentor.stories);
+    res.status(201).json({
+      message: "Story added successfully",
+      story: mentor.stories[mentor.stories.length - 1],
+    });
+
   } catch (err) {
+    console.error("Add story error:", err);
     res.status(500).json({ message: err.message });
   }
 };
-
-
 
 /* PUT /api/mentors/me/stories/:storyId */
 exports.updateStory = async (req, res) => {
