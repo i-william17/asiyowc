@@ -1,13 +1,32 @@
+#PRODUCTION
+
 port: 7880
 
 bind_addresses:
   - 0.0.0.0
 
 rtc:
-  use_external_ip: false
-
+  use_external_ip: true
+  udp_port_range_start: 50000
+  udp_port_range_end: 50010
+  
 keys:
   asiyoVoiceKey: a3f94b6d8c2e4f9a0b7c3d5e6f8a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7
+
+#DEVELOPMENT
+
+# port: 7880
+
+# bind_addresses:
+#   - 0.0.0.0
+
+# rtc:
+#   use_external_ip: false
+
+# keys:
+#   asiyoVoiceKey: a3f94b6d8c2e4f9a0b7c3d5e6f8a9b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7
+
+#IGNORE
 
 # port: 7880
 
