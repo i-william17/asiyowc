@@ -27,19 +27,17 @@ export const connectSocket = (token) => {
   }
 
   // server = http://ip:5000/api  → socket = http://ip:5000
-  const baseUrl = server.replace("/api", "");
+  // const baseUrl = server.replace("/api", "");
+  const baseUrl = "https://api.asiyoconnect.com";
 
   socket = io(baseUrl, {
-    transports: ["websocket"], // 🔒 stable + faster
+    path: "/socket.io/",
+    transports: ["websocket", "polling"],
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 800,
     reconnectionDelayMax: 4000,
-
-    auth: {
-      token, // backend socketAuth middleware reads this
-    },
-
+    auth: { token },
     autoConnect: true,
     forceNew: false,
   });

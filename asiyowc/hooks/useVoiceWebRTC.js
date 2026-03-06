@@ -167,20 +167,50 @@ export function useVoiceWebRTC({
   /* =====================================================
      ✅ FIX: Move resolveLiveKitUrl OUTSIDE the effect (near ensureMicPermission)
   ===================================================== */
+  // const resolveLiveKitUrl = useCallback(() => {
+  //   try {
+  //     // server = "http://192.168.1.112:5000/api"
+  //     const base = server.replace("/api", "");
+  //     const url = new URL(base);
+
+  //     const host = url.hostname;
+
+  //     // LiveKit runs on same machine at port 7880
+  //     return `ws://${host}:7880`;
+  //   } catch (e) {
+  //     log("error", "❌ Failed to resolve LiveKit URL", e);
+  //     return "ws://192.168.1.112:7880"; // safe fallback
+  //   }
+  // }, []);
+
+  // const resolveLiveKitUrl = useCallback(() => {
+  //   try {
+  //     const base = server.replace("/api", "");
+  //     const url = new URL(base);
+
+  //     const host = url.hostname || "api.asiyoconnect.com";
+
+  //     // If running locally use ws, otherwise wss
+  //     const protocol =
+  //       host === "localhost" || host.startsWith("192.") ? "ws" : "wss";
+
+  //     return `${protocol}://${host}:7880`;
+  //   } catch (e) {
+  //     log("error", "❌ Failed to resolve LiveKit URL", e);
+
+  //     // safe fallback
+  //     return "ws://192.168.1.112:7880";
+  //   }
+  // }, []);
+
   const resolveLiveKitUrl = useCallback(() => {
-    try {
-      // server = "http://192.168.1.112:5000/api"
-      const base = server.replace("/api", "");
-      const url = new URL(base);
-
-      const host = url.hostname;
-
-      // LiveKit runs on same machine at port 7880
-      return `ws://${host}:7880`;
-    } catch (e) {
-      log("error", "❌ Failed to resolve LiveKit URL", e);
-      return "ws://192.168.1.112:7880"; // safe fallback
+    if (__DEV__) {
+      // Local development
+      return "ws://192.168.1.112:7880";
     }
+
+    // Production
+    return "wss://api.asiyoconnect.com:7880";
   }, []);
 
   /* =====================================================

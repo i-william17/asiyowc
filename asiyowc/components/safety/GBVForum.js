@@ -29,25 +29,39 @@ export default function GBVForumScreen() {
     useEffect(() => {
         let mounted = true;
 
-        (async () => {
+        const init = async () => {
             try {
-                // 1️⃣ Try joining (works if NOT a member)
-                const res = await dispatch(joinGroup(GBV_GROUP_ID)).unwrap();
+                /* 1️⃣ Ensure membership */
+                const res = await dispatch(
+                    joinGroup({ groupId: GBV_GROUP_ID })
+                ).unwrap();
 
                 if (!mounted) return;
 
-                if (res?.chatId) {
-                    setChatId(res.chatId);
-                    dispatch(fetchGroupConversation(res.chatId));
-                    return;
+                const resolvedChatId = res?.chatId;
+
+                if (resolvedChatId) {
+                    setChatId(resolvedChatId);
+
+                    /* 2️⃣ Fetch conversation AFTER join */
+                    dispatch(fetchGroupConversation(resolvedChatId));
                 }
+
             } catch (err) {
-                // 2️⃣ Already a member → fetch group
-                await dispatch(fetchGroupDetail(GBV_GROUP_ID)).unwrap();
+
+                /* already member → load group */
+                const group = await dispatch(fetchGroupDetail(GBV_GROUP_ID)).unwrap();
 
                 if (!mounted) return;
+
+                if (group?.chatId) {
+                    setChatId(group.chatId);
+                    await dispatch(fetchGroupConversation(group.chatId));
+                }
             }
-        })();
+        };
+
+        init();
 
         return () => {
             mounted = false;
@@ -57,12 +71,12 @@ export default function GBVForumScreen() {
     /* =====================================================
        WHEN GROUP IS LOADED, EXTRACT CHAT ID
     ===================================================== */
-    useEffect(() => {
-        if (selectedGroup?.chatId && !chatId) {
-            setChatId(selectedGroup.chatId);
-            dispatch(fetchGroupConversation(selectedGroup.chatId));
-        }
-    }, [selectedGroup]);
+    // useEffect(() => {
+    //     if (selectedGroup?.chatId && !chatId) {
+    //         setChatId(selectedGroup.chatId);
+    //         dispatch(fetchGroupConversation(selectedGroup.chatId));
+    //     }
+    // }, [selectedGroup]);
 
     /* =====================================================
        RENDER CHAT

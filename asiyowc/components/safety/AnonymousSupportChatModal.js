@@ -12,6 +12,7 @@ import {
   Modal,
   Alert,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSelector } from "react-redux";
@@ -66,7 +67,12 @@ export default function AnonymousSupportChatModal({ onClose }) {
         updated[updated.length - 1].content += chunk;
         return updated;
       });
+
+      requestAnimationFrame(() =>
+        scrollRef.current?.scrollToEnd({ animated: true })
+      );
     },
+
     onDone: () => {
       setLoading(false);
       requestAnimationFrame(() =>
@@ -158,21 +164,21 @@ export default function AnonymousSupportChatModal({ onClose }) {
     };
   }, [loading]);
 
-  useEffect(() => {
-    return () => {
-      // 🔥 Runs when modal unmounts
-      clearAiMemory();
-      setMessages([
-        {
-          role: "assistant",
-          content:
-            "This is a safe, anonymous space. You can share freely. I’m here to listen.",
-        },
-      ]);
-      setInput("");
-      setLoading(false);
-    };
-  }, [clearAiMemory]);
+  // useEffect(() => {
+  //   return () => {
+  //     // 🔥 Runs when modal unmounts
+  //     clearAiMemory();
+  //     setMessages([
+  //       {
+  //         role: "assistant",
+  //         content:
+  //           "This is a safe, anonymous space. You can share freely. I’m here to listen.",
+  //       },
+  //     ]);
+  //     setInput("");
+  //     setLoading(false);
+  //   };
+  // }, []);
 
 
   /* ================= SEND MESSAGE ================= */

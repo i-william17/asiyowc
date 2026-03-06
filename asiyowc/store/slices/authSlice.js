@@ -14,8 +14,21 @@ export const fetchAuthenticatedUser = createAsyncThunk(
       const response = await authService.getMe(token);
 
       return response.data;
+
     } catch (error) {
+
+      const status = error?.response?.status;
+
       console.error("🔴 /me error:", error.response?.data || error.message);
+
+      // 🔥 If token invalid → clear storage
+      if (status === 401) {
+        console.warn("⚠️ Token invalid or expired. Clearing stored token.");
+
+        await secureStore.removeItem('token');
+        await secureStore.removeItem('userId');
+      }
+
       return rejectWithValue(error.response?.data || error.message);
     }
   }
@@ -313,10 +326,9 @@ const authSlice = createSlice({
 
       .addCase(fetchAuthenticatedUser.rejected, (state) => {
         state.user = null;
+        state.token = null;
         state.isAuthenticated = false;
-        // ❌ DO NOT clear token here
       })
-
       .addCase(fetchGamification.fulfilled, (state, action) => {
         // keep existing user, just patch gamification
         if (!state.user) state.user = {};

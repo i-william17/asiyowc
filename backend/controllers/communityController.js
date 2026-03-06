@@ -446,10 +446,10 @@ exports.joinGroup = async (req, res) => {
   try {
     const userId = req.user?.id || req.user?._id;
     const { groupId } = req.params;
-    const { inviteToken } = req.body;
+    const { inviteToken } = req.body || {};
 
     if (!mongoose.Types.ObjectId.isValid(groupId)) {
-      return bad(res, 'Invalid group ID');
+      return bad(res, "Invalid group ID");
     }
 
     const group = await Group.findOne({
@@ -457,26 +457,45 @@ exports.joinGroup = async (req, res) => {
       isRemoved: false
     });
 
-    if (!group) return notFound(res, 'Group not found');
+    if (!group) return notFound(res, "Group not found");
+
+    /* =====================================
+       CHECK MEMBERSHIP
+    ===================================== */
 
     const alreadyMember = group.members.some(
       (m) => String(m.user) === String(userId)
     );
 
+    /* =====================================
+       IF ALREADY MEMBER → JUST RETURN CHAT
+    ===================================== */
+
     if (alreadyMember) {
-      return bad(res, 'User already a member of this group');
+      const chat = await ensureGroupChatExistsAndSynced(group);
+
+      return ok(res, {
+        _id: group._id,
+        isMember: true,
+        chatId: chat._id,
+        membersCount: group.members.length
+      });
     }
 
-    // 🔐 PRIVATE GROUP: require valid invite token
-    if (group.privacy === 'private') {
+    /* =====================================
+       PRIVATE GROUP TOKEN CHECK
+       (PUBLIC + SYSTEM SKIP)
+    ===================================== */
+
+    if (group.privacy === "private") {
       if (!inviteToken) {
-        return forbidden(res, 'Invite link required to join this private group');
+        return forbidden(res, "Invite link required to join this private group");
       }
 
       const tokenHash = crypto
-        .createHash('sha256')
+        .createHash("sha256")
         .update(String(inviteToken))
-        .digest('hex');
+        .digest("hex");
 
       const validToken = (group.inviteTokens || []).find(
         (t) =>
@@ -485,9 +504,13 @@ exports.joinGroup = async (req, res) => {
       );
 
       if (!validToken) {
-        return forbidden(res, 'Invalid or expired invite link');
+        return forbidden(res, "Invalid or expired invite link");
       }
     }
+
+    /* =====================================
+       ADD USER TO GROUP
+    ===================================== */
 
     group.members.push({
       user: userId,
@@ -496,7 +519,21 @@ exports.joinGroup = async (req, res) => {
 
     await group.save();
 
+    /* =====================================
+       ENSURE CHAT + SYNC PARTICIPANTS
+    ===================================== */
+
     const chat = await ensureGroupChatExistsAndSynced(group);
+
+    /* =====================================
+       ADD USER TO CHAT PARTICIPANTS
+       (important for access control)
+    ===================================== */
+
+    await Chat.updateOne(
+      { _id: chat._id },
+      { $addToSet: { participants: userId } }
+    );
 
     return ok(res, {
       _id: group._id,
@@ -504,8 +541,9 @@ exports.joinGroup = async (req, res) => {
       chatId: chat._id,
       membersCount: group.members.length
     });
+
   } catch (err) {
-    console.error('[joinGroup]', err);
+    console.error("[joinGroup]", err);
     return serverError(res, err);
   }
 };

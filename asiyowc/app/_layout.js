@@ -93,25 +93,25 @@ function AppShell() {
     })();
   }, []);
 
-  // useEffect(() => {
-  //   (async () => {
-  //     try {
-  //       const result = await dispatch(restoreToken()).unwrap();
-  //       const { token } = result;
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await dispatch(restoreToken()).unwrap();
+        const { token } = result;
 
-  //       if (!token) {
-  //         router.replace("/onboarding");
-  //         return;
-  //       }
+        if (!token) {
+          router.replace("/onboarding");
+          return;
+        }
 
-  //       router.replace("/(tabs)");
-  //     } catch (e) {
-  //       router.replace("/onboarding");
-  //     } finally {
-  //       SplashScreen.hideAsync().catch(() => {});
-  //     }
-  //   })();
-  // }, []);
+        router.replace("/(tabs)");
+      } catch (e) {
+        router.replace("/onboarding");
+      } finally {
+        SplashScreen.hideAsync().catch(() => {});
+      }
+    })();
+  }, []);
 
   /* ================= FETCH AUTHENTICATED USER ================= */
   useEffect(() => {
