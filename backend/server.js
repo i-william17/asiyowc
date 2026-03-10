@@ -9,7 +9,7 @@ const compression = require('compression');
 const http = require('http');
 const { Server } = require('socket.io');
 require('express-async-errors');
-const dotenv = require('dotenv');
+require('dotenv').config();
 const path = require('path');
 const { initRedis } = require('./config/redis.js');
 const runVoiceReminderCron = require('./utils/voiceReminder');
@@ -46,8 +46,6 @@ const { responseFormatter } = require('./middleware/responseFormatter.js');
 
 // Socket handlers
 // const { setupSocket } = require('./socket/index.js'); // ❗ KEPT COMMENTED
-
-dotenv.config();
 
 const app = express();
 
@@ -88,6 +86,9 @@ const allowedOrigins = [
   "http://192.168.1.112:7880",
   "http://192.168.1.112:5000",
   "http://192.168.1.112:8081",
+  "https://asiyoconnect.com",
+  "https://api.asiyoconnect.com",
+  "https://www.asiyoconnect.com",
   "https://www.asiyowc.com",
   "https://www.asiyowc.onrender.com",
   "https://thumbnails-delivers-really-mathematical.trycloudflare.com"
