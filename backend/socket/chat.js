@@ -333,8 +333,8 @@ module.exports = (io, socket) => {
           null;
 
         const preview =
-          payload.type === "text"
-            ? "New message"
+          message.type === "text"
+            ? (message.ciphertext || "New message").slice(0, 100)
             : "New message";
 
         const recipientsIds = chat.participants
@@ -497,6 +497,57 @@ module.exports = (io, socket) => {
       }
 
       /* =====================
+   PUSH (REACTION)
+===================== */
+
+      try {
+
+        const senderId = normalizeId(populatedMsg.sender?._id);
+        const senderName =
+          socket.user?.profile?.fullName ||
+          "Someone";
+
+        const senderAvatar =
+          socket.user?.profile?.avatar?.url ||
+          null;
+
+        const preview =
+          populatedMsg.ciphertext
+            ? populatedMsg.ciphertext.slice(0, 80)
+            : "Reacted to your message";
+
+        const recipientsIds = [senderId]
+          .filter(Boolean)
+          .filter(uid => String(uid) !== String(userId))
+          .filter(uid => !isOnline(uid));
+
+        if (recipientsIds.length) {
+
+          const recipients = await User.find({
+            _id: { $in: recipientsIds }
+          }).select("pushTokens");
+
+          await Promise.all(
+            recipients.map((recipient) =>
+              sendExpoPushToUser(recipient, {
+                title: `${senderName} reacted ${emoji || ""}`,
+                body: preview,
+                data: {
+                  type: "community",
+                  chatId: String(cid),
+                  fullName: senderName,
+                  avatar: senderAvatar
+                }
+              })
+            )
+          );
+        }
+
+      } catch (err) {
+        console.error("Reaction push failed", err);
+      }
+
+      /* =====================
          REALTIME UPDATE
       ===================== */
 
@@ -588,6 +639,89 @@ module.exports = (io, socket) => {
         chatId: cid,
         pinnedMessage: newPinned,
       });
+
+      /* =====================
+   PUSH (PIN MESSAGE)
+===================== */
+
+      try {
+
+        if (!newPinned) return;
+
+        const msg = await Message.findById(newPinned)
+          .populate("sender", "profile.fullName profile.avatar")
+          .lean();
+
+        if (!msg) return;
+
+        const chat = await Chat.findById(cid)
+          .select("participants encryptedChatKey chatKeyIv chatKeyTag");
+
+        if (!chat) return;
+
+        let preview = "Pinned a message";
+
+        try {
+
+          const chatKey = decryptChatKey(
+            chat.encryptedChatKey,
+            chat.chatKeyIv,
+            chat.chatKeyTag
+          );
+
+          if (msg.ciphertext && msg.iv && msg.tag) {
+            preview = decryptWithKey(
+              msg.ciphertext,
+              msg.iv,
+              msg.tag,
+              chatKey
+            ).slice(0, 80);
+          }
+
+        } catch (e) {
+          preview = "Pinned a message";
+        }
+
+        const senderName =
+          socket.user?.profile?.fullName ||
+          "Someone";
+
+        const senderAvatar =
+          socket.user?.profile?.avatar?.url ||
+          null;
+
+        const recipientsIds = chat.participants
+          .map(normalizeId)
+          .filter(Boolean)
+          .filter(uid => String(uid) !== String(userId))
+          .filter(uid => !isOnline(uid));
+
+        if (recipientsIds.length) {
+
+          const recipients = await User.find({
+            _id: { $in: recipientsIds }
+          }).select("pushTokens");
+
+          await Promise.all(
+            recipients.map((recipient) =>
+              sendExpoPushToUser(recipient, {
+                title: `${senderName} pinned a message`,
+                body: preview,
+                data: {
+                  type: "community",
+                  chatId: String(cid),
+                  fullName: senderName,
+                  avatar: senderAvatar
+                }
+              })
+            )
+          );
+        }
+
+      } catch (err) {
+        console.error("Pin push failed", err);
+      }
+
     } catch (err) {
       console.error("[PIN MESSAGE ERROR]", err);
     }

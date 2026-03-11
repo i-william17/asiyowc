@@ -1180,6 +1180,57 @@ exports.sendGroupMessage = async (req, res) => {
       lastSeq: chat.lastSeq,
     });
 
+    /* =============================
+       PUSH NOTIFICATIONS
+    ============================== */
+
+    const groupMeta = await Group.findById(groupId)
+      .select("name avatar")
+      .lean();
+
+    const senderName = user.profile?.fullName || "Someone";
+
+    const preview =
+      finalMessage.type === "text"
+        ? (finalMessage.ciphertext || "Sent a message").slice(0, 100)
+        : "Sent a message";
+
+    for (const uid of chat.participants) {
+
+      if (String(uid) === String(user.id)) continue;
+
+      const recipient = await User.findById(uid)
+        .select("pushTokens")
+        .lean();
+
+      if (!recipient || !recipient.pushTokens?.length) continue;
+
+      const state = chat.readState?.find(
+        (r) => String(r.user) === String(uid)
+      );
+
+      const lastReadSeq = state?.lastReadSeq || 0;
+      const unreadCount = Math.max(0, (chat.lastSeq || 0) - lastReadSeq);
+
+      const body =
+        unreadCount > 1
+          ? `${senderName}: ${preview} (+${unreadCount - 1} more)`
+          : `${senderName}: ${preview}`;
+
+      await sendExpoPushToUser(recipient, {
+        title: groupMeta?.name || "Group message",
+        body,
+        data: {
+          type: "group_message",
+          groupId: String(groupId),
+          chatId: String(chatId),
+          messageId: String(finalMessage._id),
+          unreadCount,
+          avatar: groupMeta?.avatar || null
+        }
+      });
+    }
+
     return ok(res, finalMessage, "Message sent");
 
   } catch (error) {
@@ -2804,6 +2855,53 @@ exports.sendMessage = async (req, res) => {
       message: populatedMessage,
       lastSeq: chat.lastSeq,
     });
+
+    /* =============================
+       PUSH NOTIFICATIONS
+    ============================= */
+
+    const senderName = user.profile?.fullName || "Someone";
+    const senderAvatar = user.profile?.avatar || null;
+
+    const preview =
+      populatedMessage.type === "text"
+        ? (populatedMessage.ciphertext || "Sent a message").slice(0, 100)
+        : "Sent a message";
+
+    for (const uid of chat.participants) {
+
+      if (String(uid) === String(user.id)) continue;
+
+      const recipient = await User.findById(uid)
+        .select("pushTokens")
+        .lean();
+
+      if (!recipient || !recipient.pushTokens?.length) continue;
+
+      const state = chat.readState?.find(
+        (r) => String(r.user) === String(uid)
+      );
+
+      const lastReadSeq = state?.lastReadSeq || 0;
+      const unreadCount = Math.max(0, (chat.lastSeq || 0) - lastReadSeq);
+
+      const body =
+        unreadCount > 1
+          ? `${preview} (+${unreadCount - 1} more)`
+          : preview;
+
+      await sendExpoPushToUser(recipient, {
+        title: senderName,
+        body,
+        data: {
+          type: "chat_message",
+          chatId: String(chat._id),
+          messageId: String(populatedMessage._id),
+          unreadCount,
+          avatar: senderAvatar
+        }
+      });
+    }
 
     /* =============================
        RESPONSE

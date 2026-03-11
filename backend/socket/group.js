@@ -245,6 +245,60 @@ module.exports = (io, socket) => {
         console.error("Group decrypt failed", err);
       }
 
+      /* =====================
+   PUSH (GROUP MESSAGE)
+===================== */
+
+      try {
+
+        const senderName =
+          socket.user?.profile?.fullName ||
+          "Someone";
+
+        const senderAvatar =
+          socket.user?.profile?.avatar?.url ||
+          null;
+
+        const preview =
+          message.type === "text"
+            ? (message.ciphertext || "New message").slice(0, 100)
+            : "New message";
+
+        const memberIds = await Group.findById(gid).select("members.user");
+
+        const recipientsIds = memberIds.members
+          .map(m => normalizeId(m.user))
+          .filter(Boolean)
+          .filter(uid => String(uid) !== String(userId))
+          .filter(uid => !isOnline(uid));
+
+        if (recipientsIds.length) {
+
+          const recipients = await User.find({
+            _id: { $in: recipientsIds }
+          }).select("pushTokens");
+
+          await Promise.all(
+            recipients.map((recipient) =>
+              sendExpoPushToUser(recipient, {
+                title: senderName,
+                body: preview,
+                data: {
+                  type: "community",
+                  groupId: String(gid),
+                  chatId: String(chat._id),
+                  fullName: senderName,
+                  avatar: senderAvatar
+                }
+              })
+            )
+          );
+        }
+
+      } catch (err) {
+        console.error("Group push failed", err);
+      }
+
       io.to(`chat:${String(chat._id)}`).emit("group:message:new", {
         groupId: gid,
         chatId: String(chat._id),
@@ -318,6 +372,86 @@ module.exports = (io, socket) => {
       }
 
       await msg.save();
+
+      /* =====================
+   PUSH (GROUP REACTION)
+===================== */
+
+      try {
+
+        const populated = await Message.findById(messageId)
+          .populate("sender", "profile.fullName profile.avatar")
+          .lean();
+
+        if (!populated) return;
+
+        const chat = await Chat.findById(chatId)
+          .select("encryptedChatKey chatKeyIv chatKeyTag");
+
+        let preview = "Reacted to a message";
+
+        try {
+
+          const chatKey = decryptChatKey(
+            chat.encryptedChatKey,
+            chat.chatKeyIv,
+            chat.chatKeyTag
+          );
+
+          if (populated.ciphertext && populated.iv && populated.tag) {
+            preview = decryptWithKey(
+              populated.ciphertext,
+              populated.iv,
+              populated.tag,
+              chatKey
+            ).slice(0, 80);
+          }
+
+        } catch { }
+
+        const senderName =
+          socket.user?.profile?.fullName ||
+          "Someone";
+
+        const senderAvatar =
+          socket.user?.profile?.avatar?.url ||
+          null;
+
+        const group = await Group.findOne({ chat: chatId })
+          .select("members.user");
+
+        const recipientsIds = group.members
+          .map(m => normalizeId(m.user))
+          .filter(Boolean)
+          .filter(uid => String(uid) !== String(userId))
+          .filter(uid => !isOnline(uid));
+
+        if (recipientsIds.length) {
+
+          const recipients = await User.find({
+            _id: { $in: recipientsIds }
+          }).select("pushTokens");
+
+          await Promise.all(
+            recipients.map((recipient) =>
+              sendExpoPushToUser(recipient, {
+                title: `${senderName} reacted ${emoji || ""}`,
+                body: preview,
+                data: {
+                  type: "community",
+                  chatId: String(chatId),
+                  groupId: String(group._id),
+                  fullName: senderName,
+                  avatar: senderAvatar
+                }
+              })
+            )
+          );
+        }
+
+      } catch (err) {
+        console.error("Group reaction push failed", err);
+      }
 
       const populatedMsg = await Message.findById(messageId)
         .populate("reactions.user", "profile.fullName profile.avatar");
@@ -530,6 +664,83 @@ module.exports = (io, socket) => {
           : messageId;
 
       await chat.save();
+
+      /* =====================
+   PUSH (GROUP PIN)
+===================== */
+
+      try {
+
+        if (!chat.pinnedMessage) return;
+
+        const msg = await Message.findById(chat.pinnedMessage).lean();
+
+        if (!msg) return;
+
+        let preview = "Pinned a message";
+
+        try {
+
+          const chatKey = decryptChatKey(
+            chat.encryptedChatKey,
+            chat.chatKeyIv,
+            chat.chatKeyTag
+          );
+
+          if (msg.ciphertext && msg.iv && msg.tag) {
+            preview = decryptWithKey(
+              msg.ciphertext,
+              msg.iv,
+              msg.tag,
+              chatKey
+            ).slice(0, 80);
+          }
+
+        } catch { }
+
+        const senderName =
+          socket.user?.profile?.fullName ||
+          "Someone";
+
+        const senderAvatar =
+          socket.user?.profile?.avatar?.url ||
+          null;
+
+        const group = await Group.findOne({ chat: chatId })
+          .select("members.user");
+
+        const recipientsIds = group.members
+          .map(m => normalizeId(m.user))
+          .filter(Boolean)
+          .filter(uid => String(uid) !== String(userId))
+          .filter(uid => !isOnline(uid));
+
+        if (recipientsIds.length) {
+
+          const recipients = await User.find({
+            _id: { $in: recipientsIds }
+          }).select("pushTokens");
+
+          await Promise.all(
+            recipients.map((recipient) =>
+              sendExpoPushToUser(recipient, {
+                title: `${senderName} pinned a message`,
+                body: preview,
+                data: {
+                  type: "community",
+                  chatId: String(chatId),
+                  groupId: String(group._id),
+                  fullName: senderName,
+                  avatar: senderAvatar
+                }
+              })
+            )
+          );
+        }
+
+      } catch (err) {
+        console.error("Group pin push failed", err);
+      }
 
       const pinnedMsg = chat.pinnedMessage
         ? await Message.findById(chat.pinnedMessage)
