@@ -8,10 +8,8 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "node": "20",
       "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
+        "buildType": "apk"
       },
       "ios": {
         "simulator": true
@@ -20,10 +18,8 @@
 
     "preview": {
       "distribution": "internal",
-      "node": "20",
       "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
+        "buildType": "apk"
       },
       "ios": {
         "distribution": "internal"
@@ -32,7 +28,6 @@
 
     "production": {
       "autoIncrement": true,
-      "node": "20",
       "android": {
         "buildType": "app-bundle"
       },
@@ -42,10 +37,8 @@
     },
 
     "apk": {
-      "node": "20",
       "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
+        "buildType": "apk"
       }
     }
   },
