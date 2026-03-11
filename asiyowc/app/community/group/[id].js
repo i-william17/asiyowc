@@ -653,7 +653,7 @@ export default function GroupDetail() {
                 </Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
+              {/* <TouchableOpacity
                 onPress={async () => {
                   await Share.share({ message: inviteLink });
                 }}
@@ -662,7 +662,7 @@ export default function GroupDetail() {
                 <Text style={{ fontFamily: "Poppins-Medium", color: "#fff" }}>
                   Share
                 </Text>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
 
             </View>
 

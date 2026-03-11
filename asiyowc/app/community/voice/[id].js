@@ -82,7 +82,7 @@ export default function VoiceDetail() {
   const isLive = instance?.status === "live";
 
   /* ================= SHARE FUNCTIONALITY ================= */
-  const SHARE_BASE_URL = server.replace("/api", "");// Change to your actual domain
+  const SHARE_BASE_URL = "https://www.asiyoconnect.com";// Change to your actual domain
 
   const voiceShareLink = useMemo(() => {
     if (!instance?.instanceId) return null;

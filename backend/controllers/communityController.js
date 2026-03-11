@@ -11,6 +11,12 @@ const Chat = require('../models/Chat');
 const Voice = require('../models/Voice');
 const Report = require('../models/Report');
 const Post = require('../models/Post');
+
+const Message = require("../models/Message");
+const {
+  decryptChatKey,
+  decryptWithKey
+} = require("../utils/chatCrypto");
 const { sendExpoPushToUser } = require("../utils/push");
 const { deleteFromCloudinary } = require("../middleware/upload");
 
@@ -147,7 +153,6 @@ const ensureGroupChatExistsAndSynced = async (group) => {
     chat = await Chat.create({
       type: 'group',
       participants: memberIds,
-      messages: []
     });
 
     group.chat = chat._id;
@@ -236,7 +241,6 @@ exports.createGroup = async (req, res) => {
     const chat = await Chat.create({
       type: "group",
       participants: [user.id], // matches your existing Chat docs (ObjectIds)
-      messages: [],
     });
 
     // ✅ Now create group WITH chat
@@ -870,60 +874,102 @@ exports.getGroupConversationByChatId = async (req, res) => {
 
     if (!chat) return notFound(res, "Chat not found");
 
-    let messages = chat.messages || [];
-
     /* =============================
-       2️⃣ SORT NEWEST FIRST
+       2️⃣ MESSAGE QUERY
     ============================== */
-    messages.sort((a, b) => b.createdAt - a.createdAt);
+    let query = Message.find({
+      chatId: chat._id,
+      deletedFor: { $ne: user.id }
+    });
 
-    /* =============================
-       3️⃣ CURSOR PAGINATION
-    ============================== */
     if (before) {
-      const index = messages.findIndex(
-        (m) => String(m._id) === String(before)
-      );
+      const beforeMsg = await Message.findOne({
+        _id: before,
+        chatId: chat._id,
+      }).select("seq");
 
-      if (index !== -1) {
-        messages = messages.slice(index + 1);
+      if (beforeMsg) {
+        query = query.where("seq").lt(beforeMsg.seq);
       }
     }
 
-    /* =============================
-       4️⃣ LIMIT
-    ============================== */
-    messages = messages.slice(0, Number(limit));
-
-    /* =============================
-       5️⃣ RETURN OLDEST → NEWEST
-    ============================== */
-    messages.reverse();
-
-    /* =============================
-       6️⃣ POPULATE MESSAGES
-    ============================== */
-    const populatedMessages = await Chat.populate(messages, [
-      {
-        path: "sender",
-        select: "profile.fullName profile.avatar",
-      },
-      {
+    const populatedMessages = await query
+      .sort({ seq: -1 })
+      .limit(Number(limit))
+      .populate("sender", "profile.fullName profile.avatar")
+      .populate({
         path: "replyTo",
+        select: "ciphertext iv tag sender",
         populate: {
           path: "sender",
           select: "profile.fullName profile.avatar",
         },
-      },
-      {
-        path: "reactions.user",
-        select: "profile.fullName profile.avatar",
-      },
-    ]);
+      })
+      .populate("reactions.user", "profile.fullName profile.avatar")
+      .lean();
 
     /* =============================
-       🔥 7️⃣ FIND GROUP USING CHAT ID
-       (CRITICAL FIX FOR YOUR SCHEMA)
+       🔐 DECRYPT CHAT KEY
+    ============================== */
+    let chatKey = null;
+
+    try {
+      chatKey = decryptChatKey(
+        chat.encryptedChatKey,
+        chat.chatKeyIv,
+        chat.chatKeyTag
+      );
+    } catch (err) {
+      console.error("Chat key decrypt failed:", err);
+    }
+
+    /* =============================
+       🔐 DECRYPT MESSAGES
+    ============================== */
+    if (chatKey) {
+      populatedMessages.forEach((m) => {
+
+        /* decrypt main message */
+        if (m.ciphertext && m.iv && m.tag) {
+          try {
+            m.ciphertext = decryptWithKey(
+              m.ciphertext,
+              m.iv,
+              m.tag,
+              chatKey
+            );
+          } catch {
+            m.ciphertext = "";
+          }
+        }
+
+        /* decrypt reply message */
+        if (
+          m.replyTo &&
+          m.replyTo.ciphertext &&
+          m.replyTo.iv &&
+          m.replyTo.tag
+        ) {
+          try {
+            m.replyTo.ciphertext = decryptWithKey(
+              m.replyTo.ciphertext,
+              m.replyTo.iv,
+              m.replyTo.tag,
+              chatKey
+            );
+          } catch {
+            m.replyTo.ciphertext = "";
+          }
+        }
+
+      });
+    }
+
+    /* restore chronological order */
+    populatedMessages.reverse();
+
+    /* =============================
+       7️⃣ FIND GROUP USING CHAT ID
     ============================== */
     const group = await Group.findOne({
       chat: chat._id,
@@ -935,7 +981,37 @@ exports.getGroupConversationByChatId = async (req, res) => {
     if (!group) return notFound(res, "Group not found");
 
     /* =============================
-       8️⃣ FINAL RESPONSE (UNIT)
+       🔐 FETCH + DECRYPT PINNED MESSAGE
+    ============================== */
+    // let pinnedMessage = null;
+
+    // if (chat.pinnedMessage) {
+    //   pinnedMessage = await Message.findById(chat.pinnedMessage)
+    //     .populate("sender", "profile.fullName profile.avatar")
+    //     .lean();
+
+    //   if (pinnedMessage && chatKey) {
+    //     try {
+    //       if (
+    //         pinnedMessage.ciphertext &&
+    //         pinnedMessage.iv &&
+    //         pinnedMessage.tag
+    //       ) {
+    //         pinnedMessage.ciphertext = decryptWithKey(
+    //           pinnedMessage.ciphertext,
+    //           pinnedMessage.iv,
+    //           pinnedMessage.tag,
+    //           chatKey
+    //         );
+    //       }
+    //     } catch (err) {
+    //       console.error("Pinned message decrypt failed:", err);
+    //     }
+    //   }
+    // }
+
+    /* =============================
+       8️⃣ FINAL RESPONSE
     ============================== */
     return ok(res, {
       group,
@@ -944,7 +1020,7 @@ exports.getGroupConversationByChatId = async (req, res) => {
         pinnedMessage: chat.pinnedMessage || null,
         lastSeq: chat.lastSeq || 0,
         readState: chat.readState || [],
-        messages: populatedMessages,
+        messages: populatedMessages
       },
     });
 
@@ -966,8 +1042,8 @@ exports.sendGroupMessage = async (req, res) => {
       return bad(res, "Invalid groupId");
     }
 
-    if (!req.body?.ciphertext || !req.body?.iv || !req.body?.tag) {
-      return bad(res, "Missing encrypted message payload");
+    if (!req.body?.ciphertext) {
+      return bad(res, "Message content required");
     }
 
     const group = await Group.findOne({
@@ -985,7 +1061,9 @@ exports.sendGroupMessage = async (req, res) => {
       type: "group",
       isRemoved: false,
       participants: user.id,
-    });
+    }).select(
+      "participants encryptedChatKey chatKeyIv chatKeyTag readState lastSeq"
+    );
 
     if (!chat) return notFound(res, "Chat not found");
 
@@ -996,8 +1074,7 @@ exports.sendGroupMessage = async (req, res) => {
     chat.lastSeq = (chat.lastSeq || 0) + 1;
 
     /* =============================
-       FIX: UPDATE SENDER READ STATE
-       Prevent unread messages for sender
+       UPDATE SENDER READ STATE
     ============================== */
 
     chat.readState = chat.readState || [];
@@ -1019,44 +1096,78 @@ exports.sendGroupMessage = async (req, res) => {
        BUILD MESSAGE
     ============================== */
 
-    const message = {
+    const createdMessage = await Message.create({
+      chatId: chat._id,
       sender: user.id,
       ciphertext: req.body.ciphertext,
-      iv: req.body.iv,
-      tag: req.body.tag,
       type: req.body.type || "text",
       replyTo: req.body.replyTo || null,
-      reactions: [],
-      readBy: [],
-      seq: chat.lastSeq,
-      createdAt: new Date(),
-    };
+      seq: chat.lastSeq
+    });
 
-    chat.messages.push(message);
+    chat.lastMessageId = createdMessage._id;
+    chat.lastMessageAt = createdMessage.createdAt;
+    chat.lastMessageType = createdMessage.type;
     chat.updatedAt = new Date();
 
     await chat.save();
 
+    const finalMessage = await Message.findById(createdMessage._id)
+      .populate("sender", "profile.fullName profile.avatar")
+      .populate({
+        path: "replyTo",
+        select: "ciphertext iv tag sender",
+        populate: {
+          path: "sender",
+          select: "profile.fullName profile.avatar"
+        }
+      })
+      .populate("reactions.user", "profile.fullName profile.avatar")
+      .lean();
+
     /* =============================
-       POPULATE FOR CLIENT
+       🔐 DECRYPT MESSAGE
     ============================== */
 
-    await chat.populate("messages.sender", "profile.fullName profile.avatar");
+    try {
 
-    await chat.populate({
-      path: "messages.replyTo",
-      populate: {
-        path: "sender",
-        select: "profile.fullName profile.avatar",
-      },
-    });
+      const chatKey = decryptChatKey(
+        chat.encryptedChatKey,
+        chat.chatKeyIv,
+        chat.chatKeyTag
+      );
 
-    await chat.populate(
-      "messages.reactions.user",
-      "profile.fullName profile.avatar"
-    );
+      /* decrypt main message */
 
-    const finalMessage = chat.messages.at(-1);
+      if (finalMessage.ciphertext && finalMessage.iv && finalMessage.tag) {
+        finalMessage.ciphertext = decryptWithKey(
+          finalMessage.ciphertext,
+          finalMessage.iv,
+          finalMessage.tag,
+          chatKey
+        );
+      }
+
+      /* decrypt reply message */
+
+      if (
+        finalMessage.replyTo &&
+        finalMessage.replyTo.ciphertext &&
+        finalMessage.replyTo.iv &&
+        finalMessage.replyTo.tag
+      ) {
+        finalMessage.replyTo.ciphertext = decryptWithKey(
+          finalMessage.replyTo.ciphertext,
+          finalMessage.replyTo.iv,
+          finalMessage.replyTo.tag,
+          chatKey
+        );
+      }
+
+    } catch (err) {
+      console.error("Group message decrypt failed:", err);
+      finalMessage.ciphertext = "";
+    }
 
     /* =============================
        SOCKET BROADCAST
@@ -1097,12 +1208,14 @@ exports.deleteGroupMessage = async (req, res) => {
       _id: chatId,
       type: 'group',
       isRemoved: false,
-      'messages._id': messageId
     });
 
     if (!chat) return notFound(res, 'Chat not found');
 
-    const msg = chat.messages.id(messageId);
+    const msg = await Message.findOne({
+      _id: messageId,
+      chatId
+    });
 
     const canDelete =
       String(msg.sender) === String(user.id) ||
@@ -1117,7 +1230,7 @@ exports.deleteGroupMessage = async (req, res) => {
     msg.tag = '';
     msg.reactions = [];
 
-    await chat.save();
+    await msg.save();
 
     req.io.to(`chat:${chatId}`).emit('message:deleted', {
       chatId,
@@ -1207,12 +1320,14 @@ exports.softDeleteMessage = async (req, res) => {
     const chat = await Chat.findOne({
       _id: chatId,
       participants: user.id,
-      'messages._id': messageId
     });
 
     if (!chat) return notFound(res, 'Message not found');
 
-    const msg = chat.messages.id(messageId);
+    const msg = await Message.findOne({
+      _id: messageId,
+      chatId
+    });
 
     if (mode === 'everyone') {
       if (String(msg.sender) !== String(user.id)) {
@@ -1228,7 +1343,7 @@ exports.softDeleteMessage = async (req, res) => {
       msg.deletedFor.addToSet(user.id);
     }
 
-    await chat.save();
+    await msg.save();
 
     req.io.to(`chat:${chatId}`).emit('message:deleted', {
       chatId,
@@ -1249,36 +1364,69 @@ exports.markMessageAsRead = async (req, res) => {
 
     const { chatId, messageId } = req.params;
 
-    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
-    if (!ensureObjectIdParam(res, messageId, 'messageId')) return;
+    if (!ensureObjectIdParam(res, chatId, "chatId")) return;
+    if (!ensureObjectIdParam(res, messageId, "messageId")) return;
 
-    const chat = await Chat.findOneAndUpdate(
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: user.id,
+      isRemoved: false
+    });
+
+    if (!chat) return notFound(res, "Chat not found");
+
+    const msg = await Message.findOne({
+      _id: messageId,
+      chatId: chat._id
+    });
+
+    if (!msg) return notFound(res, "Message not found");
+
+    await Message.updateOne(
       {
-        _id: chatId,
-        participants: user.id,
-        'messages._id': messageId
+        _id: msg._id,
+        chatId: chat._id,
+        "readBy.user": { $ne: user.id }
       },
       {
-        $addToSet: {
-          'messages.$.readBy': { user: user.id }
+        $push: {
+          readBy: {
+            user: user.id,
+            readAt: new Date()
+          }
         }
-      },
-      { new: true }
+      }
     );
 
-    if (!chat) return notFound(res, 'Message not found');
+    const updatedMsg = await Message.findById(msg._id).select("readBy seq");
 
-    const msg = chat.messages.id(messageId);
+    chat.readState = chat.readState || [];
 
-    // 🔥 Emit realtime read receipt
-    req.io.to(`chat:${chatId}`).emit('message:read', {
+    const existingState = chat.readState.find(
+      (r) => String(r.user) === String(user.id)
+    );
+
+    if (existingState) {
+      existingState.lastReadSeq = Math.max(existingState.lastReadSeq || 0, updatedMsg.seq || 0);
+      existingState.lastReadAt = new Date();
+    } else {
+      chat.readState.push({
+        user: user.id,
+        lastReadSeq: updatedMsg.seq || 0,
+        lastReadAt: new Date()
+      });
+    }
+
+    await chat.save();
+
+    req.io.to(`chat:${chatId}`).emit("message:read", {
       chatId,
       messageId,
       userId: user.id,
-      readBy: msg.readBy
+      readBy: updatedMsg.readBy
     });
 
-    return ok(res, msg.readBy, 'Message marked as read');
+    return ok(res, updatedMsg.readBy, "Message marked as read");
   } catch (e) {
     return serverError(res, e);
   }
@@ -2176,7 +2324,6 @@ exports.createChat = async (req, res) => {
         type: 'dm',
         participants: uniqueParticipants,
         dmKey,
-        messages: [],
         isRemoved: false
       });
 
@@ -2194,7 +2341,6 @@ exports.createChat = async (req, res) => {
       const chat = await Chat.create({
         type: 'group',
         participants: uniqueParticipants,
-        messages: []
       });
 
       return created(res, chat);
@@ -2259,47 +2405,132 @@ exports.getChatById = async (req, res) => {
     if (!user) return;
 
     const { chatId } = req.params;
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit || 30, 10)));
+    const before = req.query.before;
+
     if (!mongoose.Types.ObjectId.isValid(chatId)) {
-      return bad(res, 'Invalid chatId');
+      return bad(res, "Invalid chatId");
     }
 
+    /* =============================
+       1️⃣ LOAD CHAT
+    ============================== */
     const chat = await Chat.findOne({
       _id: chatId,
-      isRemoved: false
+      isRemoved: false,
     })
-      /* ================= PARTICIPANTS (UPDATED) ================= */
       .populate(
-        'participants',
-        'profile.fullName profile.avatar profile.bio profile.location profile.coverPhoto'
+        "participants",
+        "profile.fullName profile.avatar profile.bio profile.location profile.coverPhoto"
       )
-
-      /* ================= UNCHANGED ================= */
-      .populate({
-        path: 'messages.sender',
-        select: 'profile.fullName profile.avatar'
-      })
-      .populate({
-        path: 'messages.replyTo',
-        populate: {
-          path: 'sender',
-          select: 'profile.fullName profile.avatar'
-        }
-      })
-      .populate({
-        path: 'messages.reactions.user',
-        select: 'profile.fullName profile.avatar'
-      })
       .lean();
 
-    if (!chat) return notFound(res, 'Chat not found');
+    if (!chat) return notFound(res, "Chat not found");
 
-    const isParticipant = chat.participants.some(
-      (p) => String(p._id) === String(user.id)
-    );
-    if (!isParticipant) return forbidden(res, 'Not a participant');
+    const isParticipant = Array.isArray(chat.participants) &&
+      chat.participants.some((p) => String(p._id) === String(user.id));
 
-    return ok(res, chat);
+    if (!isParticipant) return forbidden(res, "Not a participant");
+
+    /* =============================
+       2️⃣ MESSAGE QUERY
+    ============================== */
+    let query = Message.find({
+      chatId: chat._id,
+      deletedFor: { $ne: user.id },
+    });
+
+    if (before && mongoose.Types.ObjectId.isValid(before)) {
+      const beforeMsg = await Message.findOne({
+        _id: before,
+        chatId: chat._id,
+      }).select("seq");
+
+      if (beforeMsg) {
+        query = query.where("seq").lt(beforeMsg.seq);
+      }
+    }
+
+    const messages = await query
+      .sort({ seq: -1 })
+      .limit(limit)
+      .populate("sender", "profile.fullName profile.avatar")
+      .populate({
+        path: "replyTo",
+        select: "ciphertext iv tag sender type sharedPost createdAt",
+        populate: {
+          path: "sender",
+          select: "profile.fullName profile.avatar",
+        },
+      })
+      .populate("reactions.user", "profile.fullName profile.avatar")
+      .lean();
+
+    /* =============================
+       3️⃣ DECRYPT CHAT KEY
+    ============================== */
+    let chatKey = null;
+
+    try {
+      chatKey = decryptChatKey(
+        chat.encryptedChatKey,
+        chat.chatKeyIv,
+        chat.chatKeyTag
+      );
+    } catch (err) {
+      console.error("DM chat key decrypt failed:", err);
+    }
+
+    /* =============================
+       4️⃣ DECRYPT MESSAGES
+    ============================== */
+    if (chatKey) {
+      messages.forEach((m) => {
+        if (m.ciphertext && m.iv && m.tag) {
+          try {
+            m.ciphertext = decryptWithKey(
+              m.ciphertext,
+              m.iv,
+              m.tag,
+              chatKey
+            );
+          } catch {
+            m.ciphertext = "";
+          }
+        }
+
+        if (
+          m.replyTo &&
+          m.replyTo.ciphertext &&
+          m.replyTo.iv &&
+          m.replyTo.tag
+        ) {
+          try {
+            m.replyTo.ciphertext = decryptWithKey(
+              m.replyTo.ciphertext,
+              m.replyTo.iv,
+              m.replyTo.tag,
+              chatKey
+            );
+          } catch {
+            m.replyTo.ciphertext = "";
+          }
+        }
+      });
+    }
+
+    /* restore chronological order */
+    messages.reverse();
+
+    /* =============================
+       5️⃣ FINAL RESPONSE
+    ============================== */
+    return ok(res, {
+      ...chat,
+      messages,
+    });
   } catch (e) {
+    console.error("[getChatById]", e);
     return serverError(res, e);
   }
 };
@@ -2322,27 +2553,76 @@ exports.getMessages = async (req, res) => {
 
     if (!chat) return notFound(res, "Chat not found");
 
-    let messages = chat.messages || [];
+    let query = Message.find({
+      chatId: chat._id,
+      deletedFor: { $ne: user.id }
+    });
 
-    // 🔥 newest
-    if (!before) {
-      messages = messages.slice(-limit);
-    }
-    // 🔥 older
-    else {
-      const index = messages.findIndex(
-        (m) => String(m._id) === String(before)
-      );
+    if (before) {
+      const beforeMsg = await Message.findOne({
+        _id: before,
+        chatId: chat._id
+      }).select("seq");
 
-      if (index === -1) {
-        messages = messages.slice(-limit);
-      } else {
-        messages = messages.slice(
-          Math.max(0, index - limit),
-          index
-        );
+      if (beforeMsg) {
+        query = query.where("seq").lt(beforeMsg.seq);
       }
     }
+
+    const messages = await query
+      .sort({ seq: -1 })
+      .limit(limit)
+      .populate("sender", "profile.fullName profile.avatar")
+      .populate({
+        path: "replyTo",
+        populate: {
+          path: "sender",
+          select: "profile.fullName profile.avatar"
+        }
+      })
+      .populate("reactions.user", "profile.fullName profile.avatar")
+      .lean();
+
+    let chatKey = null;
+
+    try {
+      chatKey = decryptChatKey(
+        chat.encryptedChatKey,
+        chat.chatKeyIv,
+        chat.chatKeyTag
+      );
+    } catch (err) {
+      console.error("Chat key decrypt failed:", err);
+    }
+
+    if (chatKey) {
+      messages.forEach(m => {
+
+        if (m.ciphertext && m.iv && m.tag) {
+          try {
+            m.ciphertext = decryptWithKey(m.ciphertext, m.iv, m.tag, chatKey);
+          } catch {
+            m.ciphertext = "";
+          }
+        }
+
+        if (m.replyTo && m.replyTo.ciphertext && m.replyTo.iv && m.replyTo.tag) {
+          try {
+            m.replyTo.ciphertext = decryptWithKey(
+              m.replyTo.ciphertext,
+              m.replyTo.iv,
+              m.replyTo.tag,
+              chatKey
+            );
+          } catch {
+            m.replyTo.ciphertext = "";
+          }
+        }
+
+      });
+    }
+
+    messages.reverse();
 
     return ok(res, messages);
   } catch (e) {
@@ -2364,14 +2644,17 @@ exports.getMessageById = async (req, res) => {
     const chat = await Chat.findOne({
       _id: chatId,
       participants: user.id,
-      isRemoved: false,
-      'messages._id': messageId
-    }).populate('messages.sender', 'name avatar');
+      isRemoved: false
+    });
 
-    if (!chat) return notFound(res, 'Message not found');
+    if (!chat) return notFound(res, "Chat not found");
 
-    const msg = (chat.messages || []).find((m) => String(m._id) === String(messageId));
-    if (!msg) return notFound(res, 'Message not found');
+    const msg = await Message.findOne({
+      _id: messageId,
+      chatId
+    }).populate("sender", "profile.fullName profile.avatar");
+
+    if (!msg) return notFound(res, "Message not found");
 
     return ok(res, msg);
   } catch (error) {
@@ -2386,7 +2669,7 @@ exports.sendMessage = async (req, res) => {
     if (!user) return;
 
     const { chatId } = req.params;
-    const { ciphertext, iv, tag, type = "text", replyTo } = req.body;
+    const { ciphertext, type = "text", replyTo } = req.body;
 
     const chat = await Chat.findOne({
       _id: chatId,
@@ -2396,41 +2679,137 @@ exports.sendMessage = async (req, res) => {
 
     if (!chat) return notFound(res, "Chat not found");
 
-    // ✅ Safe seq increment
+    /* =============================
+       SEQUENCE
+    ============================= */
     chat.lastSeq = (chat.lastSeq || 0) + 1;
 
-    const message = {
+    /* =============================
+       UPDATE SENDER READ STATE
+    ============================= */
+    chat.readState = chat.readState || [];
+
+    const senderState = chat.readState.find(
+      (r) => String(r.user) === String(user.id)
+    );
+
+    if (senderState) {
+      senderState.lastReadSeq = chat.lastSeq;
+      senderState.lastReadAt = new Date();
+    } else {
+      chat.readState.push({
+        user: user.id,
+        lastReadSeq: chat.lastSeq,
+        lastReadAt: new Date(),
+      });
+    }
+
+    /* =============================
+       CREATE MESSAGE
+       (SCHEMA WILL ENCRYPT)
+    ============================= */
+    const createdMessage = await Message.create({
+      chatId: chat._id,
       sender: user.id,
       ciphertext,
-      iv,
-      tag,
       type,
       replyTo: replyTo || null,
-      seq: chat.lastSeq,
-      createdAt: new Date(),
-    };
+      seq: chat.lastSeq
+    });
 
-    chat.messages = chat.messages || [];
-    chat.messages.push(message);
+    // console.log("DM MESSAGE SAVED:", createdMessage._id);
+    /* =============================
+       UPDATE CHAT METADATA
+    ============================= */
+    chat.lastMessageId = createdMessage._id;
+    chat.lastMessageAt = createdMessage.createdAt;
+    chat.lastMessageType = createdMessage.type;
     chat.updatedAt = new Date();
 
     await chat.save();
 
-    // Populate only the last message (cheaper)
-    await chat.populate({
-      path: "messages.sender",
-      select: "profile.fullName profile.avatar",
-    });
+    /* =============================
+       LOAD MESSAGE
+    ============================= */
+    const populatedMessage = await Message.findById(createdMessage._id)
+      .populate("sender", "profile.fullName profile.avatar")
+      .populate({
+        path: "replyTo",
+        populate: {
+          path: "sender",
+          select: "profile.fullName profile.avatar"
+        }
+      })
+      .populate("reactions.user", "profile.fullName profile.avatar")
+      .lean();
 
-    const populatedMessage = chat.messages.at(-1);
+    /* =============================
+       🔐 DECRYPT MESSAGE
+    ============================= */
 
+    const chatKey = decryptChatKey(
+      chat.encryptedChatKey,
+      chat.chatKeyIv,
+      chat.chatKeyTag
+    );
+
+    /* =============================
+       DECRYPT MAIN MESSAGE
+    ============================= */
+
+    if (
+      populatedMessage.ciphertext &&
+      populatedMessage.iv &&
+      populatedMessage.tag
+    ) {
+      try {
+        populatedMessage.ciphertext = decryptWithKey(
+          populatedMessage.ciphertext,
+          populatedMessage.iv,
+          populatedMessage.tag,
+          chatKey
+        );
+      } catch {
+        populatedMessage.ciphertext = "";
+      }
+    }
+
+    /* =============================
+       DECRYPT REPLY MESSAGE
+    ============================= */
+
+    if (
+      populatedMessage.replyTo &&
+      populatedMessage.replyTo.ciphertext &&
+      populatedMessage.replyTo.iv &&
+      populatedMessage.replyTo.tag
+    ) {
+      try {
+        populatedMessage.replyTo.ciphertext = decryptWithKey(
+          populatedMessage.replyTo.ciphertext,
+          populatedMessage.replyTo.iv,
+          populatedMessage.replyTo.tag,
+          chatKey
+        );
+      } catch {
+        populatedMessage.replyTo.ciphertext = "";
+      }
+    }
+
+    /* =============================
+       SOCKET BROADCAST
+    ============================= */
     req.io.to(`chat:${chatId}`).emit("message:new", {
       chatId,
       message: populatedMessage,
       lastSeq: chat.lastSeq,
     });
 
+    /* =============================
+       RESPONSE
+    ============================= */
     return ok(res, populatedMessage);
+
   } catch (e) {
     console.error("[sendMessage]", e);
     return serverError(res, e);
@@ -2449,19 +2828,22 @@ exports.editMessageById = async (req, res) => {
 
     const { ciphertext, iv, tag, type, sharedPost } = req.body;
 
-    if (!ciphertext || !iv || !tag) return bad(res, 'ciphertext, iv, and tag are required');
+    if (!ciphertext)
+      return bad(res, 'ciphertext is required');
 
     // Only sender (or admin/moderator) can edit
     const chat = await Chat.findOne({
       _id: chatId,
       participants: user.id,
       isRemoved: false,
-      'messages._id': messageId
     });
 
     if (!chat) return notFound(res, 'Message not found');
 
-    const msg = (chat.messages || []).find((m) => String(m._id) === String(messageId));
+    const msg = await Message.findOne({
+      _id: messageId,
+      chatId
+    });
     if (!msg) return notFound(res, 'Message not found');
 
     const canEdit =
@@ -2478,24 +2860,35 @@ exports.editMessageById = async (req, res) => {
       if (!postExists) return notFound(res, 'Post not found');
     }
 
-    const update = {
-      'messages.$.ciphertext': ciphertext,
-      'messages.$.iv': iv,
-      'messages.$.tag': tag
-    };
+    msg.ciphertext = ciphertext;
+    msg.iv = undefined;
+    msg.tag = undefined;
 
-    if (type) update['messages.$.type'] = type;
-    if (type === 'share') update['messages.$.sharedPost'] = sharedPost || null;
-    if (type === 'text') update['messages.$.sharedPost'] = null;
+    if (type) msg.type = type;
 
-    const updated = await Chat.findOneAndUpdate(
-      { _id: chatId, 'messages._id': messageId },
-      { $set: { ...update, updatedAt: new Date() } },
-      { new: true }
-    ).populate('messages.sender', 'name avatar');
+    if (type === "share") {
+      msg.sharedPost = sharedPost;
+    } else if (type === "text") {
+      msg.sharedPost = null;
+    }
 
-    const updatedMsg = (updated.messages || []).find((m) => String(m._id) === String(messageId));
-    return ok(res, updatedMsg, 'Message updated');
+    await msg.save();
+
+    msg.editedAt = new Date();
+    await msg.save();
+
+    const populated = await Message.findById(msg._id)
+      .populate("sender", "profile.fullName profile.avatar")
+      .populate({
+        path: "replyTo",
+        populate: {
+          path: "sender",
+          select: "profile.fullName profile.avatar"
+        }
+      })
+      .populate("reactions.user", "profile.fullName profile.avatar");
+
+    return ok(res, populated, "Message updated");
   } catch (error) {
     return serverError(res, error);
   }
@@ -2508,8 +2901,8 @@ exports.deleteMessageById = async (req, res) => {
     if (!user) return;
 
     const { chatId, messageId } = req.params;
-    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
-    if (!ensureObjectIdParam(res, messageId, 'messageId')) return;
+    if (!ensureObjectIdParam(res, chatId, "chatId")) return;
+    if (!ensureObjectIdParam(res, messageId, "messageId")) return;
 
     const chat = await Chat.findOne({
       _id: chatId,
@@ -2517,22 +2910,41 @@ exports.deleteMessageById = async (req, res) => {
       isRemoved: false
     });
 
-    if (!chat) return notFound(res, 'Chat not found');
+    if (!chat) return notFound(res, "Chat not found");
 
-    const msg = (chat.messages || []).find((m) => String(m._id) === String(messageId));
-    if (!msg) return notFound(res, 'Message not found');
+    const msg = await Message.findOne({
+      _id: messageId,
+      chatId: chat._id
+    });
+
+    if (!msg) return notFound(res, "Message not found");
 
     const canDelete =
-      String(msg.sender) === String(user.id) || hasRole(user, ['moderator', 'admin']);
+      String(msg.sender) === String(user.id) ||
+      hasRole(user, ["moderator", "admin"]);
 
-    if (!canDelete) return forbidden(res, 'Not allowed to delete this message');
+    if (!canDelete) return forbidden(res, "Not allowed to delete this message");
 
-    await Chat.updateOne(
-      { _id: chatId },
-      { $pull: { messages: { _id: messageId } }, $set: { updatedAt: new Date() } }
-    );
+    await Message.deleteOne({
+      _id: msg._id,
+      chatId: chat._id
+    });
 
-    return ok(res, null, 'Message deleted');
+    if (String(chat.lastMessageId) === String(msg._id)) {
+      const prevLast = await Message.findOne({ chatId: chat._id })
+        .sort({ seq: -1 })
+        .select("_id createdAt type seq");
+
+      chat.lastMessageId = prevLast?._id || null;
+      chat.lastMessageAt = prevLast?.createdAt || chat.updatedAt;
+      chat.lastMessageType = prevLast?.type || null;
+      chat.lastSeq = prevLast?.seq || 0;
+      chat.updatedAt = new Date();
+
+      await chat.save();
+    }
+
+    return ok(res, null, "Message deleted");
   } catch (error) {
     return serverError(res, error);
   }
@@ -2545,42 +2957,70 @@ exports.sharePostInChat = async (req, res) => {
     if (!user) return;
 
     const { chatId } = req.params;
-    if (!ensureObjectIdParam(res, chatId, 'chatId')) return;
+    if (!ensureObjectIdParam(res, chatId, "chatId")) return;
 
-    const { postId, ciphertext, iv, tag } = req.body;
+    const { postId, ciphertext } = req.body;
 
-    if (!postId || !isValidObjectId(postId)) return bad(res, 'postId is required');
-    if (!ciphertext || !iv || !tag) {
-      // In your earlier version you used placeholder encryption; we require caller to send real encrypted payload.
-      return bad(res, 'ciphertext, iv, and tag are required for share');
-    }
+    if (!postId || !isValidObjectId(postId))
+      return bad(res, "postId is required");
 
-    const post = await Post.findOne({ _id: postId, isRemoved: false });
-    if (!post) return notFound(res, 'Post not found');
+    if (!ciphertext)
+      return bad(res, "ciphertext is required");
 
-    const updatedChat = await Chat.findOneAndUpdate(
-      { _id: chatId, isRemoved: false, participants: user.id },
-      {
-        $push: {
-          messages: {
-            sender: user.id,
-            ciphertext,
-            iv,
-            tag,
-            type: 'share',
-            sharedPost: postId
-          }
-        },
-        $set: { updatedAt: new Date() }
-      },
-      { new: true }
-    )
-      .populate('messages.sender', 'name avatar')
-      .populate('messages.sharedPost');
+    const post = await Post.findOne({
+      _id: postId,
+      isRemoved: false,
+    });
 
-    if (!updatedChat) return notFound(res, 'Chat not found or access denied');
+    if (!post) return notFound(res, "Post not found");
 
-    return ok(res, updatedChat.messages[updatedChat.messages.length - 1], 'Post shared');
+    const chat = await Chat.findOne({
+      _id: chatId,
+      participants: user.id,
+      isRemoved: false,
+    });
+
+    if (!chat) return notFound(res, "Chat not found");
+
+    /* =============================
+       SEQUENCE
+    ============================== */
+
+    chat.lastSeq = (chat.lastSeq || 0) + 1;
+
+    /* =============================
+       CREATE MESSAGE
+    ============================== */
+
+    const createdMessage = await Message.create({
+      chatId,
+      sender: user.id,
+      ciphertext,
+      type: "share",
+      sharedPost: postId,
+      seq: chat.lastSeq,
+    });
+
+    /* =============================
+       UPDATE CHAT METADATA
+    ============================== */
+
+    chat.lastMessageId = createdMessage._id;
+    chat.lastMessageAt = createdMessage.createdAt;
+    chat.lastMessageType = "share";
+    chat.updatedAt = new Date();
+
+    await chat.save();
+
+    /* =============================
+       POPULATE MESSAGE
+    ============================== */
+
+    const populated = await Message.findById(createdMessage._id)
+      .populate("sender", "profile.fullName profile.avatar")
+      .populate("sharedPost");
+
+    return ok(res, populated, "Post shared");
   } catch (error) {
     return serverError(res, error);
   }

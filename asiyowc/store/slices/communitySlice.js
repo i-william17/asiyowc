@@ -652,16 +652,21 @@ const communitySlice = createSlice({
        READ / DELIVERY RECEIPTS
     ===================================================== */
     updateMessageReceipt: (state, action) => {
-      const { messageId, userId } = action.payload;
+      const { chatId, messageId, userId } = action.payload;
       if (!messageId || !userId) return;
 
-      // 1️⃣ Update selectedChat
+      /* =========================
+         1️⃣ UPDATE SELECTED CHAT
+      ========================== */
+
       const msg = state.selectedChat?.messages?.find(
         (m) => String(m._id) === String(messageId)
       );
 
       if (msg) {
-        msg.readBy = Array.isArray(msg.readBy) ? msg.readBy : [];
+        if (!Array.isArray(msg.readBy)) {
+          msg.readBy = [];
+        }
 
         const exists = msg.readBy.some(
           (r) => String(r.user || r) === String(userId)
@@ -675,29 +680,29 @@ const communitySlice = createSlice({
         }
       }
 
-      // 2️⃣ ALSO update chats list (🔥 THIS FIXES UNREAD COUNT + REVERTING)
-      const chat = state.chats.find((c) =>
-        c.messages?.some((m) => String(m._id) === String(messageId))
+      /* =========================
+         2️⃣ UPDATE CHAT LIST
+      ========================== */
+
+      const chat = state.chats.find(
+        (c) => String(c._id) === String(chatId)
       );
 
-      if (chat) {
-        const chatMsg = chat.messages.find(
-          (m) => String(m._id) === String(messageId)
+      if (chat?.lastMessage && String(chat.lastMessage._id) === String(messageId)) {
+
+        if (!Array.isArray(chat.lastMessage.readBy)) {
+          chat.lastMessage.readBy = [];
+        }
+
+        const exists = chat.lastMessage.readBy.some(
+          (r) => String(r.user || r) === String(userId)
         );
 
-        if (chatMsg) {
-          chatMsg.readBy = Array.isArray(chatMsg.readBy) ? chatMsg.readBy : [];
-
-          const exists = chatMsg.readBy.some(
-            (r) => String(r.user || r) === String(userId)
-          );
-
-          if (!exists) {
-            chatMsg.readBy.push({
-              user: userId,
-              readAt: new Date().toISOString(),
-            });
-          }
+        if (!exists) {
+          chat.lastMessage.readBy.push({
+            user: userId,
+            readAt: new Date().toISOString(),
+          });
         }
       }
     },

@@ -433,7 +433,7 @@ export default function PodDetailsScreen() {
     const generateInviteLink = () => {
         if (!podId) return;
 
-        const baseUrl = server.replace("/api", "");
+        const baseUrl = "https://www.asiyoconnect.com";
         const link = `${baseUrl}/savings/pods/invite/${podId}`;
 
         setInviteLink(link);

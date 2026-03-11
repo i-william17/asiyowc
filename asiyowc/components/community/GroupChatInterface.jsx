@@ -7,12 +7,13 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Image,
   Pressable,
   Modal,
   Alert,
   Keyboard,
   ActivityIndicator,
+  LayoutAnimation,
+  UIManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,6 +22,7 @@ import { useRouter } from "expo-router";
 import { Swipeable } from "react-native-gesture-handler";
 import { decode as atob } from "base-64";
 import { Dimensions } from "react-native";
+import { Image } from "expo-image";
 
 import {
   fetchGroupConversation,
@@ -76,7 +78,7 @@ export default function GroupChatInterface({ chatId }) {
   const keyboardHeightRef = useRef(0);
 
   const { token, user } = useSelector((s) => s.auth);
-  const { selectedChat, loadingDetail, chats } = useSelector((s) => s.community);
+  const { selectedChat, loadingDetail } = useSelector((s) => s.community);
 
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [inputHeight, setInputHeight] = useState(0);
@@ -115,6 +117,12 @@ export default function GroupChatInterface({ chatId }) {
   const [confirmDeleteMeVisible, setConfirmDeleteMeVisible] = useState(false);
   const [confirmDeleteEveryoneVisible, setConfirmDeleteEveryoneVisible] = useState(false);
   const [deleteOptionsVisible, setDeleteOptionsVisible] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
 
   /* =====================================================
      FIX 1: REACTION HELPER FUNCTIONS
@@ -450,7 +458,7 @@ export default function GroupChatInterface({ chatId }) {
 
   const requestDeleteForMe = () => {
     setDeleteOptionsVisible(false);
-    setContextMenuVisible(false); // ✅ ADD
+    setContextMenuVisible(false);
     requestAnimationFrame(() => {
       setConfirmDeleteMeVisible(true);
     });
@@ -458,7 +466,7 @@ export default function GroupChatInterface({ chatId }) {
 
   const requestDeleteForEveryone = () => {
     setDeleteOptionsVisible(false);
-    setContextMenuVisible(false); // ✅ ADD
+    setContextMenuVisible(false);
     requestAnimationFrame(() => {
       setConfirmDeleteEveryoneVisible(true);
     });
@@ -560,7 +568,6 @@ export default function GroupChatInterface({ chatId }) {
     const firstMessage = selectedChat?.messages?.[0];
     if (!firstMessage?._id) return;
 
-    // ✅ show hint first
     setShowOlderHint(true);
 
     try {
@@ -580,24 +587,22 @@ export default function GroupChatInterface({ chatId }) {
       }
     } finally {
       setLoadingOlder(false);
-
-      // hide hint after loading
       setTimeout(() => setShowOlderHint(false), 1200);
     }
   }, [selectedChat, loadingOlder, hasMore, dispatch]);
 
   /* =====================================================
-     TYPING EMITS
+     TYPING EMITS (OPTIMIZED)
   ===================================================== */
-  const emitTypingStart = () => {
+  const emitTypingStart = useCallback(() => {
     if (!socketRef.current || !groupId) return;
     socketRef.current.emit("group:typing:start", { groupId });
-  };
+  }, [groupId]);
 
-  const emitTypingStop = () => {
+  const emitTypingStop = useCallback(() => {
     if (!socketRef.current || !groupId) return;
     socketRef.current.emit("group:typing:stop", { groupId });
-  };
+  }, [groupId]);
 
   const scheduleTypingStop = () => {
     if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
@@ -640,7 +645,6 @@ export default function GroupChatInterface({ chatId }) {
   useEffect(() => {
     if (!chatId) return;
 
-    // 🔥 prevents old messages flash
     dispatch(clearSelectedChat());
 
     dispatch(fetchGroupConversation({
@@ -653,7 +657,6 @@ export default function GroupChatInterface({ chatId }) {
   useEffect(() => {
     hasAutoScrolledRef.current = false;
     readEmittedRef.current.clear();
-    // Reset pagination
     setHasMore(true);
     setLoadingOlder(false);
 
@@ -662,15 +665,6 @@ export default function GroupChatInterface({ chatId }) {
       flushReadQueue();
     };
   }, [chatId]);
-
-
-  useEffect(() => {
-    console.log("selectedChat", selectedChat);
-
-    console.log("lastSeq direct", selectedChat?.lastSeq);
-    console.log("lastSeq nested", selectedChat?.chat?.lastSeq);
-
-  }, [selectedChat]);
 
   /* =====================================================
      SOCKET (REALTIME WITH ALL FEATURES)
@@ -688,12 +682,10 @@ export default function GroupChatInterface({ chatId }) {
         return;
       }
 
-      // 🔥 JOIN CHAT ROOM
       if (res.chatId) {
         socket.emit("chat:join", { chatId: res.chatId });
       }
 
-      // 🔥 NOW SAFE TO MARK READ
       if (selectedChat?.lastSeq && myId) {
         socket.emit("group:read", {
           chatId,
@@ -738,7 +730,6 @@ export default function GroupChatInterface({ chatId }) {
     socket.on("group:delete:me:update", ({ chatId: id, messageId, userId }) => {
       if (String(id) !== String(chatId)) return;
 
-      // Only apply if this delete is for ME
       if (String(userId) !== String(myId)) return;
 
       dispatch(
@@ -782,23 +773,20 @@ export default function GroupChatInterface({ chatId }) {
       });
     });
 
-    // ================= JOIN CHAT =================//
     socket.emit("chat:join", { chatId });
 
     /* ================= GROUP PRESENCE ================= */
     socket.emit("group:presence:whois", { groupId }, (res) => {
-
       if (!res?.success || !Array.isArray(res.data)) return;
 
       const ids = new Set(
         res.data
           .map(u => normalizePresenceId(u))
           .filter(Boolean)
-          .filter(id => id !== String(myId)) // exclude self
+          .filter(id => id !== String(myId))
       );
 
       setOnlineUserIds(ids);
-
     });
 
     socket.on("group:user:online", (payload) => {
@@ -819,14 +807,6 @@ export default function GroupChatInterface({ chatId }) {
       setOnlineUserIds(prev => {
         const next = new Set(prev);
         next.delete(uid);
-        return next;
-      });
-    });
-
-    socket.on("group:user:offline", ({ userId }) => {
-      setOnlineUserIds(prev => {
-        const next = new Set(prev);
-        next.delete(String(userId));
         return next;
       });
     });
@@ -865,8 +845,7 @@ export default function GroupChatInterface({ chatId }) {
       readQueueRef.current.clear();
       clearTimeout(readFlushTimerRef.current);
     };
-  }, [groupId, token, chatId, myId]);
-
+  }, [groupId, token, chatId, myId, emitTypingStop]);
 
   /* =====================================================
      UNREAD CLEAR (IMPORTANT)
@@ -877,8 +856,6 @@ export default function GroupChatInterface({ chatId }) {
     if (!selectedChat?.lastSeq) return;
 
     const seq = Number(selectedChat.lastSeq) || 0;
-
-    // do not emit if nothing to mark
     const state = selectedChat?.readState?.find(
       (r) => String(r.user) === String(myId)
     );
@@ -887,10 +864,8 @@ export default function GroupChatInterface({ chatId }) {
 
     if (seq <= lastReadSeq) return;
 
-    // 🔹 update backend
     socketRef.current.emit("group:read", { chatId, seq });
 
-    // 🔹 update redux immediately (UI clears badge instantly)
     dispatch(
       markChatRead({
         chatId,
@@ -898,7 +873,6 @@ export default function GroupChatInterface({ chatId }) {
         seq,
       })
     );
-
   }, [chatId, selectedChat?.lastSeq, myId]);
 
   /* =====================================================
@@ -950,13 +924,17 @@ export default function GroupChatInterface({ chatId }) {
      DATE GROUPING WITH SEPARATORS
   ===================================================== */
   const uniqueMessages = useMemo(() => {
-    const map = new Map();
-    messages.forEach((m) => {
-      if (m?._id) {
-        map.set(String(m._id), m);
-      }
-    });
-    return Array.from(map.values());
+    const seen = new Set();
+    const result = [];
+
+    for (const m of messages) {
+      const id = m?._id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      result.push(m);
+    }
+
+    return result;
   }, [messages]);
 
   const messagesWithDates = useMemo(() => {
@@ -987,12 +965,15 @@ export default function GroupChatInterface({ chatId }) {
     return result;
   }, [uniqueMessages]);
 
+  // FIX: Memoize reversed messages to prevent new array creation on every render
+  const reversedMessages = useMemo(() => {
+    return [...messagesWithDates].reverse();
+  }, [messagesWithDates]);
+
   const scrollToPinnedMessage = useCallback(() => {
     if (!pinnedMessage?._id || !listRef.current) return;
 
-    const reversedData = [...messagesWithDates].reverse();
-
-    const index = reversedData.findIndex(
+    const index = reversedMessages.findIndex(
       (item) =>
         item.type === "message" &&
         String(item._id) === String(pinnedMessage._id)
@@ -1000,17 +981,14 @@ export default function GroupChatInterface({ chatId }) {
 
     if (index === -1) return;
 
-    // Highlight
     setHighlightedId(pinnedMessage._id);
     setTimeout(() => setHighlightedId(null), 2000);
 
-    // First scroll
     listRef.current.scrollToIndex({
       index,
       animated: true,
     });
 
-    // Second scroll → FORCE CENTER
     setTimeout(() => {
       listRef.current?.scrollToIndex({
         index,
@@ -1018,8 +996,7 @@ export default function GroupChatInterface({ chatId }) {
         viewPosition: 0.5,
       });
     }, 250);
-
-  }, [pinnedMessage, messagesWithDates]);
+  }, [pinnedMessage, reversedMessages]);
 
   const reactionModalMessage = useMemo(() => {
     if (!reactionModalMessageId) return null;
@@ -1040,14 +1017,9 @@ export default function GroupChatInterface({ chatId }) {
       .map((id) => getMemberName(id))
       .filter(Boolean)
       .slice(0, 2);
-  }, [typingUserIds, myId, members]); // ← ADD members
-
-  useEffect(() => {
-
-  }, [typingUserIds]);
+  }, [typingUserIds, myId, members]);
 
   const onlineCount = useMemo(() => {
-    // Guards
     if (!Array.isArray(members) || members.length === 0) return 0;
     if (!(onlineUserIds instanceof Set) || onlineUserIds.size === 0) return 0;
     if (!myId) return 0;
@@ -1055,15 +1027,11 @@ export default function GroupChatInterface({ chatId }) {
     let count = 0;
 
     for (const member of members) {
-      // member shape: { user: { _id, profile, ... } }
       const uid = normalizeId(member?.user || member);
 
       if (!uid) continue;
-
-      // ❌ exclude myself
       if (uid === String(myId)) continue;
 
-      // ✅ strict match against presence Set (strings only)
       if (onlineUserIds.has(uid)) {
         count += 1;
       }
@@ -1071,7 +1039,6 @@ export default function GroupChatInterface({ chatId }) {
 
     return count;
   }, [members, onlineUserIds, myId]);
-
 
   const headerSubtitle = useMemo(() => {
     if (typingNames.length === 1) {
@@ -1103,7 +1070,6 @@ export default function GroupChatInterface({ chatId }) {
 
   const closeContextMenu = () => {
     setContextMenuVisible(false);
-    // setContextMessage(null);
   };
 
   const doReply = () => {
@@ -1121,255 +1087,293 @@ export default function GroupChatInterface({ chatId }) {
   /* =====================================================
      MESSAGE ROW COMPONENT WITH ALL FEATURES
   ===================================================== */
-  const MessageRow = React.memo(function MessageRow({ item }) {
-    const swipeRef = useRef(null);
+  const MessageRow = React.memo(
+    function MessageRow({ item }) {
+      const [expanded, setExpanded] = useState(false);
 
-    const senderId = getSenderId(item);
-    const isMine = myId && senderId && String(senderId) === String(myId);
+      const messageText = String(item.ciphertext || "");
+      const isLongMessage = messageText.length > 100;
 
-    const deletedForEveryone = item.isDeletedForEveryone === true;
-    const deletedForMe =
-      !deletedForEveryone &&
-      Array.isArray(item.deletedFor) &&
-      item.deletedFor.map(String).includes(String(myId));
+      const truncatedText = messageText.slice(0, 100);
+      const displayText = expanded ? messageText : truncatedText;
 
-    const showDeletedBubble = deletedForEveryone || deletedForMe;
-    const deletedText = deletedForEveryone
-      ? "This message was deleted"
-      : "This message was deleted from me";
+      const toggleExpand = () => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setExpanded((prev) => !prev);
+      };
+      const swipeRef = useRef(null);
 
-    const senderName = getSenderNameFromMessage(item);
-    const senderAvatar = getSenderAvatarFromMessage(item);
+      const senderId = getSenderId(item);
+      const isMine = myId && senderId && String(senderId) === String(myId);
 
-    const replied =
-      typeof item.replyTo === "object"
-        ? item.replyTo
-        : messages.find((m) => String(m._id) === String(item.replyTo));
+      const deletedForEveryone = item.isDeletedForEveryone === true;
+      const deletedForMe =
+        !deletedForEveryone &&
+        Array.isArray(item.deletedFor) &&
+        item.deletedFor.map(String).includes(String(myId));
 
-    const replyPreviewText = replied?.ciphertext || null;
-    const replyPreviewSenderName = getSenderNameFromMessage(replied) || null;
+      const showDeletedBubble = deletedForEveryone || deletedForMe;
+      const deletedText = deletedForEveryone
+        ? "This message was deleted"
+        : "This message was deleted from me";
 
-    const onSwipeReply = () => {
-      if (showDeletedBubble) return;
-      setReplyTo(item);
-      swipeRef.current?.close?.();
-    };
+      const senderName = getSenderNameFromMessage(item);
+      const senderAvatar = getSenderAvatarFromMessage(item);
 
-    const renderLeftActions = () => (
-      <View style={tw`justify-center pl-4`}>
-        <View style={tw`w-9 h-9 rounded-full bg-purple-600 items-center justify-center`}>
-          <Ionicons name="return-up-forward" size={18} color="#fff" />
+      const avatarSource = useMemo(() => {
+        if (!senderAvatar) return null;
+        return { uri: senderAvatar };
+      }, [senderAvatar]);
+
+      const replied =
+        typeof item.replyTo === "object"
+          ? item.replyTo
+          : messages.find((m) => String(m._id) === String(item.replyTo));
+
+      const replyPreviewText = replied?.ciphertext || null;
+      const replyPreviewSenderName = getSenderNameFromMessage(replied) || null;
+
+      const onSwipeReply = () => {
+        if (showDeletedBubble) return;
+        setReplyTo(item);
+        swipeRef.current?.close?.();
+      };
+
+      const renderLeftActions = () => (
+        <View style={tw`justify-center pl-4`}>
+          <View style={tw`w-9 h-9 rounded-full bg-purple-600 items-center justify-center`}>
+            <Ionicons name="return-up-forward" size={18} color="#fff" />
+          </View>
         </View>
-      </View>
-    );
+      );
 
-    const isPinned = String(item._id) === String(pinnedMessage);
-    const reactionSummary = getReactionSummary(item);
-    const totalReactions = getTotalReactions(item); // FIX 1: Use correct total count
-    const receipt = getReceiptState(item, isMine);
+      const isPinned = String(item._id) === String(pinnedMessage);
+      const reactionSummary = getReactionSummary(item);
+      const totalReactions = getTotalReactions(item);
+      const receipt = getReceiptState(item, isMine);
 
-    return (
-      <Swipeable
-        ref={swipeRef}
-        friction={2}
-        leftThreshold={40}
-        renderLeftActions={renderLeftActions}
-        onSwipeableLeftOpen={onSwipeReply}
-      >
-        <Pressable
-          onLongPress={() => {
-            if (!showDeletedBubble) openContextMenu(item);
-          }}
-          delayLongPress={250}
+      return (
+        <Swipeable
+          ref={swipeRef}
+          friction={2}
+          leftThreshold={40}
+          renderLeftActions={renderLeftActions}
+          onSwipeableLeftOpen={onSwipeReply}
         >
-          <View
-            style={[
-              tw`mb-5 flex-row`,
-              isMine ? tw`justify-end` : tw`justify-start`,
-              highlightedId === item._id && {
-                backgroundColor: "#F3E8FF",
-                borderRadius: 18,
-                padding: 6,
-              },
-            ]}
+          <Pressable
+            onLongPress={() => {
+              if (!showDeletedBubble) openContextMenu(item);
+            }}
+            delayLongPress={250}
           >
-            {!isMine && senderAvatar && (
-              <Image
-                source={{ uri: senderAvatar }}
-                style={tw`w-9 h-9 rounded-full mr-3`}
-              />
-            )}
-
             <View
               style={[
-                tw`px-4 py-3 rounded-2xl max-w-[82%]`,
-                isMine ? tw`bg-white border border-gray-200` : tw`bg-purple-600`,
+                tw`mb-5 flex-row`,
+                isMine ? tw`justify-end` : tw`justify-start`,
+                highlightedId === item._id && {
+                  backgroundColor: "#F3E8FF",
+                  borderRadius: 18,
+                  padding: 6,
+                },
               ]}
             >
-              {/* PIN INDICATOR */}
-              {isPinned && !showDeletedBubble && (
-                <View style={tw`flex-row items-center mb-1`}>
-                  <Ionicons
-                    name="pin"
-                    size={12}
-                    color={isMine ? "#6B7280" : "#E9D5FF"}
-                  />
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      marginLeft: 4,
-                      fontFamily: "Poppins-Medium",
-                      color: isMine ? "#6B7280" : "#E9D5FF",
-                    }}
-                  >
-                    Pinned
-                  </Text>
-                </View>
+              {!isMine && avatarSource && (
+                <Image
+                  source={avatarSource}
+                  style={tw`w-9 h-9 rounded-full mr-3`}
+                  cachePolicy="memory-disk"
+                />
               )}
 
-              {/* SENDER NAME (GROUP ONLY) */}
-              {!isMine && !showDeletedBubble && (
-                <Text
-                  style={{
-                    fontFamily: "Poppins-SemiBold",
-                    fontSize: 12,
-                    color: "#E9D5FF",
-                    marginBottom: 4,
-                  }}
-                >
-                  {senderName}
-                </Text>
-              )}
-
-              {/* REPLY PREVIEW */}
-              {!!replyPreviewText && !showDeletedBubble && (
-                <View
-                  style={[
-                    tw`mb-2 px-3 py-2 rounded-xl`,
-                    isMine ? tw`bg-gray-50 border border-gray-200` : tw`bg-purple-500/40`,
-                  ]}
-                >
-                  {!!replyPreviewSenderName && (
+              <View
+                style={[
+                  tw`px-4 py-3 rounded-2xl max-w-[82%]`,
+                  isMine ? tw`bg-white border border-gray-200` : tw`bg-purple-600`,
+                ]}
+              >
+                {/* PIN INDICATOR */}
+                {isPinned && !showDeletedBubble && (
+                  <View style={tw`flex-row items-center mb-1`}>
+                    <Ionicons
+                      name="pin"
+                      size={12}
+                      color={isMine ? "#6B7280" : "#E9D5FF"}
+                    />
                     <Text
                       style={{
-                        fontFamily: "Poppins-SemiBold",
-                        fontSize: 12,
+                        fontSize: 11,
+                        marginLeft: 4,
+                        fontFamily: "Poppins-Medium",
                         color: isMine ? "#6B7280" : "#E9D5FF",
-                        marginBottom: 2,
                       }}
                     >
-                      {replyPreviewSenderName}
+                      Pinned
                     </Text>
-                  )}
+                  </View>
+                )}
+
+                {/* SENDER NAME (GROUP ONLY) */}
+                {!isMine && !showDeletedBubble && (
                   <Text
-                    numberOfLines={2}
                     style={{
-                      fontFamily: "Poppins-Regular",
+                      fontFamily: "Poppins-SemiBold",
                       fontSize: 12,
-                      color: isMine ? "#6B7280" : "#F3E8FF",
+                      color: "#E9D5FF",
+                      marginBottom: 4,
                     }}
                   >
-                    {replyPreviewText}
+                    {senderName}
                   </Text>
-                </View>
-              )}
+                )}
 
-              {/* MESSAGE BODY */}
-              {showDeletedBubble ? (
-                <Text
-                  style={{
-                    fontFamily: "Poppins-Italic",
-                    fontSize: 13,
-                    color: isMine ? "#9CA3AF" : "#E9D5FF",
-                  }}
-                >
-                  {deletedText}
-                </Text>
-              ) : (
-                <Text
-                  style={{
-                    fontFamily: "Poppins-Regular",
-                    fontSize: 14,
-                    lineHeight: 20,
-                    color: isMine ? "#111827" : "#FFFFFF",
-                  }}
-                >
-                  {item.ciphertext}
-                </Text>
-              )}
-
-              {/* FIX 1 & 2: REACTIONS with total count and width constraint */}
-              {!showDeletedBubble && reactionSummary.length > 0 && (
-                <View style={tw`mt-2 flex-row items-center justify-end`}>
-                  <Pressable
-                    onPress={() => openReactionModal(item)}
+                {/* REPLY PREVIEW */}
+                {!!replyPreviewText && !showDeletedBubble && (
+                  <View
                     style={[
-                      tw`flex-row items-center px-2 py-1 rounded-full`,
-                      { maxWidth: 80 }, // FIX 2: Prevents infinite stretching
-                      isMine
-                        ? tw`bg-white border border-gray-300`
-                        : tw`bg-purple-500/80`,
-                      { marginLeft: "auto" },
+                      tw`mb-2 px-3 py-2 rounded-xl`,
+                      isMine ? tw`bg-gray-50 border border-gray-200` : tw`bg-purple-500/40`,
                     ]}
                   >
-                    <View style={tw`flex-row items-center mr-1`}>
-                      {reactionSummary.slice(0, 3).map((r, index) => (
-                        <View
-                          key={`${item._id}-${r.emoji}-${index}`}
-                          style={[
-                            tw`w-5 h-5 rounded-full items-center justify-center`,
-                            isMine ? tw`bg-gray-100` : tw`bg-purple-400`,
-                            { marginLeft: index > 0 ? -6 : 0 },
-                          ]}
-                        >
-                          <Text style={{ fontSize: 10 }}>{r.emoji}</Text>
-                        </View>
-                      ))}
-                    </View>
-
+                    {!!replyPreviewSenderName && (
+                      <Text
+                        style={{
+                          fontFamily: "Poppins-SemiBold",
+                          fontSize: 12,
+                          color: isMine ? "#6B7280" : "#E9D5FF",
+                          marginBottom: 2,
+                        }}
+                      >
+                        {replyPreviewSenderName}
+                      </Text>
+                    )}
                     <Text
-                      numberOfLines={1}
+                      numberOfLines={2}
                       style={{
-                        fontFamily: "Poppins-Medium",
-                        fontSize: 11,
-                        color: isMine ? "#111827" : "#FFFFFF",
-                        marginLeft: 4,
-                        maxWidth: 40, // FIX 2: Prevents text overflow
+                        fontFamily: "Poppins-Regular",
+                        fontSize: 12,
+                        color: isMine ? "#6B7280" : "#F3E8FF",
                       }}
                     >
-                      {formatCount(totalReactions)} {/* FIX 1: Formatted total count */}
+                      {replyPreviewText}
                     </Text>
-                  </Pressable>
-                </View>
-              )}
-
-              {/* META */}
-              <View style={tw`mt-2 flex-row items-center justify-end`}>
-                <Text
-                  style={{
-                    fontFamily: "Poppins-Regular",
-                    fontSize: 11,
-                    color: isMine ? "#9CA3AF" : "#E9D5FF",
-                  }}
-                >
-                  {formatTime(item.createdAt)}
-                </Text>
-
-                {isMine && receipt.icon && !showDeletedBubble && (
-                  <Ionicons
-                    name={receipt.icon}
-                    size={14}
-                    color={receipt.color}
-                    style={{ marginLeft: 6 }}
-                  />
+                  </View>
                 )}
+
+                {/* MESSAGE BODY */}
+                {showDeletedBubble ? (
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Italic",
+                      fontSize: 13,
+                      color: isMine ? "#9CA3AF" : "#E9D5FF",
+                    }}
+                  >
+                    {deletedText}
+                  </Text>
+                ) : (
+                  <>
+                    <Text
+                      style={{
+                        fontFamily: "Poppins-Regular",
+                        fontSize: 14,
+                        lineHeight: 20,
+                        color: isMine ? "#111827" : "#FFFFFF",
+                      }}
+                    >
+                      {displayText}
+                      {!expanded && isLongMessage ? "..." : ""}
+                    </Text>
+
+                    {isLongMessage && (
+                      <Pressable onPress={toggleExpand} style={{ marginTop: 4 }}>
+                        <Text
+                          style={{
+                            fontFamily: "Poppins-SemiBold",
+                            fontSize: 12,
+                            color: isMine ? "#6B7280" : "#E9D5FF",
+                          }}
+                        >
+                          {expanded ? "Show less" : "Show more"}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </>
+                )}
+
+                {/* REACTIONS with total count and width constraint */}
+                {!showDeletedBubble && reactionSummary.length > 0 && (
+                  <View style={tw`mt-2 flex-row items-center justify-end`}>
+                    <Pressable
+                      onPress={() => openReactionModal(item)}
+                      style={[
+                        tw`flex-row items-center px-2 py-1 rounded-full`,
+                        { maxWidth: 80 },
+                        isMine
+                          ? tw`bg-white border border-gray-300`
+                          : tw`bg-purple-500/80`,
+                        { marginLeft: "auto" },
+                      ]}
+                    >
+                      <View style={tw`flex-row items-center mr-1`}>
+                        {reactionSummary.slice(0, 3).map((r, index) => (
+                          <View
+                            key={`${item._id}-${r.emoji}-${index}`}
+                            style={[
+                              tw`w-5 h-5 rounded-full items-center justify-center`,
+                              isMine ? tw`bg-gray-100` : tw`bg-purple-400`,
+                              { marginLeft: index > 0 ? -6 : 0 },
+                            ]}
+                          >
+                            <Text style={{ fontSize: 10 }}>{r.emoji}</Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          fontFamily: "Poppins-Medium",
+                          fontSize: 11,
+                          color: isMine ? "#111827" : "#FFFFFF",
+                          marginLeft: 4,
+                          maxWidth: 40,
+                        }}
+                      >
+                        {formatCount(totalReactions)}
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* META */}
+                <View style={tw`mt-2 flex-row items-center justify-end`}>
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Regular",
+                      fontSize: 11,
+                      color: isMine ? "#9CA3AF" : "#E9D5FF",
+                    }}
+                  >
+                    {formatTime(item.createdAt)}
+                  </Text>
+
+                  {isMine && receipt.icon && !showDeletedBubble && (
+                    <Ionicons
+                      name={receipt.icon}
+                      size={14}
+                      color={receipt.color}
+                      style={{ marginLeft: 6 }}
+                    />
+                  )}
+                </View>
               </View>
             </View>
-          </View>
-        </Pressable>
-      </Swipeable>
-    );
-  });
+          </Pressable>
+        </Swipeable>
+      );
+    },
+    (prev, next) => prev.item === next.item // Custom comparison for perfect memoization
+  );
 
   /* =====================================================
      DATE TAG COMPONENT
@@ -1387,12 +1391,12 @@ export default function GroupChatInterface({ chatId }) {
   });
 
   /* =====================================================
-     RENDER LIST ITEM
+     RENDER LIST ITEM (MEMOIZED)
   ===================================================== */
-  const renderListItem = ({ item }) => {
+  const renderListItem = useCallback(({ item }) => {
     if (item?.type === "date") return <DateTag label={item.label} />;
     return <MessageRow item={item} />;
-  };
+  }, []); // Empty deps array since components are stable
 
   /* =====================================================
      LOADING STATE
@@ -1457,6 +1461,7 @@ export default function GroupChatInterface({ chatId }) {
                     borderWidth: 2,
                     borderColor: "#FFFFFF",
                   }}
+                  cachePolicy="memory-disk"
                 />
               ) : (
                 <View
@@ -1528,7 +1533,6 @@ export default function GroupChatInterface({ chatId }) {
           onPress={scrollToPinnedMessage}
           style={tw`bg-gradient-to-r from-purple-50 to-white border-b border-gray-100 px-4 py-3 shadow-sm`}
         >
-
           <View style={tw`flex-row items-center justify-between`}>
             <View style={tw`flex-row items-center flex-1`}>
               {/* PIN ICON */}
@@ -1588,6 +1592,7 @@ export default function GroupChatInterface({ chatId }) {
                       : require("../../assets/images/image-placeholder.png")
                   }
                   style={tw`w-5 h-5 rounded-full mr-2`}
+                  cachePolicy="memory-disk"
                 />
                 <Text
                   style={{
@@ -1614,21 +1619,20 @@ export default function GroupChatInterface({ chatId }) {
         </TouchableOpacity>
       )}
 
-      {/* ================= MESSAGES ================= */}
+      {/* ================= MESSAGES (OPTIMIZED FLATLIST) ================= */}
       <FlatList
         ref={listRef}
-        data={[...messagesWithDates].reverse()}
+        data={reversedMessages}
         keyExtractor={(item, index) =>
           item.type === "date"
             ? `date-${item.label}-${index}`
             : `msg-${item._id}`
         }
         renderItem={renderListItem}
-
-        /* ================= PAGINATION ================= */
         inverted
         maintainVisibleContentPosition={{
-          minIndexForVisible: 1
+          minIndexForVisible: 2,
+          autoscrollToTopThreshold: 20
         }}
         onEndReached={loadOlder}
         onEndReachedThreshold={0.2}
@@ -1663,22 +1667,19 @@ export default function GroupChatInterface({ chatId }) {
             )}
           </>
         }
-
-        /* ================= READ RECEIPTS ================= */
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         onMomentumScrollEnd={onMomentumScrollEnd}
-
-        /* ================= UX ================= */
         showsVerticalScrollIndicator={false}
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         removeClippedSubviews
         overScrollMode="never"
         bounces={false}
-        initialNumToRender={25}
-        maxToRenderPerBatch={25}
-        windowSize={10}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
+        updateCellsBatchingPeriod={40}
         onScrollToIndexFailed={(info) => {
           setTimeout(() => {
             listRef.current?.scrollToIndex({
@@ -1687,8 +1688,6 @@ export default function GroupChatInterface({ chatId }) {
             });
           }, 400);
         }}
-
-        /* ================= THE IMPORTANT PART ================= */
         contentContainerStyle={{
           paddingHorizontal: 16,
           paddingTop: 12,
@@ -1725,11 +1724,10 @@ export default function GroupChatInterface({ chatId }) {
           });
 
           setConfirmDeleteMeVisible(false);
-          setDeleteOptionsVisible(false);  // ✅ ADD
-          setContextMenuVisible(false);    // ✅ ADD
+          setDeleteOptionsVisible(false);
+          setContextMenuVisible(false);
           setContextMessage(null);
         }}
-
       />
 
       {/* ================= DELETE FOR EVERYONE MODAL ================= */}
@@ -1756,11 +1754,10 @@ export default function GroupChatInterface({ chatId }) {
           });
 
           setConfirmDeleteEveryoneVisible(false);
-          setDeleteOptionsVisible(false);  // ✅ ADD
-          setContextMenuVisible(false);    // ✅ ADD
+          setDeleteOptionsVisible(false);
+          setContextMenuVisible(false);
           setContextMessage(null);
         }}
-
       />
 
       {/* ================= DELETE OPTIONS MODAL ================= */}
@@ -1973,11 +1970,10 @@ export default function GroupChatInterface({ chatId }) {
           <View
             style={[
               tw`bg-white rounded-t-3xl pt-6 px-4`,
-              { height: REACTION_SHEET_HEIGHT } // 🔥 IMPORTANT
+              { height: REACTION_SHEET_HEIGHT }
             ]}
           >
-
-            {/* Header - FIX 3: Added total count */}
+            {/* Header */}
             <View style={tw`flex-row items-center justify-between mb-6`}>
               <View>
                 <Text
@@ -2014,11 +2010,7 @@ export default function GroupChatInterface({ chatId }) {
               showsVerticalScrollIndicator={false}
               renderItem={({ item }) => {
                 const reactionUserId = safeId(item.user);
-
-                // 🔑 RESOLVE FROM KNOWN USERS
-                const reactionUser =
-                  userMap.get(reactionUserId) || item.user;
-
+                const reactionUser = userMap.get(reactionUserId) || item.user;
                 const isMine = reactionUserId === myId;
 
                 return (
@@ -2042,6 +2034,7 @@ export default function GroupChatInterface({ chatId }) {
                               : require("../../assets/images/image-placeholder.png")
                           }
                           style={tw`w-12 h-12 rounded-full mr-4 bg-gray-200`}
+                          cachePolicy="memory-disk"
                         />
 
                         <View style={tw`flex-1`}>
@@ -2095,11 +2088,9 @@ export default function GroupChatInterface({ chatId }) {
                         </Text>
                       </TouchableOpacity>
                     )}
-
                   </Pressable>
                 );
               }}
-
               ListEmptyComponent={
                 <View style={tw`py-8 items-center`}>
                   <Text
@@ -2422,7 +2413,6 @@ export default function GroupChatInterface({ chatId }) {
         onRequestClose={() => setReportModalVisible(false)}
       >
         <View style={tw`flex-1 bg-black/40 justify-end`}>
-
           <View
             style={[
               tw`bg-white rounded-t-3xl px-5 pt-6`,
@@ -2459,7 +2449,7 @@ export default function GroupChatInterface({ chatId }) {
                     marginTop: 4,
                   }}
                 >
-                  Tell us what’s wrong with this group
+                  Tell us what's wrong with this group
                 </Text>
               </View>
 

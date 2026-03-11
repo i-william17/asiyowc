@@ -1,119 +1,32 @@
 // models/Chat.js
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
+const {
+  generateChatKey,
+  encryptChatKey,
+} = require("../utils/chatCrypto");
 
 /* =====================================================
-   MESSAGE SCHEMA
+   READ STATE
 ===================================================== */
-
-const reactionSchema = new mongoose.Schema(
+const readStateSchema = new mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    emoji: {
-      type: String,
-      required: true
-    },
-    createdAt: {
-      type: Date,
-      default: Date.now
-    }
-  },
-  { _id: false }
-);
-
-const readReceiptSchema = new mongoose.Schema(
-  {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
-    },
-    readAt: {
-      type: Date,
-      default: Date.now
-    }
-  },
-  { _id: false }
-);
-
-const messageSchema = new mongoose.Schema(
-  {
-    sender: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true
+      ref: "User",
+      required: true,
     },
 
-    ciphertext: {
-      type: String,
-      required: true
-    },
-
-    iv: {
-      type: String,
-      required: true
-    },
-
-    tag: {
-      type: String,
-      required: true
-    },
-
-    type: {
-      type: String,
-      enum: ['text', 'share'],
-      default: 'text'
-    },
-
-    sharedPost: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Post'
-    },
-
-    /* =====================
-       🔁 REPLY SUPPORT
-    ===================== */
-    replyTo: {
-      type: mongoose.Schema.Types.ObjectId
-    },
-
-    /* =====================
-       ❤️ REACTIONS
-    ===================== */
-    reactions: [reactionSchema],
-
-    /* =====================
-       ✓✓ READ RECEIPTS
-    ===================== */
-    readBy: [readReceiptSchema],
-
-    /* =====================
-   📈 MESSAGE SEQUENCE
-===================== */
-
-    seq: {
+    lastReadSeq: {
       type: Number,
-      index: true
+      default: 0,
     },
-    /* =====================
-       🗑 DELETE CONTROL
-    ===================== */
-    deletedFor: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      }
-    ],
 
-    isDeletedForEveryone: {
-      type: Boolean,
-      default: false
-    }
+    lastReadAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
-  { timestamps: true }
+  { _id: false }
 );
 
 /* =====================================================
@@ -123,108 +36,132 @@ const chatSchema = new mongoose.Schema(
   {
     type: {
       type: String,
-      enum: ['dm', 'group'],
-      required: true
+      enum: ["dm", "group"],
+      required: true,
     },
 
     participants: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-      }
+        ref: "User",
+        required: true,
+      },
     ],
 
-    /* =====================
-   🚫 BLOCKED USERS
-===================== */
+    pinnedMessage: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null
+    },
+
     blockedUsers: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      }
+        ref: "User",
+      },
     ],
 
-    // 🔑 DM-only uniqueness key
     dmKey: {
       type: String,
       index: true,
-      sparse: true
+      sparse: true,
     },
 
-    messages: [messageSchema],
+    /* =====================
+       PER-CHAT ENCRYPTION KEY
+    ===================== */
+    encryptedChatKey: {
+      type: String,
+      required: true,
+    },
+
+    chatKeyIv: {
+      type: String,
+      required: true,
+    },
+
+    chatKeyTag: {
+      type: String,
+      required: true,
+    },
+
+    keyVersion: {
+      type: String,
+      default: "v1",
+    },
 
     /* =====================
-       📌 PINNED MESSAGE
+       CHAT SUMMARY
     ===================== */
     pinnedMessage: {
-      type: mongoose.Schema.Types.ObjectId
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+
+    lastMessageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+      default: null,
+    },
+
+    lastMessageAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+
+    lastMessageType: {
+      type: String,
+      enum: ["text", "share", null],
+      default: null,
     },
 
     /* =====================
-   📊 CHAT MESSAGE SEQ
-===================== */
-
+       SEQUENCE
+    ===================== */
     lastSeq: {
       type: Number,
-      default: 0
+      default: 0,
     },
 
     /* =====================
-   👁 CHAT READ STATE
-===================== */
-
-    readState: [
-      {
-        user: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'User',
-          required: true
-        },
-
-        lastReadSeq: {
-          type: Number,
-          default: 0
-        },
-
-        lastReadAt: {
-          type: Date,
-          default: Date.now
-        }
-      }
-    ],
+       READ STATE
+    ===================== */
+    readState: {
+      type: [readStateSchema],
+      default: [],
+    },
 
     isRemoved: {
       type: Boolean,
-      default: false
-    }
+      default: false,
+    },
   },
   {
     timestamps: true,
     toJSON: { virtuals: true },
-    toObject: { virtuals: true }
+    toObject: { virtuals: true },
   }
 );
 
-
 /* =====================================================
-   🔒 HARDENING (KEEP)
+   HARDENING
 ===================================================== */
-
-chatSchema.pre('validate', function (next) {
+chatSchema.pre("validate", function (next) {
   if (Array.isArray(this.participants)) {
     this.participants = this.participants
-      .map((v) => (typeof v === 'object' ? v._id || v.id : v))
+      .map((v) => (typeof v === "object" ? v._id || v.id : v))
       .filter((v) => mongoose.Types.ObjectId.isValid(v));
   }
   next();
 });
 
 const normalizeId = (v) =>
-  typeof v === 'object' && v !== null ? v._id || v.id : v;
+  typeof v === "object" && v !== null ? v._id || v.id : v;
 
 chatSchema.pre(
-  ['find', 'findOne', 'findOneAndUpdate', 'countDocuments'],
+  ["find", "findOne", "findOneAndUpdate", "countDocuments"],
   function () {
     const cond = this.getQuery?.() || this._conditions;
 
@@ -243,35 +180,48 @@ chatSchema.pre(
 );
 
 /* =====================================================
-   VIRTUALS (UI REQUIRED)
+   AUTO-GENERATE CHAT KEY ON CREATE
 ===================================================== */
+chatSchema.pre("validate", function (next) {
+  if (!this.isNew) return next();
 
-chatSchema.virtual('lastMessage').get(function () {
-  if (!this.messages || this.messages.length === 0) return null;
-  return this.messages[this.messages.length - 1];
-});
+  if (this.encryptedChatKey && this.chatKeyIv && this.chatKeyTag) {
+    return next();
+  }
 
-chatSchema.virtual('lastMessageAt').get(function () {
-  if (!this.messages || this.messages.length === 0) return this.updatedAt;
-  return this.messages[this.messages.length - 1].createdAt;
-});
+  try {
+    const chatKey = generateChatKey();
+    const wrapped = encryptChatKey(chatKey);
 
-chatSchema.virtual('messagesCount').get(function () {
-  return this.messages ? this.messages.length : 0;
+    this.encryptedChatKey = wrapped.encryptedChatKey;
+    this.chatKeyIv = wrapped.chatKeyIv;
+    this.chatKeyTag = wrapped.chatKeyTag;
+    this.keyVersion = wrapped.keyVersion;
+
+    next();
+  } catch (err) {
+    next(err);
+  }
 });
 
 /* =====================================================
-   INDEXES
+   VIRTUALS
 ===================================================== */
+chatSchema.virtual("messagesCount", {
+  ref: "Message",
+  localField: "_id",
+  foreignField: "chatId",
+  count: true,
+});
 
 chatSchema.index(
   { dmKey: 1 },
   {
     unique: true,
     partialFilterExpression: {
-      type: 'dm',
-      isRemoved: false
-    }
+      type: "dm",
+      isRemoved: false,
+    },
   }
 );
 
@@ -279,10 +229,10 @@ chatSchema.index({ participants: 1, updatedAt: -1 });
 chatSchema.index({ isRemoved: 1 });
 chatSchema.index({ blockedUsers: 1 });
 chatSchema.index({ _id: 1, "readState.user": 1 });
+chatSchema.index({ lastMessageAt: -1 });
+
 chatSchema.methods.getReadState = function (userId) {
-  return this.readState.find(
-    r => String(r.user) === String(userId)
-  );
+  return this.readState.find((r) => String(r.user) === String(userId));
 };
 
-module.exports = mongoose.model('Chat', chatSchema);
+module.exports = mongoose.model("Chat", chatSchema);

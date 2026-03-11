@@ -12,6 +12,8 @@ import {
   Keyboard,
   ScrollView,
   ActivityIndicator,
+  LayoutAnimation,
+  UIManager,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -192,6 +194,10 @@ export default function ChatInterface({ chatId }) {
   const readQueueRef = useRef(new Set());
   const readFlushTimerRef = useRef(null);
 
+  // FIX: Separate typing states for local and remote
+  const [isTypingLocal, setIsTypingLocal] = useState(false);
+  const [isTypingRemote, setIsTypingRemote] = useState(false);
+
   const { token } = useSelector((s) => s.auth);
   const { selectedChat, loadingDetail, chats } = useSelector((s) => s.community);
 
@@ -245,8 +251,7 @@ export default function ChatInterface({ chatId }) {
   const [activeCategory, setActiveCategory] = useState("popular");
   const touchStartX = useRef(0);
 
-  /* Presence & typing */
-  const [typing, setTyping] = useState(false);
+  /* Presence */
   const [online, setOnline] = useState(false);
 
   /* ================= DELETE CONFIRMATION MODALS ================= */
@@ -281,6 +286,13 @@ export default function ChatInterface({ chatId }) {
 
     return iBlockedThem || theyBlockedMe;
   }, [selectedChat?.blockedUsers, selectedChat?.participants, myId]);
+
+
+  useEffect(() => {
+    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
 
   /* =====================================================
      REPORT CHAT FUNCTION
@@ -694,12 +706,12 @@ export default function ChatInterface({ chatId }) {
     /* ================= TYPING ================= */
     socket.on("typing:start", ({ userId }) => {
       if (String(userId) === String(myId)) return;
-      setTyping(true);
+      setIsTypingRemote(true); // FIX: Use remote typing state
     });
 
     socket.on("typing:stop", ({ userId }) => {
       if (String(userId) === String(myId)) return;
-      setTyping(false);
+      setIsTypingRemote(false); // FIX: Use remote typing state
     });
 
     /* ================= PRESENCE ================= */
@@ -739,8 +751,9 @@ export default function ChatInterface({ chatId }) {
       messageIds.forEach((messageId) => {
         dispatch(
           updateMessageReceipt({
-            messageId,
-            userId,
+            chatId: id,
+            messageId: String(messageId),
+            userId: String(userId),
           })
         );
       });
@@ -845,26 +858,28 @@ export default function ChatInterface({ chatId }) {
   }, []);
 
   /* =====================================================
-     TYPING EMITS
+     TYPING EMITS (FIX 5: Optimized)
   ===================================================== */
-  const emitTypingStart = () => {
+  const emitTypingStart = useCallback(() => {
     if (!socketRef.current || !chatId) return;
     if (isBlocked) return;
 
     socketRef.current.emit("typing:start", { chatId });
-  };
+  }, [chatId, isBlocked]);
 
-  const emitTypingStop = () => {
+  const emitTypingStop = useCallback(() => {
     if (!socketRef.current || !chatId) return;
     socketRef.current.emit("typing:stop", { chatId });
-  };
+  }, [chatId]);
 
-  const scheduleTypingStop = () => {
+  const scheduleTypingStop = useCallback(() => {
     if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+
     typingStopTimerRef.current = setTimeout(() => {
       emitTypingStop();
+      setIsTypingLocal(false); // FIX: Reset local typing state
     }, 900);
-  };
+  }, [emitTypingStop]);
 
   /* =====================================================
      SEND MESSAGE
@@ -890,7 +905,7 @@ export default function ChatInterface({ chatId }) {
 
     setText("");
     setReplyTo(null);
-    setTyping(false);
+    setIsTypingLocal(false); // FIX: Reset local typing state
     emitTypingStop();
   };
 
@@ -1036,13 +1051,15 @@ export default function ChatInterface({ chatId }) {
   /* =====================================================
      DATE GROUPING WITH SEPARATORS
   ===================================================== */
+  // FIX 10: Safer uniqueMessages with null checks
   const uniqueMessages = useMemo(() => {
     const map = new Map();
-    (selectedChat?.messages || []).forEach((m) => {
-      if (m?._id) {
-        map.set(String(m._id), m);
-      }
+
+    (selectedChat?.messages ?? []).forEach((m) => {
+      if (!m?._id) return; // FIX 10: Early return if no _id
+      map.set(String(m._id), m);
     });
+
     return Array.from(map.values());
   }, [selectedChat?.messages]);
 
@@ -1078,12 +1095,15 @@ export default function ChatInterface({ chatId }) {
     return result;
   }, [uniqueMessages, myId]);
 
+  // FIX 1: Memoize reversed messages to prevent new array on every render
+  const reversedMessages = useMemo(() => {
+    return [...messagesWithDates].reverse();
+  }, [messagesWithDates]);
+
   const scrollToPinnedMessage = useCallback(() => {
     if (!pinnedMessage?._id || !listRef.current) return;
 
-    const reversedData = [...messagesWithDates].reverse();
-
-    const index = reversedData.findIndex(
+    const index = reversedMessages.findIndex(
       (item) =>
         item.type === "message" &&
         String(item._id) === String(pinnedMessage._id)
@@ -1110,245 +1130,284 @@ export default function ChatInterface({ chatId }) {
       });
     }, 250);
 
-  }, [pinnedMessage, messagesWithDates]);
+  }, [pinnedMessage, reversedMessages]);
 
   /* =====================================================
-     MESSAGE ROW WITH ALL FEATURES
+     MESSAGE ROW WITH ALL FEATURES (FIX 3: Improved memoization)
   ===================================================== */
-  const MessageRow = React.memo(function MessageRow({ item, myId }) {
-    const swipeRef = useRef(null);
+  const MessageRow = React.memo(
+    function MessageRow({ item, myId }) {
+      const [expanded, setExpanded] = useState(false);
 
-    const isMine = String(normalizeId(item.sender)) === String(myId);
+      const messageText = String(item.ciphertext || "");
+      const isLongMessage = messageText.length > 100;
 
-    /* ================= DELETE STATES ================= */
-    const deletedForEveryone = item.isDeletedForEveryone === true;
+      const displayText = expanded ? messageText : messageText.slice(0, 100);
 
-    const deletedForMe =
-      !deletedForEveryone &&
-      Array.isArray(item.deletedFor) &&
-      item.deletedFor.map(String).includes(String(myId));
+      const toggleExpand = () => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setExpanded((prev) => !prev);
+      };
+      const swipeRef = useRef(null);
 
-    // Show deleted bubble
-    const showDeletedBubble = deletedForEveryone || deletedForMe;
+      const isMine = String(normalizeId(item.sender)) === String(myId);
 
-    // Correct message text
-    const deletedText = deletedForEveryone
-      ? "This message was deleted"
-      : "This message was deleted from me";
+      /* ================= DELETE STATES ================= */
+      const deletedForEveryone = item.isDeletedForEveryone === true;
 
-    /* ================================================= */
+      const deletedForMe =
+        !deletedForEveryone &&
+        Array.isArray(item.deletedFor) &&
+        item.deletedFor.map(String).includes(String(myId));
 
-    const replied =
-      typeof item.replyTo === "object"
-        ? item.replyTo
-        : selectedChat?.messages?.find(
+      // Show deleted bubble
+      const showDeletedBubble = deletedForEveryone || deletedForMe;
+
+      // Correct message text
+      const deletedText = deletedForEveryone
+        ? "This message was deleted"
+        : "This message was deleted from me";
+
+      /* ================================================= */
+
+      // FIX 8: Memoize reply preview calculation
+      const replied = useMemo(() => {
+        if (typeof item.replyTo === "object") return item.replyTo;
+
+        return selectedChat?.messages?.find(
           (m) => String(m._id) === String(item.replyTo)
         );
+      }, [item.replyTo, selectedChat?.messages]);
 
-    const replyPreviewText = replied?.ciphertext || null;
+      const replyPreviewText = replied?.ciphertext || null;
 
-    const onSwipeReply = () => {
-      if (showDeletedBubble) return; // prevent reply on deleted
-      setReplyTo(item);
-      swipeRef.current?.close?.();
-    };
+      const onSwipeReply = () => {
+        if (showDeletedBubble) return; // prevent reply on deleted
+        setReplyTo(item);
+        swipeRef.current?.close?.();
+      };
 
-    const renderLeftActions = () => (
-      <View style={tw`justify-center pl-4`}>
-        <View style={tw`w-9 h-9 rounded-full bg-purple-600 items-center justify-center`}>
-          <Ionicons name="return-up-forward" size={18} color="#fff" />
+      const renderLeftActions = () => (
+        <View style={tw`justify-center pl-4`}>
+          <View style={tw`w-9 h-9 rounded-full bg-purple-600 items-center justify-center`}>
+            <Ionicons name="return-up-forward" size={18} color="#fff" />
+          </View>
         </View>
-      </View>
-    );
+      );
 
-    const isPinned = String(item._id) === String(selectedChat?.pinnedMessage);
-    const reactionSummary = getReactionSummary(item);
-    const totalReactions = getTotalReactions(item); // FIX 1: Use correct total count
-    const receipt = getReceiptState(item, isMine);
+      const isPinned = String(item._id) === String(selectedChat?.pinnedMessage);
+      const reactionSummary = getReactionSummary(item);
+      const totalReactions = getTotalReactions(item); // FIX 1: Use correct total count
+      const receipt = getReceiptState(item, isMine);
 
-    return (
-      <Swipeable
-        ref={swipeRef}
-        friction={2}
-        leftThreshold={40}
-        renderLeftActions={renderLeftActions}
-        onSwipeableLeftOpen={onSwipeReply}
-      >
-        <Pressable
-          onLongPress={() => {
-            if (!showDeletedBubble) openContextMenu(item);
-          }}
-          delayLongPress={250}
+      return (
+        <Swipeable
+          ref={swipeRef}
+          friction={2}
+          leftThreshold={40}
+          renderLeftActions={renderLeftActions}
+          onSwipeableLeftOpen={onSwipeReply}
         >
-          <View
-            style={[
-              tw`mb-5 flex-row`,
-              isMine ? tw`justify-end` : tw`justify-start`,
-              highlightedId === item._id && {
-                backgroundColor: "#F3E8FF",
-                borderRadius: 18,
-                padding: 6,
-              },
-            ]}
+          <Pressable
+            onLongPress={() => {
+              if (!showDeletedBubble) openContextMenu(item);
+            }}
+            delayLongPress={250}
           >
-
-            {!isMine && receiverAvatar && (
-              <Image
-                source={{ uri: receiverAvatar }}
-                style={tw`w-9 h-9 rounded-full mr-3`}
-              />
-            )}
-
             <View
               style={[
-                tw`px-4 py-3 rounded-2xl max-w-[82%]`,
-                isMine
-                  ? tw`bg-white border border-gray-200`
-                  : tw`bg-purple-600`,
+                tw`mb-5 flex-row`,
+                isMine ? tw`justify-end` : tw`justify-start`,
+                highlightedId === item._id && {
+                  backgroundColor: "#F3E8FF",
+                  borderRadius: 18,
+                  padding: 6,
+                },
               ]}
             >
-              {/* PIN */}
-              {isPinned && !showDeletedBubble && (
-                <View style={tw`flex-row items-center mb-1`}>
-                  <Ionicons
-                    name="pin"
-                    size={12}
-                    color={isMine ? "#6B7280" : "#E9D5FF"}
-                  />
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      marginLeft: 4,
-                      fontFamily: "Poppins-Medium",
-                      color: isMine ? "#6B7280" : "#E9D5FF",
-                    }}
-                  >
-                    Pinned
-                  </Text>
-                </View>
+
+              {!isMine && receiverAvatar && (
+                <Image
+                  source={{ uri: receiverAvatar }}
+                  style={tw`w-9 h-9 rounded-full mr-3`}
+                />
               )}
 
-              {/* REPLY PREVIEW */}
-              {!!replyPreviewText && !showDeletedBubble && (
-                <View
-                  style={[
-                    tw`mb-2 px-3 py-2 rounded-xl`,
-                    isMine
-                      ? tw`bg-gray-50 border border-gray-200`
-                      : tw`bg-purple-500/40`,
-                  ]}
-                >
-                  <Text
-                    numberOfLines={2}
-                    style={{
-                      fontFamily: "Poppins-Regular",
-                      fontSize: 12,
-                      color: isMine ? "#6B7280" : "#F3E8FF",
-                    }}
-                  >
-                    {replyPreviewText}
-                  </Text>
-                </View>
-              )}
-
-              {/* MESSAGE BODY */}
-              {showDeletedBubble ? (
-                <Text
-                  style={{
-                    fontFamily: "Poppins-Italic",
-                    fontSize: 13,
-                    color: isMine ? "#9CA3AF" : "#E9D5FF",
-                  }}
-                >
-                  {deletedText}
-                </Text>
-              ) : (
-                <Text
-                  style={{
-                    fontFamily: "Poppins-Regular",
-                    fontSize: 14,
-                    lineHeight: 20,
-                    color: isMine ? "#111827" : "#FFFFFF",
-                  }}
-                >
-                  {item.ciphertext}
-                </Text>
-              )}
-
-              {/* FIX 1 & 2: REACTIONS with total count and width constraint */}
-              {!showDeletedBubble && reactionSummary.length > 0 && (
-                <View style={tw`mt-2 flex-row items-center justify-end`}>
-                  <Pressable
-                    onPress={() => openReactionModal(item)}
-                    style={[
-                      tw`flex-row items-center px-2 py-1 rounded-full`,
-                      { maxWidth: 80 }, // FIX 2: Prevents infinite stretching
-                      isMine
-                        ? tw`bg-white border border-gray-300`
-                        : tw`bg-purple-500/80`,
-                      { marginLeft: "auto" },
-                    ]}
-                  >
-                    <View style={tw`flex-row items-center mr-1`}>
-                      {reactionSummary.slice(0, 3).map((r, index) => (
-                        <View
-                          key={`${item._id}-${r.emoji}-${index}`}
-                          style={[
-                            tw`w-5 h-5 rounded-full items-center justify-center`,
-                            isMine
-                              ? tw`bg-gray-100`
-                              : tw`bg-purple-400`,
-                            { marginLeft: index > 0 ? -6 : 0 },
-                          ]}
-                        >
-                          <Text style={{ fontSize: 10 }}>{r.emoji}</Text>
-                        </View>
-                      ))}
-                    </View>
-
+              <View
+                style={[
+                  tw`px-4 py-3 rounded-2xl max-w-[82%]`,
+                  isMine
+                    ? tw`bg-white border border-gray-200`
+                    : tw`bg-purple-600`,
+                ]}
+              >
+                {/* PIN */}
+                {isPinned && !showDeletedBubble && (
+                  <View style={tw`flex-row items-center mb-1`}>
+                    <Ionicons
+                      name="pin"
+                      size={12}
+                      color={isMine ? "#6B7280" : "#E9D5FF"}
+                    />
                     <Text
-                      numberOfLines={1}
                       style={{
-                        fontFamily: "Poppins-Medium",
                         fontSize: 11,
-                        color: isMine ? "#111827" : "#FFFFFF",
                         marginLeft: 4,
-                        maxWidth: 40, // FIX 2: Prevents text overflow
+                        fontFamily: "Poppins-Medium",
+                        color: isMine ? "#6B7280" : "#E9D5FF",
                       }}
                     >
-                      {formatCount(totalReactions)} {/* FIX 1: Formatted total count */}
+                      Pinned
                     </Text>
-                  </Pressable>
-                </View>
-              )}
-
-              {/* META */}
-              <View style={tw`mt-2 flex-row items-center justify-end`}>
-                <Text
-                  style={{
-                    fontFamily: "Poppins-Regular",
-                    fontSize: 11,
-                    color: isMine ? "#9CA3AF" : "#E9D5FF",
-                  }}
-                >
-                  {formatTime(item.createdAt)}
-                </Text>
-
-                {isMine && receipt.icon && !showDeletedBubble && (
-                  <Ionicons
-                    name={receipt.icon}
-                    size={14}
-                    color={receipt.color}
-                    style={{ marginLeft: 6 }}
-                  />
+                  </View>
                 )}
+
+                {/* REPLY PREVIEW */}
+                {!!replyPreviewText && !showDeletedBubble && (
+                  <View
+                    style={[
+                      tw`mb-2 px-3 py-2 rounded-xl`,
+                      isMine
+                        ? tw`bg-gray-50 border border-gray-200`
+                        : tw`bg-purple-500/40`,
+                    ]}
+                  >
+                    <Text
+                      numberOfLines={2}
+                      style={{
+                        fontFamily: "Poppins-Regular",
+                        fontSize: 12,
+                        color: isMine ? "#6B7280" : "#F3E8FF",
+                      }}
+                    >
+                      {replyPreviewText}
+                    </Text>
+                  </View>
+                )}
+
+                {/* MESSAGE BODY */}
+                {showDeletedBubble ? (
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Italic",
+                      fontSize: 13,
+                      color: isMine ? "#9CA3AF" : "#E9D5FF",
+                    }}
+                  >
+                    {deletedText}
+                  </Text>
+                ) : (
+                  <>
+                    <Text
+                      style={{
+                        fontFamily: "Poppins-Regular",
+                        fontSize: 14,
+                        lineHeight: 20,
+                        color: isMine ? "#111827" : "#FFFFFF",
+                      }}
+                    >
+                      {displayText}
+                      {!expanded && isLongMessage ? "..." : ""}
+                    </Text>
+
+                    {isLongMessage && (
+                      <Pressable onPress={toggleExpand} style={{ marginTop: 4 }}>
+                        <Text
+                          style={{
+                            fontFamily: "Poppins-SemiBold",
+                            fontSize: 12,
+                            color: isMine ? "#6B7280" : "#E9D5FF",
+                          }}
+                        >
+                          {expanded ? "Show less" : "Show more"}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </>
+                )}
+
+                {/* FIX 1 & 2: REACTIONS with total count and width constraint */}
+                {!showDeletedBubble && reactionSummary.length > 0 && (
+                  <View style={tw`mt-2 flex-row items-center justify-end`}>
+                    <Pressable
+                      onPress={() => openReactionModal(item)}
+                      style={[
+                        tw`flex-row items-center px-2 py-1 rounded-full`,
+                        { maxWidth: 80 }, // FIX 2: Prevents infinite stretching
+                        isMine
+                          ? tw`bg-white border border-gray-300`
+                          : tw`bg-purple-500/80`,
+                        { marginLeft: "auto" },
+                      ]}
+                    >
+                      <View style={tw`flex-row items-center mr-1`}>
+                        {reactionSummary.slice(0, 3).map((r, index) => (
+                          <View
+                            key={`${item._id}-${r.emoji}-${index}`}
+                            style={[
+                              tw`w-5 h-5 rounded-full items-center justify-center`,
+                              isMine
+                                ? tw`bg-gray-100`
+                                : tw`bg-purple-400`,
+                              { marginLeft: index > 0 ? -6 : 0 },
+                            ]}
+                          >
+                            <Text style={{ fontSize: 10 }}>{r.emoji}</Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          fontFamily: "Poppins-Medium",
+                          fontSize: 11,
+                          color: isMine ? "#111827" : "#FFFFFF",
+                          marginLeft: 4,
+                          maxWidth: 40, // FIX 2: Prevents text overflow
+                        }}
+                      >
+                        {formatCount(totalReactions)} {/* FIX 1: Formatted total count */}
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* META */}
+                <View style={tw`mt-2 flex-row items-center justify-end`}>
+                  <Text
+                    style={{
+                      fontFamily: "Poppins-Regular",
+                      fontSize: 11,
+                      color: isMine ? "#9CA3AF" : "#E9D5FF",
+                    }}
+                  >
+                    {formatTime(item.createdAt)}
+                  </Text>
+
+                  {isMine && receipt.icon && !showDeletedBubble && (
+                    <Ionicons
+                      name={receipt.icon}
+                      size={14}
+                      color={receipt.color}
+                      style={{ marginLeft: 6 }}
+                    />
+                  )}
+                </View>
               </View>
             </View>
-          </View>
-        </Pressable>
-      </Swipeable>
-    );
-  });
+          </Pressable>
+        </Swipeable>
+      );
+    },
+    (prev, next) => {
+      // FIX 3: Custom comparison for perfect memoization
+      return (
+        prev.item === next.item &&
+        prev.myId === next.myId
+      );
+    }
+  );
 
   /* =====================================================
      DATE TAG COMPONENT
@@ -1366,12 +1425,15 @@ export default function ChatInterface({ chatId }) {
   });
 
   /* =====================================================
-     LIST RENDERER
+     LIST RENDERER (FIX 2: Memoized with useCallback)
   ===================================================== */
-  const renderListItem = ({ item }) => {
-    if (item?.type === "date") return <DateTag label={item.label} />;
+  const renderListItem = useCallback(({ item }) => {
+    if (item?.type === "date") {
+      return <DateTag label={item.label} />;
+    }
+
     return <MessageRow item={item} myId={myId} />;
-  };
+  }, [myId]);
 
   /* =====================================================
      LOADING STATE
@@ -1395,7 +1457,12 @@ export default function ChatInterface({ chatId }) {
     );
   }
 
-  const headerSubtitle = typing ? "typing…" : online ? "online" : "offline";
+  // FIX: Use remote typing state for header subtitle
+  const headerSubtitle = isTypingRemote
+    ? "typing…"
+    : online
+      ? "online"
+      : "offline";
 
   /* =====================================================
      UI
@@ -1596,16 +1663,17 @@ export default function ChatInterface({ chatId }) {
         </TouchableOpacity>
       )}
 
-      {/* ================= MESSAGES ================= */}
+      {/* ================= MESSAGES (OPTIMIZED FLATLIST) ================= */}
       <FlatList
         ref={listRef}
-        data={[...messagesWithDates].reverse()} // 🔥 REVERSE for inverted
-        renderItem={renderListItem}
+        data={reversedMessages} // FIX 1: Using memoized reversed messages
+        renderItem={renderListItem} // FIX 2: Memoized render function
         keyExtractor={(item, index) =>
           item.type === "date"
             ? `date-${item.label}-${index}`
             : `msg-${item._id}`
         }
+        extraData={selectedChat?.pinnedMessage} // FIX 4: Add extraData for pinned message updates
 
         /* ================= WHATSAPP-STYLE SCROLLING ================= */
         inverted // 🔥 KEY CHANGE: Uses native inversion
@@ -1638,12 +1706,20 @@ export default function ChatInterface({ chatId }) {
         keyboardShouldPersistTaps="handled"
         overScrollMode="never"
         bounces={false}
+        scrollEventThrottle={16} // FIX 9: Add scroll throttle
 
         /* ================= PERFORMANCE ================= */
         initialNumToRender={25}
         maxToRenderPerBatch={25}
         windowSize={10}
-        removeClippedSubviews={false} // 🔥 CHANGED: Disable for better UX during fast scroll
+        // FIX 6: Add getItemLayout for smoother pagination
+        getItemLayout={(data, index) => ({
+          length: 80, // Approximate height of each item
+          offset: 80 * index,
+          index
+        })}
+        // FIX 7: Platform-specific removeClippedSubviews
+        removeClippedSubviews={Platform.OS === "android"}
         onScrollToIndexFailed={(info) => {
           setTimeout(() => {
             listRef.current?.scrollToIndex({
@@ -2754,7 +2830,13 @@ export default function ChatInterface({ chatId }) {
           editable={!isBlocked}
           onChangeText={(v) => {
             setText(v);
-            emitTypingStart();
+
+            // FIX 5: Only emit typing start if not already typing locally
+            if (!isTypingLocal) {
+              emitTypingStart();
+              setIsTypingLocal(true);
+            }
+
             scheduleTypingStop();
           }}
           onFocus={() => {

@@ -68,6 +68,7 @@ import {
 import tw from "../../utils/tw";
 
 // ✅ 1️⃣ IMPORTS (add once at top)
+import { server } from "../../server";
 import ConfirmModal from "../../components/community/ConfirmModal";
 import { createOrGetDMChat } from "../../store/slices/communitySlice";
 
@@ -202,19 +203,19 @@ const Chip = React.memo(({ text, tone = "purple" }) => {
     tone === "purple"
       ? tw`bg-purple-100`
       : tone === "gold"
-      ? tw`bg-amber-100`
-      : tone === "green"
-      ? tw`bg-green-100`
-      : tw`bg-gray-100`;
+        ? tw`bg-amber-100`
+        : tone === "green"
+          ? tw`bg-green-100`
+          : tw`bg-gray-100`;
 
   const textStyle =
     tone === "purple"
       ? tw`text-purple-800`
       : tone === "gold"
-      ? tw`text-amber-800`
-      : tone === "green"
-      ? tw`text-green-800`
-      : tw`text-gray-700`;
+        ? tw`text-amber-800`
+        : tone === "green"
+          ? tw`text-green-800`
+          : tw`text-gray-700`;
 
   return (
     <View style={[base, toneStyle]}>
@@ -251,7 +252,8 @@ const StatPill = React.memo(({ label, value, icon: Icon, gradient }) => (
 export default function MentorDetailsScreen() {
   const router = useRouter();
   const { mentorId } = useLocalSearchParams();
-  
+
+  const { user } = useSelector((s) => s.auth);
   // ✅ 2️⃣ STATE (add once inside component)
   const dispatch = useDispatch();
   const [confirmVisible, setConfirmVisible] = useState(false);
@@ -339,6 +341,16 @@ export default function MentorDetailsScreen() {
   const pricePerSession = safeNum(safeMentor?.pricePerSession, 0);
 
   const starSegments = useMemo(() => getStarSegments(rating), [rating]);
+
+  const mentorUserId = useMemo(() => {
+    return typeof safeMentor?.user === "string"
+      ? safeMentor.user
+      : safeMentor?.user?._id;
+  }, [safeMentor]);
+
+  const currentUserId = user?._id;
+
+  const isOwnMentorProfile = String(currentUserId) === String(mentorUserId);
 
   const primaryStatusTone = useMemo(() => {
     if (isSuspended) return "red";
@@ -467,18 +479,45 @@ export default function MentorDetailsScreen() {
   // ✅ STEP 2 — Use your EXISTING DM chat logic
   const handleMentorChat = async () => {
     try {
-      const participantId =
-        typeof safeMentor?.user === "string"
-          ? safeMentor.user
-          : safeMentor?.user?._id;
+      // if (isOwnMentorProfile) {
+      //   Alert.alert("Unavailable", "You cannot start a chat with yourself.");
+      //   return;
+      // }
 
-      const chat = await dispatch(
-        createOrGetDMChat({ participantId })
-      ).unwrap();
+      if (!mentorUserId || !currentUserId) {
+        console.error("Missing participant IDs");
+        return;
+      }
 
-      router.replace(`/community/chat/${chat._id}`);
+      const res = await fetch(`${server}/community/chats`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          type: "dm",
+          participants: [currentUserId, mentorUserId],
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        console.error(data?.message || "Failed to create chat");
+        return;
+      }
+
+      const chatId = data?._id || data?.chat?._id || data?.data?._id;
+
+      if (!chatId) {
+        console.error("Chat ID missing in response:", data);
+        return;
+      }
+
+      router.replace(`/community/chat/${chatId}`);
     } catch (err) {
-      console.error(err);
+      console.error("Chat error:", err);
     }
   };
 
@@ -688,8 +727,8 @@ export default function MentorDetailsScreen() {
                 primaryStatusTone === "green"
                   ? ["#F0FDF4", "#FFFFFF"]
                   : primaryStatusTone === "red"
-                  ? ["#FEF2F2", "#FFFFFF"]
-                  : ["#F3F4F6", "#FFFFFF"]
+                    ? ["#FEF2F2", "#FFFFFF"]
+                    : ["#F3F4F6", "#FFFFFF"]
               }
             />
           </View>
@@ -943,31 +982,40 @@ export default function MentorDetailsScreen() {
 
             {/* ✅ STEP 3 — Replace your Bottom Button with dynamic Talk to Mentor button */}
             {safeMentor?.isActive &&
-             !safeMentor?.isSuspended &&
-             isMentorAvailableNow && (
+              !safeMentor?.isSuspended &&
+              isMentorAvailableNow &&
+              !isOwnMentorProfile && (
 
-              <TouchableOpacity
-                onPress={() => setConfirmVisible(true)}
-                style={tw`flex-1 rounded-full overflow-hidden shadow-sm`}
-                activeOpacity={0.85}
-              >
-                <LinearGradient
-                  colors={["#7C3AED", "#F59E0B"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={tw`py-3 flex-row items-center justify-center`}
+                <TouchableOpacity
+                  onPress={() => setConfirmVisible(true)}
+                  style={tw`flex-1 rounded-full overflow-hidden shadow-sm`}
+                  activeOpacity={0.85}
                 >
-                  <MessageCircle size={16} color="#FFFFFF" />
-                  <Text
-                    style={[
-                      tw`text-white ml-2`,
-                      { fontFamily: "Poppins-SemiBold" },
-                    ]}
+                  <LinearGradient
+                    colors={["#7C3AED", "#F59E0B"]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={tw`py-3 flex-row items-center justify-center`}
                   >
-                    Talk to Mentor
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
+                    <MessageCircle size={16} color="#FFFFFF" />
+                    <Text
+                      style={[
+                        tw`text-white ml-2`,
+                        { fontFamily: "Poppins-SemiBold" },
+                      ]}
+                    >
+                      Talk to Mentor
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
+
+            {isOwnMentorProfile && (
+              <View style={tw`flex-1 bg-gray-200 rounded-full py-3 items-center`}>
+                <Text style={{ fontFamily: "Poppins-Regular", color: "#6B7280" }}>
+                  This is your mentor profile
+                </Text>
+              </View>
             )}
 
             {/* ✅ STEP 4 — Optional (nice UX): Show disabled state when mentor is offline */}
@@ -1135,7 +1183,7 @@ export default function MentorDetailsScreen() {
                     await handleShareProfile();
                   }}
                 /> */}
-                                {/* <ActionRow
+                {/* <ActionRow
                   icon={Star}
                   title="Rate mentor"
                   subtitle="Provide feedback on your experience with this mentor"

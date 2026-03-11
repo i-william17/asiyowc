@@ -700,20 +700,45 @@ export default function CommunityScreen() {
       return (
         <>
           {/* ✅ Replace only the top create row area with combined create+search row */}
-          <SearchCreateRow
-            tab="groups"
-            searchOpen={searchOpen}
-            searchQuery={searchQuery}
-            setSearchQuery={setSearchQuery}
-            openSearchForTab={openSearchForTab}
-            closeSearchForTab={closeSearchForTab}
-            getCreateAction={getCreateAction}
-            getCreateIcon={getCreateIcon}
-            getSearchPlaceholder={getSearchPlaceholder}
-            groupsSearchInputRef={groupsSearchInputRef}
-            chatsSearchInputRef={chatsSearchInputRef}
-            voicesSearchInputRef={voicesSearchInputRef}
-          />
+          {/* <SearchCreateRow
+  tab="chats"
+  searchOpen={searchOpen}
+  searchQuery={searchQuery}
+  setSearchQuery={setSearchQuery}
+  openSearchForTab={openSearchForTab}
+  closeSearchForTab={closeSearchForTab}
+  getCreateAction={getCreateAction}
+  getCreateIcon={getCreateIcon}
+  getSearchPlaceholder={getSearchPlaceholder}
+  groupsSearchInputRef={groupsSearchInputRef}
+  chatsSearchInputRef={chatsSearchInputRef}
+  voicesSearchInputRef={voicesSearchInputRef}
+/> */}
+
+          {/* SEARCH ONLY */}
+          <View style={tw`flex-row items-center mb-3`}>
+            <View style={tw`flex-1 mr-3`}>
+              <View style={tw`flex-row items-center bg-white border border-gray-200 rounded-2xl px-4 py-3`}>
+                <Ionicons name="search" size={18} color="#6B7280" />
+                <TextInput
+                  ref={groupsSearchInputRef}
+                  value={searchQuery.groups}
+                  onChangeText={(v) =>
+                    setSearchQuery((p) => ({ ...p, groups: v }))
+                  }
+                  placeholder="Search groups…"
+                  placeholderTextColor="#9CA3AF"
+                  style={{
+                    flex: 1,
+                    marginLeft: 10,
+                    paddingVertical: 6,
+                    fontFamily: "Poppins-Regular",
+                    color: "#111827",
+                  }}
+                />
+              </View>
+            </View>
+          </View>
 
           {!filteredGroups.length ? (
             <EmptyState

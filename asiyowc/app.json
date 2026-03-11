@@ -16,6 +16,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.asiyowc",
+      "associatedDomains": [
+        "applinks:www.asiyoconnect.com",
+        "applinks:asiyoconnect.com"
+      ],
       "infoPlist": {
         "NSMicrophoneUsageDescription": "This app needs microphone access for voice rooms.",
         "UIBackgroundModes": [
@@ -41,6 +45,26 @@
         "INTERNET",
         "BLUETOOTH",
         "BLUETOOTH_CONNECT"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "www.asiyoconnect.com"
+            },
+            {
+              "scheme": "https",
+              "host": "asiyoconnect.com"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ]
     },
     "web": {

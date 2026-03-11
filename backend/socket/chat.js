@@ -1,7 +1,12 @@
 // backend/socket/chat.js
 const mongoose = require('mongoose');
 const Chat = require('../models/Chat');
+const Message = require('../models/Message');
 const User = require("../models/User");
+const {
+  decryptWithKey,
+  decryptChatKey
+} = require("../utils/chatCrypto");
 const { sendExpoPushToUser } = require("../utils/push");
 const { isOnline } = require("./presence");
 
@@ -124,7 +129,6 @@ module.exports = (io, socket) => {
       const chat = await Chat.create({
         type,
         participants: uniqueParticipants,
-        messages: [],
       });
 
       uniqueParticipants.forEach((uid) => {
@@ -181,73 +185,163 @@ module.exports = (io, socket) => {
   /* =====================================================
      SEND MESSAGE (TEXT / REPLY) WITH BLOCK CHECK
   ===================================================== */
-  socket.on('message:send', async ({ chatId, payload }, cb) => {
+  socket.on("message:send", async ({ chatId, payload }, cb) => {
     try {
+
       const cid = normalizeId(chatId);
-      if (!isValidId(cid) || !payload?.ciphertext) return;
+
+      if (!isValidId(cid) || !payload?.ciphertext) {
+        return cb?.({ success: false });
+      }
 
       const chat = await Chat.findOne({
         _id: cid,
         participants: userId,
-        isRemoved: false,
-      });
+        isRemoved: false
+      }).select(
+        "participants encryptedChatKey chatKeyIv chatKeyTag blockedUsers type readState lastSeq"
+      );
 
-      if (!chat) return;
+      if (!chat) {
+        return cb?.({ success: false });
+      }
 
-      // 🔥 BLOCK CHECK - Prevent blocked users from sending messages
       if (chat.blockedUsers?.map(String).includes(String(userId))) {
-        return cb?.({ success: false, message: "You are blocked from sending messages in this chat" });
+        return cb?.({ success: false, message: "Blocked" });
       }
 
       /* =====================
-         SEQUENCE + MESSAGE
+         SEQUENCE
       ===================== */
 
       chat.lastSeq = (chat.lastSeq || 0) + 1;
 
-      const message = {
-        _id: new mongoose.Types.ObjectId(),
-        sender: new mongoose.Types.ObjectId(userId),
-        ciphertext: payload.ciphertext,
-        type: payload.type || 'text',
-        replyTo: payload.replyTo || null,
-        reactions: [],
-        readBy: [],
-        seq: chat.lastSeq,
-        createdAt: new Date(),
-      };
+      chat.readState = chat.readState || [];
 
-      chat.messages.push(message);
+      const senderState = chat.readState.find(
+        r => String(r.user) === String(userId)
+      );
+
+      if (senderState) {
+        senderState.lastReadSeq = chat.lastSeq;
+        senderState.lastReadAt = new Date();
+      } else {
+        chat.readState.push({
+          user: userId,
+          lastReadSeq: chat.lastSeq,
+          lastReadAt: new Date()
+        });
+      }
+
+      /* =====================
+         CREATE MESSAGE
+      ===================== */
+
+      const createdMessage = await Message.create({
+        chatId: chat._id,
+        sender: userId,
+        ciphertext: payload.ciphertext,
+        iv: payload.iv || null,
+        tag: payload.tag || null,
+        algorithm: payload.algorithm || "aes-256-gcm",
+        keyVersion: payload.keyVersion || "v1",
+        type: payload.type || "text",
+        replyTo: payload.replyTo || null,
+        seq: chat.lastSeq
+      });
+
+      chat.lastMessageId = createdMessage._id;
+      chat.lastMessageAt = createdMessage.createdAt;
+      chat.lastMessageType = createdMessage.type;
+      chat.updatedAt = new Date();
+
       await chat.save();
 
-      /* ================= DM PUSH NOTIFICATION (OPTIMIZED + AVATAR) ================= */
+      /* =====================
+         LOAD MESSAGE
+      ===================== */
+
+      const message = await Message.findById(createdMessage._id)
+        .populate("sender", "profile.fullName profile.avatar")
+        .populate({
+          path: "replyTo",
+          select: "ciphertext iv tag sender",
+          populate: {
+            path: "sender",
+            select: "profile.fullName profile.avatar"
+          }
+        })
+        .populate("reactions.user", "profile.fullName profile.avatar")
+        .lean();
+
+      if (!message) {
+        return cb?.({ success: false });
+      }
+
+      /* =====================
+         DECRYPT MESSAGE
+      ===================== */
+
+      try {
+
+        const chatKey = decryptChatKey(
+          chat.encryptedChatKey,
+          chat.chatKeyIv,
+          chat.chatKeyTag
+        );
+
+        if (message.ciphertext && message.iv && message.tag) {
+          message.ciphertext = decryptWithKey(
+            message.ciphertext,
+            message.iv,
+            message.tag,
+            chatKey
+          );
+        }
+
+        if (
+          message.replyTo &&
+          message.replyTo.ciphertext &&
+          message.replyTo.iv &&
+          message.replyTo.tag
+        ) {
+          message.replyTo.ciphertext = decryptWithKey(
+            message.replyTo.ciphertext,
+            message.replyTo.iv,
+            message.replyTo.tag,
+            chatKey
+          );
+        }
+
+      } catch (err) {
+        console.error("DM decrypt failed", err);
+        message.ciphertext = "";
+      }
+
+      /* =====================
+         PUSH (DM ONLY)
+      ===================== */
 
       if (chat.type === "dm") {
 
         const senderName =
           socket.user?.profile?.fullName ||
-          socket.user?.fullName ||
           "Someone";
 
         const senderAvatar =
           socket.user?.profile?.avatar?.url ||
-          socket.user?.avatar ||
           null;
 
         const preview =
           payload.type === "text"
-            ? (payload.ciphertext || "").substring(0, 60)
+            ? "New message"
             : "New message";
-
-        /* ======================================
-           Build recipient list
-        ====================================== */
 
         const recipientsIds = chat.participants
           .map(normalizeId)
           .filter(Boolean)
-          .filter(uid => String(uid) !== String(userId)) // skip sender
-          .filter(uid => !isOnline(uid)); // skip online users
+          .filter(uid => String(uid) !== String(userId))
+          .filter(uid => !isOnline(uid));
 
         if (recipientsIds.length) {
 
@@ -263,28 +357,30 @@ module.exports = (io, socket) => {
                 data: {
                   type: "community",
                   chatId: String(cid),
-
-                  // 🔥 banner metadata
                   fullName: senderName,
-                  avatar: senderAvatar,
-                },
+                  avatar: senderAvatar
+                }
               })
             )
           );
-
         }
       }
 
-      io.to(`chat:${cid}`).emit('message:new', {
+      /* =====================
+         REALTIME EMIT
+      ===================== */
+
+      io.to(`chat:${cid}`).emit("message:new", {
         chatId: cid,
         message,
-        lastSeq: chat.lastSeq,
+        lastSeq: chat.lastSeq
       });
 
       cb?.({ success: true, message });
+
     } catch (e) {
-      console.error('message:send error', e);
-      cb?.({ success: false, message: e.message });
+      console.error("message:send error", e);
+      cb?.({ success: false });
     }
   });
 
@@ -293,6 +389,7 @@ module.exports = (io, socket) => {
   ===================================================== */
   socket.on("message:reaction", async ({ chatId, messageId, emoji }) => {
     try {
+
       const cid = normalizeId(chatId);
       const mid = normalizeId(messageId);
 
@@ -300,69 +397,116 @@ module.exports = (io, socket) => {
 
       const chat = await Chat.findOne({
         _id: cid,
-        type: "dm",
         participants: userId,
-        "messages._id": mid,
-        isRemoved: false,
-      });
+        isRemoved: false
+      }).select("encryptedChatKey chatKeyIv chatKeyTag blockedUsers");
 
       if (!chat) return;
 
-      // 🔥 BLOCK CHECK - Prevent blocked users from adding reactions
       if (chat.blockedUsers?.map(String).includes(String(userId))) return;
 
-      const msg = chat.messages.id(mid);
+      const msg = await Message.findOne({
+        _id: mid,
+        chatId: cid
+      });
+
       if (!msg) return;
+
+      /* =====================
+         UPDATE REACTIONS
+      ===================== */
 
       let reactions = msg.reactions || [];
 
-      // 🔁 Remove previous reaction from this user
       reactions = reactions.filter(
-        (r) => String(r.user) !== String(userId)
+        r => String(r.user) !== String(userId)
       );
 
-      // ➕ Add new reaction if emoji exists
       if (emoji) {
         reactions.push({
           user: userId,
           emoji,
-          createdAt: new Date(),
+          createdAt: new Date()
         });
       }
 
-      // 🔥 IMPORTANT: Update ONLY the reactions field
-      await Chat.updateOne(
-        {
-          _id: cid,
-          "messages._id": mid,
-        },
-        {
-          $set: {
-            "messages.$.reactions": reactions,
-          },
-        },
-        { runValidators: false } // prevents ciphertext validation failure
-      );
+      msg.reactions = reactions;
+      await msg.save();
 
-      // Re-fetch updated message (populated)
-      const populatedChat = await Chat.findOne(
-        { _id: cid, "messages._id": mid },
-        { "messages.$": 1 }
-      ).populate(
-        "messages.reactions.user",
-        "profile.fullName profile.avatar"
-      );
+      /* =====================
+         LOAD FULL MESSAGE
+      ===================== */
 
-      const populatedMsg = populatedChat?.messages?.[0];
+      const populatedMsg = await Message.findById(mid)
+        .populate("sender", "profile.fullName profile.avatar")
+        .populate({
+          path: "replyTo",
+          select: "ciphertext iv tag sender",
+          populate: {
+            path: "sender",
+            select: "profile.fullName profile.avatar"
+          }
+        })
+        .populate("reactions.user", "profile.fullName profile.avatar")
+        .lean();
+
       if (!populatedMsg) return;
+
+      /* =====================
+         DECRYPT MESSAGE
+      ===================== */
+
+      try {
+
+        const chatKey = decryptChatKey(
+          chat.encryptedChatKey,
+          chat.chatKeyIv,
+          chat.chatKeyTag
+        );
+
+        if (
+          populatedMsg.ciphertext &&
+          populatedMsg.iv &&
+          populatedMsg.tag
+        ) {
+          populatedMsg.ciphertext = decryptWithKey(
+            populatedMsg.ciphertext,
+            populatedMsg.iv,
+            populatedMsg.tag,
+            chatKey
+          );
+        }
+
+        if (
+          populatedMsg.replyTo &&
+          populatedMsg.replyTo.ciphertext &&
+          populatedMsg.replyTo.iv &&
+          populatedMsg.replyTo.tag
+        ) {
+          populatedMsg.replyTo.ciphertext = decryptWithKey(
+            populatedMsg.replyTo.ciphertext,
+            populatedMsg.replyTo.iv,
+            populatedMsg.replyTo.tag,
+            chatKey
+          );
+        }
+
+      } catch (err) {
+        console.error("Reaction decrypt failed", err);
+        populatedMsg.ciphertext = "";
+      }
+
+      /* =====================
+         REALTIME UPDATE
+      ===================== */
 
       io.to(`chat:${cid}`).emit("message:reaction:update", {
         chatId: cid,
-        message: populatedMsg.toObject(),
+        message: populatedMsg
       });
 
     } catch (err) {
-      console.error("[DM reaction socket] ❌", err);
+      console.error("message:reaction error", err);
     }
   });
 
@@ -370,37 +514,44 @@ module.exports = (io, socket) => {
      MESSAGE READ RECEIPT (PERSISTED)
   ===================================================== */
   socket.on("message:read", async ({ chatId, messageId }) => {
+
     try {
+
       const cid = normalizeId(chatId);
       const mid = normalizeId(messageId);
 
       if (!isValidId(cid) || !isValidId(mid)) return;
 
-      await Chat.updateOne(
-        {
-          _id: cid,
-          "messages._id": mid,
-          "messages.readBy.user": { $ne: userId }, // 🔥 KEY
-        },
-        {
-          $push: {
-            "messages.$.readBy": {
-              user: userId,
-              readAt: new Date(),
-            },
-          },
-        }
-      );
-
-      io.to(String(cid)).emit("message:read:update", {
-        chatId: cid,
-        messageId: mid,
-        userId,
+      const msg = await Message.findOne({
+        _id: mid,
+        chatId: cid
       });
 
-    } catch (err) {
-      console.error("Read receipt error:", err);
+      if (!msg) return;
+
+      const already = msg.readBy.some(
+        r => String(r.user) === String(userId)
+      );
+
+      if (!already) {
+        msg.readBy.push({
+          user: userId,
+          readAt: new Date()
+        });
+
+        await msg.save();
+      }
+
+      io.to(`chat:${cid}`).emit("message:read:update", {
+        chatId: cid,
+        messageId: mid,
+        userId
+      });
+
+    } catch (e) {
+      console.error(e);
     }
+
   });
 
   /* =====================================================
@@ -447,140 +598,138 @@ module.exports = (io, socket) => {
   ===================================================== */
   // DELETE FOR ME
   socket.on("message:delete:me", async ({ chatId, messageId }) => {
+
     try {
+
       const cid = normalizeId(chatId);
       const mid = normalizeId(messageId);
+
       if (!isValidId(cid) || !isValidId(mid)) return;
 
-      const chat = await Chat.findOne({
-        _id: cid,
-        participants: userId,
-        "messages._id": mid,
+      const msg = await Message.findOne({
+        _id: mid,
+        chatId: cid
       });
-
-      if (!chat) return;
-
-      const msg = chat.messages.id(mid);
-
-      console.log("msg", msg);
 
       if (!msg) return;
 
-      msg.deletedFor = msg.deletedFor || [];
+      /* ======================
+         ADD USER TO deletedFor
+      ====================== */
 
-      if (!msg.deletedFor.includes(String(userId))) {
+      if (!msg.deletedFor.map(String).includes(String(userId))) {
         msg.deletedFor.push(userId);
-
-        await Chat.updateOne(
-          { _id: cid, "messages._id": mid },
-          {
-            $addToSet: {
-              "messages.$.deletedFor": userId
-            }
-          },
-          { runValidators: false }
-        );
-
+        await msg.save();
       }
 
-      // 🔁 ONLY ACK TO USER (no broadcast)
-      socket.emit("message:delete:me:update", {
+      /* ======================
+         REALTIME UPDATE
+      ====================== */
+
+      io.to(`user:${userId}`).emit("message:delete:me:update", {
         chatId: cid,
         messageId: mid,
-        userId,
+        userId
       });
+
     } catch (e) {
-      console.error("delete for me error", e);
+      console.error("message:delete:me error", e);
     }
+
   });
 
   // DELETE FOR EVERYONE (FIXED & GUARANTEED PERSISTENCE)
   socket.on("message:delete:everyone", async ({ chatId, messageId }, cb) => {
+
     try {
+
       const cid = normalizeId(chatId);
       const mid = normalizeId(messageId);
 
       if (!isValidId(cid) || !isValidId(mid)) {
-        return cb?.({ success: false, message: "Invalid ids" });
+        return cb?.({ success: false });
       }
 
-      // 1️⃣ Ensure user is participant AND message exists
-      const chat = await Chat.findOne(
-        { _id: cid, participants: userId, "messages._id": mid },
-        { "messages.$": 1 }
-      );
+      const msg = await Message.findOne({
+        _id: mid,
+        chatId: cid
+      });
 
-      if (!chat || !chat.messages?.length) {
-        return cb?.({ success: false, message: "Message not found" });
+      if (!msg) {
+        return cb?.({ success: false });
       }
 
-      // 2️⃣ Atomic update (NO ciphertext touched)
-      const res = await Chat.updateOne(
-        { _id: cid, "messages._id": mid },
-        {
-          $set: {
-            "messages.$.isDeletedForEveryone": true,
-            "messages.$.deletedAt": new Date(),
-          },
-        },
-        { runValidators: false }
-      );
+      /* ======================
+         PERMISSION CHECK
+      ====================== */
 
-      if (!res.modifiedCount) {
-        return cb?.({ success: false, message: "Update failed" });
+      if (String(msg.sender) !== String(userId)) {
+        return cb?.({ success: false });
       }
 
-      // 3️⃣ Broadcast
+      /* ======================
+         ONLY TOGGLE FLAG
+      ====================== */
+
+      if (!msg.isDeletedForEveryone) {
+        msg.isDeletedForEveryone = true;
+        await msg.save();
+      }
+
+      /* ======================
+         REALTIME UPDATE
+      ====================== */
+
       io.to(`chat:${cid}`).emit("message:delete:everyone:update", {
         chatId: cid,
-        messageId: mid,
+        messageId: mid
       });
 
       cb?.({ success: true });
-    } catch (err) {
-      console.error("❌ delete for everyone error", err);
-      cb?.({ success: false, message: err.message });
+
+    } catch (e) {
+      console.error("message:delete:everyone error", e);
+      cb?.({ success: false });
     }
+
   });
 
   /* =====================================================
      MESSAGE EDIT (PERSISTED)
   ===================================================== */
-  socket.on('message:edit', async ({ chatId, messageId, ciphertext }) => {
+  socket.on("message:edit", async ({ chatId, messageId, ciphertext }) => {
+
     try {
+
       const cid = normalizeId(chatId);
       const mid = normalizeId(messageId);
-      if (!isValidId(cid) || !isValidId(mid) || !ciphertext) return;
 
-      const chat = await Chat.findOne({ _id: cid, 'messages._id': mid });
-      if (!chat) return;
+      if (!isValidId(cid) || !isValidId(mid)) return;
 
-      const msg = chat.messages.id(mid);
+      const msg = await Message.findOne({
+        _id: mid,
+        chatId: cid
+      });
+
       if (!msg) return;
+
       if (String(msg.sender) !== String(userId)) return;
 
       msg.ciphertext = ciphertext;
       msg.editedAt = new Date();
 
-      await Chat.updateOne(
-        { _id: cid, "messages._id": mid },
-        {
-          $set: {
-            "messages.$.ciphertext": ciphertext,
-            "messages.$.editedAt": new Date(),
-          }
-        },
-        { runValidators: false }
-      );
+      await msg.save();
 
-      io.to(`chat:${cid}`).emit('message:edited', {
+      io.to(`chat:${cid}`).emit("message:edited", {
         chatId: cid,
         messageId: mid,
-        ciphertext,
+        ciphertext
       });
+
     } catch (e) {
-      console.error('message:edit error', e);
+      console.error(e);
     }
+
   });
 
   /* =====================================================
@@ -588,33 +737,33 @@ module.exports = (io, socket) => {
   ===================================================== */
   socket.on("message:read:batch", async ({ chatId, messageIds }) => {
     try {
-      if (!chatId || !Array.isArray(messageIds) || messageIds.length === 0) return;
 
-      const userId = socket.user?.id;
-      if (!userId) return;
+      const cid = normalizeId(chatId);
 
-      await Chat.updateOne(
-        { _id: chatId },
+      if (!isValidId(cid) || !Array.isArray(messageIds) || messageIds.length === 0) return;
+
+      await Message.updateMany(
         {
-          $addToSet: {
-            "messages.$[msg].readBy": {
-              user: userId,
-              readAt: new Date(),
-            },
-          },
+          _id: { $in: messageIds },
+          chatId: cid,
+          "readBy.user": { $ne: userId }
         },
         {
-          arrayFilters: [{ "msg._id": { $in: messageIds } }],
-          runValidators: false, // ✅ prevents ciphertext failures
+          $push: {
+            readBy: {
+              user: userId,
+              readAt: new Date()
+            }
+          }
         }
       );
 
-      // 🔁 realtime update
-      io.to(`chat:${chatId}`).emit("message:read:batch", {
-        chatId,
+      io.to(`chat:${cid}`).emit("message:read:batch", {
+        chatId: cid,
         messageIds,
-        userId,
+        userId
       });
+
     } catch (err) {
       console.error("❌ message:read:batch error", err);
     }
@@ -660,7 +809,7 @@ module.exports = (io, socket) => {
 
       await chat.save();
 
-      socket.emit("chat:read:update", {
+      io.to(`chat:${cid}`).emit("chat:read:update", {
         chatId: cid,
         userId,
         lastReadSeq: safeSeq

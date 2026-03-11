@@ -96,7 +96,7 @@ const PostCard = ({
   useEffect(() => {
     if (post?._id) {
       // This would come from your backend in production
-      const baseUrl = server; // Replace with your actual app URL
+      const baseUrl = "https://www.asiyoconnect.com"; // Replace with your actual app URL
       setShareLink(`${baseUrl}/post/${post._id}`);
     }
   }, [post?._id]);
@@ -645,7 +645,7 @@ const PostCard = ({
         // 👇 WEB ONLY CENTERING
         alignSelf: Platform.OS === 'web' ? 'center' : undefined,
         width: Platform.OS === 'web' ? '100%' : undefined,
-        maxWidth: Platform.OS === 'web' ? 850 : undefined,
+        maxWidth: Platform.OS === 'web' ? 720 : undefined,
       }}
     >
       {/* ================= HEADER ================= */}

@@ -13,6 +13,12 @@ const mongoose = require("mongoose");
 const Group = require("../models/Group");
 const Chat = require("../models/Chat");
 const User = require("../models/User");
+
+const Message = require("../models/Message");
+const {
+  decryptWithKey,
+  decryptChatKey
+} = require("../utils/chatCrypto");
 const { sendExpoPushToUser } = require("../utils/push");
 
 /**
@@ -51,6 +57,9 @@ module.exports = (io, socket) => {
   const userId = normalizeId(socket.user?.id);
   if (!isValidId(userId)) return;
 
+  if (!isValidId(userId)) {
+    return;
+  }
   /* =====================================================
      JOIN GROUP ROOM
      - joins group room
@@ -80,6 +89,7 @@ module.exports = (io, socket) => {
 
       if (group.chat) {
         socket.join(`chat:${String(group.chat)}`);
+        socket.join(`group:${gid}`);
       }
 
       cb?.({
@@ -143,6 +153,7 @@ module.exports = (io, socket) => {
   ===================================================== */
   socket.on("group:message:send", async ({ groupId, payload }, cb) => {
     try {
+
       const gid = normalizeId(groupId);
       if (!isValidId(gid) || !payload?.ciphertext) return;
 
@@ -154,99 +165,98 @@ module.exports = (io, socket) => {
 
       if (!group?.chat) return;
 
-      const chat = await Chat.findOne({
-        _id: group.chat,
-        participants: userId
-      });
+      const chat = await Chat.findById(group.chat).select(
+        "encryptedChatKey chatKeyIv chatKeyTag lastSeq"
+      );
 
       if (!chat) return;
 
-      // increment chat sequence
+      /* =====================
+         SEQUENCE
+      ===================== */
+
       chat.lastSeq = (chat.lastSeq || 0) + 1;
 
-      const message = {
-        _id: new mongoose.Types.ObjectId(),
+      const createdMessage = await Message.create({
+        chatId: chat._id,
         sender: userId,
         ciphertext: payload.ciphertext,
+        iv: payload.iv,
+        tag: payload.tag,
         type: payload.type || "text",
         replyTo: payload.replyTo || null,
-        reactions: [],
-        readBy: [],
-        seq: chat.lastSeq,
-        createdAt: new Date(),
-      };
+        seq: chat.lastSeq
+      });
 
-      chat.messages.push(message);
+      chat.lastMessageId = createdMessage._id;
+      chat.lastMessageAt = createdMessage.createdAt;
+      chat.lastMessageType = createdMessage.type;
+      chat.updatedAt = new Date();
+
       await chat.save();
 
-      /* ================= PUSH NOTIFICATION (OPTIMIZED + AVATAR) ================= */
-
-      const groupDoc = await Group.findById(gid)
-        .select("name members.user")
+      const message = await Message.findById(createdMessage._id)
+        .populate("sender", "profile.fullName profile.avatar")
+        .populate({
+          path: "replyTo",
+          select: "ciphertext iv tag sender",
+          populate: {
+            path: "sender",
+            select: "profile.fullName profile.avatar"
+          }
+        })
+        .populate("reactions.user", "profile.fullName profile.avatar")
         .lean();
 
-      if (groupDoc?.members?.length) {
+      /* =====================
+         DECRYPT MESSAGE
+      ===================== */
 
-        const senderName =
-          socket.user?.profile?.fullName ||
-          socket.user?.fullName ||
-          "Someone";
+      try {
 
-        const senderAvatar =
-          socket.user?.profile?.avatar?.url ||
-          socket.user?.avatar ||
-          null;
+        const chatKey = decryptChatKey(
+          chat.encryptedChatKey,
+          chat.chatKeyIv,
+          chat.chatKeyTag
+        );
 
-        const preview =
-          payload.type === "text"
-            ? (payload.ciphertext || "").substring(0, 60)
-            : "New message";
-
-        /* ======================================
-           Build recipient list
-        ====================================== */
-
-        const memberIds = groupDoc.members
-          .map((m) => normalizeId(m.user))
-          .filter(Boolean)
-          .filter((uid) => String(uid) !== String(userId)) // skip sender
-          .filter((uid) => !isOnline(uid)); // skip online users
-
-        if (memberIds.length) {
-
-          const recipients = await User.find({
-            _id: { $in: memberIds },
-          }).select("pushTokens");
-
-          for (const recipient of recipients) {
-            await sendExpoPushToUser(recipient, {
-              title: groupDoc.name || "Group Message",
-              body: `${senderName}: ${preview}`,
-              data: {
-                type: "community",
-                groupId: String(gid),
-                chatId: String(group.chat),
-
-                // 🔥 sender metadata for banner UI
-                fullName: senderName,
-                avatar: senderAvatar,
-              },
-            });
-          }
-
+        if (message.ciphertext && message.iv && message.tag) {
+          message.ciphertext = decryptWithKey(
+            message.ciphertext,
+            message.iv,
+            message.tag,
+            chatKey
+          );
         }
+        if (
+          message.replyTo &&
+          message.replyTo.ciphertext &&
+          message.replyTo.iv &&
+          message.replyTo.tag
+        ) {
+          message.replyTo.ciphertext = decryptWithKey(
+            message.replyTo.ciphertext,
+            message.replyTo.iv,
+            message.replyTo.tag,
+            chatKey
+          );
+        }
+      } catch (err) {
+        console.error("Group decrypt failed", err);
       }
 
-      io.to(`chat:${String(group.chat)}`).emit("group:group:new", {
+      io.to(`chat:${String(chat._id)}`).emit("group:message:new", {
         groupId: gid,
-        chatId: String(group.chat),
+        chatId: String(chat._id),
         message,
+        seq: chat.lastSeq
       });
 
       cb?.({ success: true, message });
+
     } catch (e) {
       console.error("group:message:send error", e);
-      cb?.({ success: false, message: e.message });
+      cb?.({ success: false });
     }
   });
 
@@ -278,6 +288,7 @@ module.exports = (io, socket) => {
   ===================================================== */
   socket.on("group:reaction", async ({ chatId, messageId, emoji }) => {
     try {
+
       if (!isValidId(chatId) || !isValidId(messageId)) return;
 
       const cleanEmoji =
@@ -285,51 +296,38 @@ module.exports = (io, socket) => {
           ? emoji.trim()
           : null;
 
-      const chat = await Chat.findOne({
-        _id: chatId,
-        type: "group",
-        participants: userId,
+      const msg = await Message.findOne({
+        _id: messageId,
+        chatId
       });
 
-      if (!chat) return;
-
-      const msg = chat.messages.id(messageId);
       if (!msg) return;
 
       msg.reactions = msg.reactions || [];
 
-      // always remove old reaction first
       msg.reactions = msg.reactions.filter(
-        (r) => String(r.user) !== String(userId)
+        r => String(r.user) !== String(userId)
       );
 
-      // only add if emoji provided
       if (cleanEmoji) {
         msg.reactions.push({
           user: userId,
           emoji: cleanEmoji,
-          reactedAt: new Date(),
+          reactedAt: new Date()
         });
       }
 
-      await chat.save();
+      await msg.save();
 
-      // 🔥 RE-FETCH ONLY THIS MESSAGE WITH POPULATED REACTIONS
-      const populatedChat = await Chat.findById(chatId)
-        .select("messages")
-        .populate(
-          "messages.reactions.user",
-          "profile.fullName profile.avatar fullName avatar"
-        );
-
-      const updatedMsg = populatedChat.messages.id(messageId);
-      if (!updatedMsg) return;
+      const populatedMsg = await Message.findById(messageId)
+        .populate("reactions.user", "profile.fullName profile.avatar");
 
       io.to(`chat:${chatId}`).emit("group:reaction:update", {
         chatId,
         messageId,
-        reactions: updatedMsg.reactions,
+        reactions: populatedMsg.reactions
       });
+
     } catch (e) {
       console.error("group:reaction error", e);
     }
@@ -340,42 +338,30 @@ module.exports = (io, socket) => {
   ===================================================== */
   socket.on("group:read:batch", async ({ chatId, messageIds }) => {
     try {
+
       if (!isValidId(chatId)) return;
       if (!Array.isArray(messageIds) || !messageIds.length) return;
 
-      const updated = [];
-
-      for (const mid of messageIds) {
-        if (!isValidId(mid)) continue;
-
-        const result = await Chat.updateOne(
-          {
-            _id: chatId,
-            "messages._id": mid,
-            "messages.sender": { $ne: userId }, // skip own messages
-            "messages.readBy.user": { $ne: userId }, // 🔥 PREVENT DUPLICATE
-          },
-          {
-            $push: {
-              "messages.$.readBy": {
-                user: userId,
-                readAt: new Date(),
-              },
-            },
+      await Message.updateMany(
+        {
+          _id: { $in: messageIds },
+          chatId,
+          "readBy.user": { $ne: userId }
+        },
+        {
+          $push: {
+            readBy: {
+              user: userId,
+              readAt: new Date()
+            }
           }
-        );
-
-        if (result.modifiedCount > 0) {
-          updated.push(String(mid));
         }
-      }
-
-      if (!updated.length) return;
+      );
 
       io.to(`chat:${chatId}`).emit("group:read:batch", {
         chatId,
-        messageIds: updated,
-        userId,
+        messageIds,
+        userId
       });
 
     } catch (e) {
@@ -429,7 +415,7 @@ module.exports = (io, socket) => {
       io.to(`chat:${chatId}`).emit("group:read:update", {
         chatId,
         userId,
-        lastReadSeq: safeSeq,
+        seq: safeSeq,
       });
 
       cb?.({ success: true });
@@ -445,50 +431,98 @@ module.exports = (io, socket) => {
   ===================================================== */
   socket.on("group:delete:everyone", async ({ chatId, messageId }, cb) => {
     try {
+
       if (!isValidId(chatId) || !isValidId(messageId)) {
-        return cb?.({ success: false, message: "Invalid IDs" });
+        return cb?.({ success: false });
       }
 
-      const chat = await Chat.findById(chatId);
-      if (!chat) {
-        return cb?.({ success: false, message: "Chat not found" });
-      }
+      const msg = await Message.findOne({
+        _id: messageId,
+        chatId
+      });
 
-      const msg = chat.messages.id(messageId);
       if (!msg) {
-        return cb?.({ success: false, message: "Message not found" });
+        return cb?.({ success: false });
       }
 
       if (String(msg.sender) !== String(userId)) {
-        return cb?.({ success: false, message: "Not allowed" });
+        return cb?.({ success: false });
       }
 
       msg.isDeletedForEveryone = true;
       msg.deletedAt = new Date();
 
-      await chat.save();
+      await msg.save();
 
       io.to(`chat:${chatId}`).emit("group:delete:everyone:update", {
         chatId,
-        messageId,
+        messageId
       });
 
       cb?.({ success: true });
+
     } catch (e) {
       console.error("group:delete:everyone error", e);
-      cb?.({ success: false, message: e.message });
+      cb?.({ success: false });
+    }
+  });
+
+  /* =====================================================
+   DELETE FOR ME
+===================================================== */
+  socket.on("group:delete:me", async ({ chatId, messageId }, cb) => {
+    try {
+
+      if (!isValidId(chatId) || !isValidId(messageId)) {
+        return cb?.({ success: false });
+      }
+
+      const msg = await Message.findOne({
+        _id: messageId,
+        chatId
+      });
+
+      if (!msg) {
+        return cb?.({ success: false });
+      }
+
+      msg.deletedFor = msg.deletedFor || [];
+
+      if (!msg.deletedFor.includes(userId)) {
+        msg.deletedFor.push(userId);
+      }
+
+      await msg.save();
+
+      /* emit ONLY to that user */
+      io.to(`user:${userId}`).emit("group:delete:me:update", {
+        chatId,
+        messageId
+      });
+
+      cb?.({ success: true });
+
+    } catch (e) {
+      console.error("group:delete:me error", e);
+      cb?.({ success: false });
     }
   });
 
   /* =====================================================
      PIN / UNPIN MESSAGE
   ===================================================== */
-  socket.on("group:pin", async ({ chatId, messageId }) => {
+  socket.on("group:pin", async ({ chatId, messageId }, cb) => {
+    console.log("PIN EVENT RECEIVED", chatId, messageId);
+
     try {
-      if (!isValidId(chatId) || !isValidId(messageId)) return;
+      if (!isValidId(chatId) || !isValidId(messageId)) {
+        return cb?.({ success: false, message: "Invalid ids" });
+      }
 
       const chat = await Chat.findById(chatId);
-      if (!chat) return;
+      if (!chat) {
+        return cb?.({ success: false, message: "Chat not found" });
+      }
 
       chat.pinnedMessage =
         String(chat.pinnedMessage) === String(messageId)
@@ -497,41 +531,24 @@ module.exports = (io, socket) => {
 
       await chat.save();
 
-      /* ================= PIN PUSH ================= */
-      const group = await Group.findOne({ chat: chatId })
-        .select("name members.user")
-        .lean();
+      const pinnedMsg = chat.pinnedMessage
+        ? await Message.findById(chat.pinnedMessage)
+          .populate("sender", "profile.fullName profile.avatar")
+          .lean()
+        : null;
 
-      if (group?.members?.length) {
-        for (const member of group.members) {
-          const memberId = String(member.user);
-          if (memberId === String(userId)) continue;
-          if (isOnline(memberId)) continue;
+      io.to(`chat:${String(chatId)}`).emit("group:pin:update", {
+        chatId: String(chatId),
+        pinnedMessage: pinnedMsg,
+      });
 
-          const recipient = await User.findById(memberId).select("pushTokens");
-          if (!recipient) continue;
-
-          await sendExpoPushToUser(recipient, {
-            title: "Pinned Message",
-            body: `A message was pinned in ${group.name}`,
-            data: {
-              type: "community",
-              groupId: String(group._id),
-              chatId: String(chatId),
-            },
-          });
-        }
-      }
-
-      const pinnedMsg =
-        chat.messages.id(chat.pinnedMessage) || null;
-
-      io.to(`chat:${chatId}`).emit("group:pin:update", {
-        chatId,
+      return cb?.({
+        success: true,
         pinnedMessage: pinnedMsg,
       });
     } catch (e) {
       console.error("group:pin error", e);
+      return cb?.({ success: false, message: e.message });
     }
   });
 };

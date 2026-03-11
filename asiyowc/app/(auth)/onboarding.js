@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   BackHandler,
   Image,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,8 +23,6 @@ import { MaterialIcons, FontAwesome5, Ionicons, Feather } from '@expo/vector-ico
 import { StatusBar } from 'expo-status-bar';
 import tw from '../../utils/tw';
 import { Platform } from 'react-native';
-
-const { width } = Dimensions.get('window');
 
 // Brand color constants for consistency
 const BRAND = {
@@ -47,12 +46,18 @@ const OnboardingScreen = () => {
         ? SafeAreaView
         : View; // Android uses View
   const isWeb = Platform.OS === 'web';
+  const { width, height } = useWindowDimensions();
+
+  // Responsive breakpoints
+  const isSmallWeb = isWeb && width < 480;
+  const isMediumWeb = isWeb && width >= 480 && width < 900;
+  const isLargeWeb = isWeb && width >= 900;
 
   const fadeAnim = useState(new Animated.Value(1))[0];
   const slideAnim = useState(new Animated.Value(0))[0];
   const progressAnim = useState(new Animated.Value(0))[0];
   const contentRef = useRef(null);
-  const { height: screenHeight } = Dimensions.get('window');
+  const screenHeight = height;
 
   const quotes = [
     {
@@ -251,10 +256,12 @@ const OnboardingScreen = () => {
             {stepNumber < step ? (
               <MaterialIcons name="check" size={16} color="#FFFFFF" />
             ) : (
-              <Text style={[
-                { fontFamily: 'Poppins-Medium' },
-                stepNumber === step ? { color: '#FFFFFF' } : { color: '#9CA3AF' }
-              ]}>
+              <Text
+                maxFontSizeMultiplier={1.3}
+                style={[
+                  { fontFamily: 'Poppins-Medium' },
+                  stepNumber === step ? { color: '#FFFFFF' } : { color: '#9CA3AF' }
+                ]}>
                 {stepNumber}
               </Text>
             )}
@@ -273,8 +280,14 @@ const OnboardingScreen = () => {
   );
 
   const renderStep = () => {
-    const numColumns = isWeb ? 3 : 2;
-    const cardWidth = isWeb ? '31%' : '48%';
+    // Responsive grid logic
+    let numColumns = 2;
+
+    if (isSmallWeb) numColumns = 1;
+    else if (isMediumWeb) numColumns = 2;
+    else if (isLargeWeb) numColumns = 3;
+
+    const cardWidth = numColumns === 1 ? '100%' : `${100 / numColumns - 2}%`;
 
     switch (step) {
       case 1:
@@ -287,18 +300,24 @@ const OnboardingScreen = () => {
               />
             </View>
 
-            <Text style={[
-              { fontFamily: 'Poppins-Bold', fontSize: 26, color: BRAND.primary, textAlign: 'center' },
-              tw`mb-10`
-            ]}>
-              Asiyo Women Connect App
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[
+                { fontFamily: 'Poppins-Bold', fontSize: 26, color: BRAND.primary, textAlign: 'center' },
+                tw`mb-10`
+              ]}>
+              Asiyo Women Connect
             </Text>
 
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-base text-gray-600 mb-6 text-center leading-6`]}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Medium' }, tw`text-base text-gray-600 mb-6 text-center leading-6`]}>
               {quotes[0].text}
             </Text>
 
-            <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-sm text-gray-500 mb-8 text-center italic`]}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Light' }, tw`text-sm text-gray-500 mb-8 text-center italic`]}>
               — {quotes[0].author}
             </Text>
 
@@ -314,10 +333,12 @@ const OnboardingScreen = () => {
               onPress={() => router.push('/(auth)/login')}
               style={tw`mt-6`}
             >
-              <Text style={[
-                { fontFamily: 'Poppins-Medium' },
-                tw`text-sm text-black text-center`
-              ]}>
+              <Text
+                maxFontSizeMultiplier={1.3}
+                style={[
+                  { fontFamily: 'Poppins-Medium' },
+                  tw`text-sm text-black text-center`
+                ]}>
                 Already registered? <Text style={{ color: BRAND.primary, textDecorationLine: 'underline' }}>Move to Login</Text>
               </Text>
             </TouchableOpacity>
@@ -326,20 +347,25 @@ const OnboardingScreen = () => {
 
       case 2:
         return (
-          <View style={tw`flex-1`}>
-            <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-gray-900 mb-3`]}>
+          <View style={{ flexGrow: 1 }}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-gray-900 mb-3`]}>
               Professional Interests
             </Text>
-            <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-base text-center text-gray-600 mb-8`]}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Light' }, tw`text-base text-center text-gray-600 mb-8`]}>
               Select areas that align with your professional goals
             </Text>
 
             <ScrollView
+              nestedScrollEnabled
               ref={contentRef}
               style={tw`flex-1 mb-6`}
               showsVerticalScrollIndicator={false}
             >
-              <View style={tw`flex-row flex-wrap justify-between`}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between' }}>
                 {interests.map((interest) => {
                   const IconComponent = interest.library;
                   const isSelected = selectedInterests.includes(interest.id);
@@ -352,6 +378,7 @@ const OnboardingScreen = () => {
                           marginBottom: 16,
                           paddingVertical: 18,
                           paddingHorizontal: 12,
+                          minHeight: 110,
                           borderRadius: 16,
                           borderWidth: 1.5,
                           borderColor: isSelected ? BRAND.primary : '#E5E7EB',
@@ -382,10 +409,13 @@ const OnboardingScreen = () => {
                             color={isSelected ? '#FFFFFF' : BRAND.primary}
                           />
                         </View>
-                        <Text style={[
-                          { fontFamily: 'Poppins-Medium', fontSize: 13, textAlign: 'center' },
-                          isSelected ? { color: BRAND.primary } : { color: '#374151' }
-                        ]}>
+                        <Text
+                          numberOfLines={2}
+                          maxFontSizeMultiplier={1.3}
+                          style={[
+                            { fontFamily: 'Poppins-Medium', fontSize: 13, textAlign: 'center' },
+                            isSelected ? { color: BRAND.primary } : { color: '#374151' }
+                          ]}>
                           {interest.name}
                         </Text>
                       </View>
@@ -415,15 +445,20 @@ const OnboardingScreen = () => {
 
       case 3:
         return (
-          <View style={tw`flex-1`}>
-            <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-gray-900 mb-3`]}>
+          <View style={{ flexGrow: 1 }}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-gray-900 mb-3`]}>
               Professional Role
             </Text>
-            <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-base text-center text-gray-600 mb-8`]}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Light' }, tw`text-base text-center text-gray-600 mb-8`]}>
               How do you envision contributing to our community?
             </Text>
 
             <ScrollView
+              nestedScrollEnabled
               ref={contentRef}
               style={tw`flex-1 mb-6`}
               showsVerticalScrollIndicator={false}
@@ -472,13 +507,17 @@ const OnboardingScreen = () => {
                             />
                           </View>
                           <View style={tw`flex-1`}>
-                            <Text style={[
-                              { fontFamily: 'Poppins-SemiBold', fontSize: 16, color: '#FFFFFF' },
-                              tw`mb-1`
-                            ]}>
+                            <Text
+                              maxFontSizeMultiplier={1.3}
+                              style={[
+                                { fontFamily: 'Poppins-SemiBold', fontSize: 16, color: '#FFFFFF' },
+                                tw`mb-1`
+                              ]}>
                               {role.name}
                             </Text>
-                            <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white text-opacity-90 text-sm leading-5`]}>
+                            <Text
+                              maxFontSizeMultiplier={1.3}
+                              style={[{ fontFamily: 'Poppins-Regular' }, tw`text-white text-opacity-90 text-sm leading-5`]}>
                               {role.description}
                             </Text>
                           </View>
@@ -528,16 +567,24 @@ const OnboardingScreen = () => {
               loop={false}
             />
 
-            <Text style={[{ fontFamily: 'Poppins-Bold' }, tw`text-3xl text-center text-gray-900 mb-6 mt-8 leading-tight`]}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Bold' }, tw`text-3xl text-center text-gray-900 mb-6 mt-8 leading-tight`]}>
               Together we rise, together we thrive
             </Text>
-            <Text style={[{ fontFamily: 'Poppins-Light' }, tw`text-lg text-center text-gray-600 mb-6 leading-7`]}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Light' }, tw`text-lg text-center text-gray-600 mb-6 leading-7`]}>
               You're now ready to connect with professional women worldwide, access exclusive resources, and accelerate your growth.
             </Text>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-base text-center mb-2 italic`, { color: BRAND.primary }]}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Medium' }, tw`text-base text-center mb-2 italic`, { color: BRAND.primary }]}>
               "{quotes[3].text}"
             </Text>
-            <Text style={[{ fontFamily: 'Poppins-Regular' }, tw`text-sm text-center mb-12`, { color: BRAND.accent }]}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Regular' }, tw`text-sm text-center mb-12`, { color: BRAND.accent }]}>
               — {quotes[3].author}
             </Text>
 
@@ -547,6 +594,32 @@ const OnboardingScreen = () => {
               variant="primary"
               size="lg"
             />
+
+            <TouchableOpacity
+              onPress={handleBack}
+              activeOpacity={0.7}
+              style={{
+                marginTop: 18,
+                alignSelf: 'center',
+                paddingVertical: 6,
+                paddingHorizontal: 14,
+                borderRadius: 20,
+                backgroundColor: '#F3F4F6',
+              }}
+            >
+              <Text
+                maxFontSizeMultiplier={1.3}
+                style={{
+                  fontFamily: 'Poppins-Medium',
+                  fontSize: 12,
+                  color: '#4B5563',
+                  textAlign: 'center',
+                  letterSpacing: 0.3,
+                }}
+              >
+                ← Go back
+              </Text>
+            </TouchableOpacity>
           </View>
         );
     }
@@ -554,12 +627,12 @@ const OnboardingScreen = () => {
 
   return (
     <Container style={tw`flex-1 bg-white`}>
-      <StatusBar 
-        style="light" 
-        translucent 
-        backgroundColor="transparent" 
+      <StatusBar
+        style="light"
+        translucent
+        backgroundColor="transparent"
       />
-      
+
       {Platform.OS !== 'web' && (
         <AnimatedBackground
           type="floating"
@@ -569,23 +642,23 @@ const OnboardingScreen = () => {
       )}
 
       {/* Enhanced Header with Professional Gradient - Clean Version */}
-<LinearGradient
-  colors={[BRAND.dark, BRAND.primary, BRAND.accent]}
-  style={[
-    {
-      height: screenHeight * 0.18,
-      borderBottomLeftRadius: 32,
-      borderBottomRightRadius: 32,
-      marginTop: Platform.OS === 'android' ? -600 : 0, // 👈 THIS
-      shadowColor: '#000',
-      shadowOpacity: 0.15,
-      shadowRadius: 10,
-      elevation: 8,
-    }
-  ]}
-  start={{ x: 0, y: 0 }}
-  end={{ x: 1, y: 1 }}
->
+      <LinearGradient
+        colors={[BRAND.dark, BRAND.primary, BRAND.accent]}
+        style={[
+          {
+            height: screenHeight * 0.18,
+            borderBottomLeftRadius: 32,
+            borderBottomRightRadius: 32,
+            marginTop: Platform.OS === 'android' ? -600 : 0,
+            shadowColor: '#000',
+            shadowOpacity: 0.15,
+            shadowRadius: 10,
+            elevation: 8,
+          }
+        ]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
         <View style={[
           tw`flex-1 justify-center items-center`,
           { paddingTop: Platform.OS === 'android' ? 10 : 32 }
@@ -615,41 +688,43 @@ const OnboardingScreen = () => {
                 source={require('../../assets/images/asiyowc.png')}
                 style={tw`w-8 h-8 rounded-full mr-3`}
               />
-              <Text style={[{ fontFamily: 'Poppins-SemiBold' }, tw`text-sm text-gray-700`]}>
+              <Text
+                maxFontSizeMultiplier={1.3}
+                style={[{ fontFamily: 'Poppins-SemiBold' }, tw`text-sm text-gray-700`]}>
                 Asiyo Women Connect
               </Text>
             </View>
-            <Text style={[{ fontFamily: 'Poppins-Medium' }, tw`text-xs text-gray-500`]}>
+            <Text
+              maxFontSizeMultiplier={1.3}
+              style={[{ fontFamily: 'Poppins-Medium' }, tw`text-xs text-gray-500`]}>
               Step {step} of 4
             </Text>
           </View>
         </View>
       </View>
 
-      {/* Main Content Area - Responsive Web Polish */}
-      <View
-        style={[
-          tw`flex-1 pb-8`,
-          {
-            paddingHorizontal: isWeb ? 80 : 24,
-            maxWidth: isWeb ? 900 : '100%',
-            alignSelf: 'center',
-            width: '100%',
-          }
-        ]}
+      {/* Main Content Area - Now Scrollable */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingBottom: 80,
+          paddingHorizontal: isWeb ? (width < 600 ? 16 : 80) : 24,
+          maxWidth: isWeb ? 900 : '100%',
+          alignSelf: 'center',
+          width: '100%',
+        }}
       >
         <Animated.View
-          style={[
-            tw`flex-1`,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
+          style={{
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          }}
         >
           {renderStep()}
         </Animated.View>
-      </View>
+      </ScrollView>
     </Container>
   );
 };
