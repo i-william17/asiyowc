@@ -4,9 +4,11 @@
     "slug": "asiyowc",
     "scheme": "asiyowc",
     "version": "1.0.0",
+
     "runtimeVersion": {
       "policy": "appVersion"
     },
+
     "orientation": "portrait",
     "icon": "./assets/images/asiyo-nobg.png",
     "userInterfaceStyle": "light",
@@ -21,6 +23,11 @@
       "enabled": true,
       "fallbackToCacheTimeout": 0,
       "checkAutomatically": "ON_LOAD"
+    },
+
+    "experiments": {
+      "turboModules": true,
+      "typedRoutes": true
     },
 
     "splash": {
@@ -38,10 +45,12 @@
       "buildNumber": "1",
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.asiyowc",
+
       "associatedDomains": [
         "applinks:www.asiyoconnect.com",
         "applinks:asiyoconnect.com"
       ],
+
       "infoPlist": {
         "NSMicrophoneUsageDescription": "This app needs microphone access for voice rooms.",
         "NSCameraUsageDescription": "This app uses the camera to upload profile photos and media.",
