@@ -4,16 +4,38 @@
     "slug": "asiyowc",
     "scheme": "asiyowc",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "orientation": "portrait",
     "icon": "./assets/images/asiyo-nobg.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
+    "jsEngine": "hermes",
+
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+
+    "updates": {
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
+    },
+
     "splash": {
       "image": "./assets/images/asiyo-nobg.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+
+    "notification": {
+      "icon": "./assets/images/notification_icon.png",
+      "color": "#6A1B9A"
+    },
+
     "ios": {
+      "buildNumber": "1",
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.asiyowc",
       "associatedDomains": [
@@ -22,23 +44,23 @@
       ],
       "infoPlist": {
         "NSMicrophoneUsageDescription": "This app needs microphone access for voice rooms.",
-        "UIBackgroundModes": [
-          "audio"
-        ]
+        "NSCameraUsageDescription": "This app uses the camera to upload profile photos and media.",
+        "NSPhotoLibraryUsageDescription": "This app accesses your photo library to upload images.",
+        "UIBackgroundModes": ["audio"]
       }
     },
+
     "android": {
+      "versionCode": 1,
       "softwareKeyboardLayoutMode": "resize",
       "edgeToEdgeEnabled": true,
       "package": "com.anonymous.asiyowc",
+
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/asiyo-nobg.png",
         "backgroundColor": "#ffffff"
       },
-      "notification": {
-        "icon": "./assets/images/notification_icon.png",
-        "color": "#6A1B9A"
-      },
+
       "permissions": [
         "RECORD_AUDIO",
         "MODIFY_AUDIO_SETTINGS",
@@ -46,6 +68,11 @@
         "BLUETOOTH",
         "BLUETOOTH_CONNECT"
       ],
+
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ],
+
       "intentFilters": [
         {
           "action": "VIEW",
@@ -60,17 +87,16 @@
               "host": "asiyoconnect.com"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
     },
+
     "web": {
       "name": "Asiyo Women Connect",
       "favicon": "./assets/images/asiyo-nobg.png"
     },
+
     "plugins": [
       "expo-router",
       "expo-font",
@@ -79,12 +105,14 @@
       "expo-video",
       "@react-native-community/datetimepicker"
     ],
+
     "extra": {
       "router": {},
       "eas": {
         "projectId": "bc56a75f-6b8a-4619-8118-6199e886c21b"
       }
     },
+
     "owner": "williamwritescode"
   }
 }
