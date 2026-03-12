@@ -12,7 +12,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/asiyo-nobg.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "jsEngine": "hermes",
 
     "assetBundlePatterns": [
