@@ -11,6 +11,7 @@ import {
   BackHandler,
   Image,
   useWindowDimensions,
+  StatusBar as RNStatusBar,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -292,32 +293,39 @@ const OnboardingScreen = () => {
     switch (step) {
       case 1:
         return (
-          <View style={tw`flex-1 justify-center items-center`}>
-            <View style={tw`items-center mb-6`}>
-              <Image
-                source={require('../../assets/images/asiyo-nobg.png')}
-                style={tw`w-30 h-30 rounded-full mb-4`}
-              />
-            </View>
+          <View style={tw`flex-1 items-center justify-center px-4`}>
+            <Image
+              source={require('../../assets/images/asiyo-nobg.png')}
+              style={tw`w-28 h-28 rounded-full mb-6`}
+            />
 
             <Text
               maxFontSizeMultiplier={1.3}
               style={[
                 { fontFamily: 'Poppins-Bold', fontSize: 26, color: BRAND.primary, textAlign: 'center' },
-                tw`mb-10`
-              ]}>
+                tw`mb-6`
+              ]}
+            >
               Asiyo Women Connect
             </Text>
 
             <Text
               maxFontSizeMultiplier={1.3}
-              style={[{ fontFamily: 'Poppins-Medium' }, tw`text-base text-gray-600 mb-6 text-center leading-6`]}>
+              style={[
+                { fontFamily: 'Poppins-Medium' },
+                tw`text-base text-gray-600 mb-4 text-center leading-6`
+              ]}
+            >
               {quotes[0].text}
             </Text>
 
             <Text
               maxFontSizeMultiplier={1.3}
-              style={[{ fontFamily: 'Poppins-Light' }, tw`text-sm text-gray-500 mb-8 text-center italic`]}>
+              style={[
+                { fontFamily: 'Poppins-Light' },
+                tw`text-sm text-gray-500 mb-10 text-center italic`
+              ]}
+            >
               — {quotes[0].author}
             </Text>
 
@@ -328,7 +336,6 @@ const OnboardingScreen = () => {
               size="lg"
             />
 
-            {/* Skip to Login Link */}
             <TouchableOpacity
               onPress={() => router.push('/(auth)/login')}
               style={tw`mt-6`}
@@ -338,8 +345,12 @@ const OnboardingScreen = () => {
                 style={[
                   { fontFamily: 'Poppins-Medium' },
                   tw`text-sm text-black text-center`
-                ]}>
-                Already registered? <Text style={{ color: BRAND.primary, textDecorationLine: 'underline' }}>Move to Login</Text>
+                ]}
+              >
+                Already registered?{" "}
+                <Text style={{ color: BRAND.primary, textDecorationLine: 'underline' }}>
+                  Move to Login
+                </Text>
               </Text>
             </TouchableOpacity>
           </View>
@@ -347,7 +358,7 @@ const OnboardingScreen = () => {
 
       case 2:
         return (
-          <View style={{ flexGrow: 1 }}>
+          <View style={tw`flex-1`}>
             <Text
               maxFontSizeMultiplier={1.3}
               style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-gray-900 mb-3`]}>
@@ -445,7 +456,7 @@ const OnboardingScreen = () => {
 
       case 3:
         return (
-          <View style={{ flexGrow: 1 }}>
+          <View style={tw`flex-1`}>
             <Text
               maxFontSizeMultiplier={1.3}
               style={[{ fontFamily: 'Poppins-Bold' }, tw`text-2xl text-center text-gray-900 mb-3`]}>
@@ -627,11 +638,8 @@ const OnboardingScreen = () => {
 
   return (
     <Container style={tw`flex-1 bg-white`}>
-      <StatusBar
-        style="light"
-        translucent
-        backgroundColor="transparent"
-      />
+
+      <StatusBar translucent style="light" backgroundColor="rgba(0,0,0,0)" />
 
       {Platform.OS !== 'web' && (
         <AnimatedBackground
@@ -642,27 +650,21 @@ const OnboardingScreen = () => {
       )}
 
       {/* Enhanced Header with Professional Gradient - Clean Version */}
-      <LinearGradient
-        colors={[BRAND.dark, BRAND.primary, BRAND.accent]}
-        style={[
-          {
-            height: screenHeight * 0.18,
-            borderBottomLeftRadius: 32,
-            borderBottomRightRadius: 32,
-            marginTop: Platform.OS === 'android' ? -600 : 0,
-            shadowColor: '#000',
-            shadowOpacity: 0.15,
-            shadowRadius: 10,
-            elevation: 8,
-          }
-        ]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      >
-        <View style={[
-          tw`flex-1 justify-center items-center`,
-          { paddingTop: Platform.OS === 'android' ? 10 : 32 }
-        ]}>
+<LinearGradient
+  colors={[BRAND.dark, BRAND.primary, BRAND.accent]}
+  style={{
+    height: 150 + (Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : 0),
+    paddingTop: Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : 0,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+    marginTop: Platform.OS === 'web' ? 0 : -100,
+  }}
+>
+        <View style={tw`flex-1 justify-center items-center`}>
           <LottieLoader
             type={getAnimationType()}
             size={140}
@@ -671,14 +673,7 @@ const OnboardingScreen = () => {
       </LinearGradient>
 
       {/* Enhanced Progress Section */}
-      <View
-        style={[
-          tw`px-6 mb-6`,
-          {
-            marginTop: Platform.OS === 'web' ? -32 : -60,
-          },
-        ]}
-      >
+      <View style={tw`px-6 mb-6 -mt-10`}>
         <View style={tw`bg-white rounded-2xl p-6 shadow-lg border border-gray-100`}>
           <StepIndicator />
 
